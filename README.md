@@ -55,12 +55,12 @@ Ordered phases from first artifact to production-ready app.
 | **2 — Core Engine** | 4 | Scala UDF | JAR registered, encrypt/decrypt/stable functions |
 | | 5 | APP_CONFIG table + entitlement logic | Dynamic output column registry |
 | | 6 | LocID Central integration | Fetch/cache secrets, report stats |
+| | 12 | Usage telemetry | POST stats to LocID Central post-job |
 | **3 — Processing** | 7 | Encrypt stored procedure | IPv4 + IPv6 matching + UDF → output table |
 | | 8 | Decrypt stored procedure | TX_CLOC decode → STABLE_CLOC + context |
 | **4 — UI** | 9 | Streamlit onboarding wizard | 8-screen setup flow |
 | | 10 | Streamlit main views | Home, Run, History, Config |
 | **5 — Polish** | 11 | Performance tuning | Clustering keys, SOS evaluation |
-| | 12 | Usage telemetry | POST stats to LocID Central post-job |
 | | 13 | End-to-end testing | Encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates |
 
 ---
