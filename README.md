@@ -112,6 +112,29 @@ The `encode-lib` JAR is bundled in the app stage and registered as a Java/Scala 
 
 Crypto keys (`scheme_key`, `base_locid_key`) are retrieved from LocID Central at job start, passed into UDFs — never stored in plaintext in tables.
 
+### TxCloc Constructor (confirmed from local JAR testing)
+
+```scala
+// 5-parameter form — GeoContext and optional stable ID are required
+TxCloc(
+  locationId  : String,         // base LocID
+  timestamp   : Long,           // epoch seconds
+  encClientId : Int,            // client_id from LocID Central access record
+  geoContext  : GeoContext,     // GeoContext() for default/empty; populated fields if entitlement allows
+  stableId    : Option[...]     // None for standard encrypt path
+)
+```
+
+### Key Material Note
+
+Local tests (`EncryptionTest.scala`, `EncryptionTestWithTS.scala`) derive the AES key by taking the **license key string's raw UTF-8 bytes padded to 32 bytes (AES-256)**. This is a test shortcut only.
+
+In production, the key material must come from LocID Central:
+- `base_locid_secret` → Base64-URL decode → `SecretKeySpec` for `BaseLocIdEncryption`
+- `scheme_secret` → Base64-URL decode → `SecretKeySpec` for `EncScheme0`
+
+The integration guide specifies these decode to **16 bytes (AES-128)**. The test files use 32 bytes. **Clarify with DE which key size the production JAR expects** before finalizing the UDF implementation.
+
 ---
 
 ## LocID Central Integration
@@ -340,7 +363,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 
 | Item | Status |
 |------|--------|
-| IPv6 ETL stored procedure (Ryan) | Pending — Ryan to provide after return |
+| IPv6 matching SQL | Available — full 6-pass prefix range join logic is in `Coco/tmp/20260331/example_sql_for_snowflake_locid_matching.sql`. Confirm with Ryan this POC SQL represents the final approach before productionizing. |
 | HomeBiz_Type entitlement details | Pending product iteration (Ash/David) |
 | Additional FC50 columns / new entitlements | Pending DE R&D spike outcome |
 | Telemetry payload examples from existing real-time services | David to provide |
