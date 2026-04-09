@@ -321,17 +321,213 @@ This allows the stored procedure to dynamically build the SELECT list and gate c
 
 ## Streamlit Views
 
-| View | Purpose |
-|------|---------|
-| **Home** | App status, license info, last job summary |
-| **Setup Wizard** | Post-install onboarding (see above) |
-| **Run Encrypt** | Select input table, map columns (id, ip, timestamp), select output table, run |
-| **Run Decrypt** | Select input table, map columns (id, tx_cloc), select output table, run |
-| **Job History** | Table of past runs: job_id, operation, rows_in, rows_out, runtime, status |
-| **Configuration** | View/update license key, refresh entitlements, view output column registry |
+The app has six views accessible from a left-side navigation bar. All views run entirely within the customer's Snowflake account — no data leaves their environment.
 
-**Column Mapping UX (Run views):**  
-Customer selects their input table from a dropdown. The app reads column names and presents a mapping widget so the customer can assign which column is `ip_address`, which is `timestamp`, etc. This handles arbitrary customer table schemas without hardcoding.
+---
+
+### View 1 — Home
+
+**Purpose:** Status dashboard. The first thing a customer sees when they open the app.
+
+**Layout:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│  LocID for Snowflake                      [DE logo] │
+├──────────────┬──────────────┬──────────────────────┤
+│ License      │ LocID Central│ Last Job             │
+│ ACTIVE       │ CONNECTED    │ Encrypt · 1.2M rows  │
+│ Exp: 2027-01 │ Refreshed 2m │ 4m 12s · SUCCESS     │
+├──────────────┴──────────────┴──────────────────────┤
+│  [ Run Encrypt ]   [ Run Decrypt ]   [ View History]│
+└─────────────────────────────────────────────────────┘
+```
+
+**Key elements:**
+- **License card** — client name, status (Active / Expired / Not configured), expiration date
+- **LocID Central card** — connectivity status, time since last secret refresh
+- **Last job card** — operation type, row counts, runtime, pass/fail
+- **Quick-action buttons** — shortcuts to Run Encrypt, Run Decrypt, Job History
+- **Setup banner** — shown only if onboarding wizard has not been completed; prompts the customer to finish setup before running jobs
+
+---
+
+### View 2 — Setup Wizard
+
+**Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in ~5 minutes.
+
+See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow (Welcome → License Key → Privileges → App Objects → EAI Test → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
+
+---
+
+### View 3 — Run Encrypt
+
+**Purpose:** Submit a batch Encrypt job — match customer IP + timestamp data against the LocID data lake and produce TX_CLOC / STABLE_CLOC output.
+
+**Workflow (5 steps, shown as a top stepper):**
+
+```
+[1. Input]  [2. Map Columns]  [3. Output]  [4. Options]  [5. Review & Run]
+```
+
+**Step 1 — Select Input Table**
+- Dropdown: all tables/views the app has been granted access to in the customer's account
+- Preview: row count + first 5 rows shown inline after selection
+- IP version hint: app auto-detects whether the table contains IPv4, IPv6, or mixed addresses (shown as info badge)
+
+**Step 2 — Map Columns**
+- The app reads the selected table's schema and presents a mapping widget:
+
+  | Required Field | Map to Column |
+  |---------------|---------------|
+  | Unique Row ID | `[dropdown]` |
+  | IP Address    | `[dropdown]` |
+  | Timestamp     | `[dropdown]` |
+
+- Column dropdowns are pre-filled with best-guess matches (e.g. a column named `ip` auto-selects for IP Address)
+- Timestamp format selector: epoch seconds, epoch milliseconds, or TIMESTAMP string
+
+**Step 3 — Configure Output**
+- Radio: *Create new table* or *Overwrite existing table*
+- Text input: output table name (e.g. `MY_DB.MY_SCHEMA.LOCID_RESULTS`)
+- If overwrite: confirmation prompt
+
+**Step 4 — Select Output Columns**
+- Checkboxes for each available output field, gated by entitlement:
+
+  | Column | Entitlement Required | Default |
+  |--------|---------------------|---------|
+  | TX_CLOC | `allow_tx` | ✓ |
+  | STABLE_CLOC | `allow_stable` | ✓ |
+  | Country / Country Code | `allow_geocontext` | ✓ |
+  | Region / Region Code | `allow_geocontext` | ✓ |
+  | City / City Code | `allow_geocontext` | ✓ |
+  | Postal Code | `allow_geocontext` | ✓ |
+  | HomeBiz_Type | *(future entitlement)* | — |
+
+- Columns the customer is not entitled to are shown greyed out with a tooltip explaining why
+
+**Step 5 — Review & Run**
+- Summary card: input table, row count, output table, selected columns, warehouse
+- Warehouse selector: dropdown of warehouses the customer has access to
+- **Run Job** button
+
+**During execution:**
+- Live progress bar with status messages (e.g. "Matching IPv4 records…", "Calling LocID UDF…", "Writing output…")
+- Cancel button available during run
+
+**On completion:**
+- Result summary: rows in, rows matched, rows written, unmatched count, runtime
+- Link: "View output table" (opens Snowflake worksheet) and "View in Job History"
+
+---
+
+### View 4 — Run Decrypt
+
+**Purpose:** Submit a batch Decrypt job — decode TX_CLOC values back to STABLE_CLOC and optional geo context.
+
+**Workflow (same 5-step stepper as Encrypt):**
+
+**Step 1 — Select Input Table**
+- Same table selector as Encrypt
+- Preview with row count + first 5 rows
+
+**Step 2 — Map Columns**
+
+  | Required Field | Map to Column |
+  |---------------|---------------|
+  | Unique Row ID | `[dropdown]` |
+  | TX_CLOC       | `[dropdown]` |
+
+**Step 3 — Configure Output**
+- Same as Encrypt: new table or overwrite
+
+**Step 4 — Select Output Columns**
+
+  | Column | Entitlement Required | Default |
+  |--------|---------------------|---------|
+  | STABLE_CLOC | `allow_stable` | ✓ |
+  | Country / Country Code | `allow_geocontext` | ✓ |
+  | Region / Region Code | `allow_geocontext` | ✓ |
+  | City / City Code | `allow_geocontext` | ✓ |
+  | Postal Code | `allow_geocontext` | ✓ |
+  | HomeBiz_Type | *(future entitlement)* | — |
+
+**Step 5 — Review & Run**
+- Same summary + warehouse selector + Run Job button as Encrypt
+
+**On completion:**
+- Result summary: rows in, rows decoded, rows written, runtime
+- Link to output table and Job History
+
+---
+
+### View 5 — Job History
+
+**Purpose:** Full audit log of all Encrypt and Decrypt jobs run through the app.
+
+**Layout:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Filter: [ All Operations ▼ ]  [ All Statuses ▼ ]  [ Date ▼ ] │
+├──────────┬───────────┬──────────────┬────────┬────────┬────────┤
+│ Job ID   │ Operation │ Run Date     │ Rows In│ Matched│ Status │
+├──────────┼───────────┼──────────────┼────────┼────────┼────────┤
+│ job_0042 │ Encrypt   │ 2026-04-08   │ 1.2M   │ 980K   │ ✓ OK  │
+│ job_0041 │ Decrypt   │ 2026-04-07   │ 450K   │ 450K   │ ✓ OK  │
+│ job_0040 │ Encrypt   │ 2026-04-05   │ 800K   │ 612K   │ ✗ FAIL│
+└──────────┴───────────┴──────────────┴────────┴────────┴────────┘
+```
+
+**Expandable row detail (click any row):**
+- Input table, output table, warehouse used
+- Runtime breakdown (matching, UDF, write)
+- Error message with guidance if status is FAIL
+- Output column list used for the job
+
+**Actions:**
+- Filter by: Operation (Encrypt / Decrypt), Status (Success / Failed), Date range
+- Re-run: button to pre-fill Run Encrypt / Run Decrypt with the same settings as a previous job
+- Download: export job log as CSV
+
+---
+
+### View 6 — Configuration
+
+**Purpose:** Manage license credentials, view current entitlements, and review the output column registry.
+
+**Sections:**
+
+**License & Credentials**
+- License key: shown masked (`1569-****-****-****`), with "Update" button that re-triggers the Enter Key screen
+- Client name and expiration date (read-only, from LocID Central)
+- API key: shown masked, used for stats reporting only
+- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; shows last refreshed timestamp
+
+**Current Entitlements**
+- Read-only badge list reflecting the live `access[]` record from LocID Central:
+
+  ```
+  ✓ allow_encrypt    ✓ allow_decrypt
+  ✓ allow_tx         ✓ allow_stable
+  ✓ allow_geocontext ✗ allow_homebiz (not provisioned)
+  ```
+
+**Output Column Registry**
+- Table view of all rows in `APP_CONFIG` where `config_key = 'output_col.*'`:
+
+  | Column Name | Operation | Requires Entitlement | Active |
+  |------------|-----------|---------------------|--------|
+  | TX_CLOC | Encrypt | allow_tx | ✓ |
+  | STABLE_CLOC | Both | allow_stable | ✓ |
+  | locid_country | Both | allow_geocontext | ✓ |
+  | … | … | … | … |
+
+- Read-only for customers; updated by DE via app version releases when new fields are added
+
+**Advanced**
+- "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting EAI connectivity
 
 ---
 
