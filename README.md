@@ -49,19 +49,19 @@ Ordered phases from first artifact to production-ready app.
 
 | Phase | Step | Work Item | Output |
 |-------|------|-----------|--------|
-| **1 — Foundation** | 1 | Provider DB DDL | `db/dev/provider/` |
-| | 2 | Native App package scaffold | `na_app_pkg/` skeleton |
-| | 3 | External Access Integration (EAI) | Network rule + EAI for `central.locid.com` |
-| **2 — Core Engine** | 4 | Scala UDF | JAR registered, encrypt/decrypt/stable functions |
-| | 5 | APP_CONFIG table + entitlement logic | Dynamic output column registry |
-| | 6 | LocID Central integration | Fetch/cache secrets, report stats |
-| | 12 | Usage telemetry | POST stats to LocID Central post-job |
-| **3 — Processing** | 7 | Encrypt stored procedure | IPv4 + IPv6 matching + UDF → output table |
-| | 8 | Decrypt stored procedure | TX_CLOC decode → STABLE_CLOC + context |
-| **4 — UI** | 9 | Streamlit onboarding wizard | 8-screen setup flow |
-| | 10 | Streamlit main views | Home, Run, History, Config |
-| **5 — Polish** | 11 | Performance tuning | Clustering keys, SOS evaluation |
-| | 13 | End-to-end testing | Encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates |
+| **1 — Foundation** | 1    | Provider DB DDL | `db/dev/provider/` |
+| | 2    | Native App package scaffold | `na_app_pkg/` skeleton |
+| | 3    | External Access Integration (EAI) | Network rule + EAI for `central.locid.com` |
+| **2 — Core Engine** | 4    | Scala UDF | JAR registered, encrypt/decrypt/stable functions |
+| | 5    | APP_CONFIG table + entitlement logic | Dynamic output column registry |
+| | 6    | LocID Central integration | Fetch/cache secrets, report stats |
+| | 7    | Usage telemetry | POST stats to LocID Central post-job |
+| **3 — Processing** | 8    | Encrypt stored procedure | IPv4 + IPv6 matching + UDF → output table |
+| | 9    | Decrypt stored procedure | TX_CLOC decode → STABLE_CLOC + context |
+| **4 — UI** | 10   | Streamlit onboarding wizard | 8-screen setup flow |
+| | 11   | Streamlit main views | Home, Run, History, Config |
+| **5 — Polish** | 12   | Performance tuning | Clustering keys, SOS evaluation |
+| | 13   | End-to-end testing | Encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates |
 
 ---
 
