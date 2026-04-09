@@ -10,7 +10,7 @@ The app has six views accessible from a left-side navigation bar. All views run 
 
 ```
 ┌────────────────────────────────────────────────────┐
-│  LocID for Snowflake                        [logo] │
+│  LocID for Snowflake                               │
 ├──────────────┬──────────────┬──────────────────────┤
 │ License      │ LocID Central│ Last Job             │
 │ ACTIVE       │ CONNECTED    │ Encrypt · 1.2M rows  │
