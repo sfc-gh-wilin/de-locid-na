@@ -1,0 +1,43 @@
+manifest_version: 1
+
+# =============================================================================
+# LocID Native App — manifest.yml
+# Provider: Digital Envoy / Matchbook Data
+# =============================================================================
+
+version:
+  name:    v1_0
+  label:   "1.0"
+  comment: "LocID enrichment — append TX_CLOC and STABLE_CLOC to IP+timestamp data"
+
+artifacts:
+  # Setup script: runs at install time and at each version upgrade
+  setup_script: setup.sql
+  # Consumer-visible readme shown in the Marketplace listing
+  readme: README.md
+  # Primary Streamlit entry point: auto-launched when consumer opens the app
+  default_streamlit: streamlit/app.py
+
+# Permissions the consumer must approve at install time.
+# These are displayed as "Required Permissions" in the installation UI.
+privileges:
+  - EXECUTE TASK:
+      description: >
+        Required to create and run scheduled LocID enrichment tasks.
+        The app will not schedule or execute tasks without explicit
+        action from the user in the app's UI.
+
+# ⚠ FLAGGED — External Access Integration (EAI):
+#   The app makes outbound HTTPS calls to central.locid.com for:
+#     - License validation and cryptographic secret retrieval
+#     - Usage statistics reporting after each job run
+#
+#   The EAI (LOCID_CENTRAL_EAI) is created in setup.sql using an
+#   app-owned network rule. Validate with Snowflake Native App Framework
+#   docs whether consumer approval of external access is declared here
+#   in the manifest (e.g. as a privilege entry) or handled solely via
+#   the setup script + consumer GRANT at install time.
+
+configuration:
+  log_level:   INFO
+  trace_level: ALWAYS
