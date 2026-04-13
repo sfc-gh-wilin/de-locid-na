@@ -59,19 +59,23 @@ SET encrypted_locid_1 = (
     SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_1, $dev_key)
 );
 SELECT $encrypted_locid_1 AS encrypted_locid_1;
+-- Input: 31F24ZE1W1YX58K2R1139
+-- Output: BLFk1c06vOqIQExr6WKRLPK21c_V5WTssoCta0D7NTX6mk6HGoJZEZovi4B7wqovHQ==
 
 -- 1b. Decrypt
 SET decrypted_locid_1 = (
     SELECT LOCID_DEV.STAGING.LOCID_BASE_DECRYPT($encrypted_locid_1, $dev_key)
 );
 SELECT $decrypted_locid_1 AS decrypted_locid_1;
+-- Input: BLFk1c06vOqIQExr6WKRLPK21c_V5WTssoCta0D7NTX6mk6HGoJZEZovi4B7wqovHQ==
+-- Output: 31F24ZE1W1YX58K2R1139
 
 -- 1c. Assert
 SELECT
     $locid_1             AS original_locid,
     $decrypted_locid_1   AS decrypted_locid,
     IFF($decrypted_locid_1 = $locid_1, 'PASS', 'FAIL') AS test_base_encrypt_decrypt;
-
+-- PASS
 
 -- ===========================================================================
 -- TEST 2: LOCID_TXCLOC_ENCRYPT — produces TX_CLOC
@@ -90,12 +94,15 @@ SET encrypted_locid_2 = (
     SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_2, $dev_key)
 );
 SELECT $encrypted_locid_2 AS encrypted_locid_2;
+-- Input: 4SV5XGYRWPT8AS6M04A8SMGVBZ
+-- Output: a9JoEhI4b9dRjPuuYfHyv-sFoly060h945j40lP4qp4m1QLV-Wxw5EotrPJoxiN-VyYmD2ZL
 
 -- 2b. Capture current Unix timestamp (seconds)
 SET ts_now = (
     SELECT DATE_PART('epoch_second', CURRENT_TIMESTAMP::TIMESTAMP_NTZ)::BIGINT
 );
 SELECT $ts_now AS timestamp_sec;
+-- 1776089593
 
 -- 2c. Encrypt → TX_CLOC
 --     Using same key for base_locid_key and scheme_key (valid for dev testing)
