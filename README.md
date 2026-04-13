@@ -124,7 +124,9 @@ APP_SCHEMA.HTTP_PING()         -- Python UDF to test EAI connectivity during set
 
 ## Scala UDF Design
 
-The `encode-lib` JAR is bundled in the app stage and registered as a Java/Scala UDF. Key functions:
+The `encode-lib` JAR is bundled in the app stage and registered as a Java/Scala UDF. Snowflake's Scala 2.12 runtime targets **Java 11** (class file major version 55 max) — the JAR must be compiled with `-release 11` across all bundled classes, including protobuf-generated ones. See Open Items.
+
+Key functions:
 
 | UDF | Inputs | Output | Notes |
 |-----|--------|--------|-------|
@@ -581,6 +583,8 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 
 | Item | Status |
 |------|--------|
+| encode-lib JAR Java 11 compatibility | `io.ol.locationid.proto` classes compiled with Java 17 (class file major version 61); Snowflake Scala 2.12 runtime caps at Java 11 (version 55). `LOCID_TXCLOC_ENCRYPT` and `LOCID_TXCLOC_DECRYPT` UDFs blocked until DE recompiles fat JAR with `-release 11`. `BaseLocIdEncryption` and `StableCloc` UDFs work today. DE notified. |
+| AES key size (test vs. production) | Local test files use AES-256 (32-byte UTF-8 key). Integration guide specifies AES-128 (16-byte Base64-URL decoded key from LocID Central). Confirm with DE which key size the production JAR expects. |
 | IPv6 matching SQL | Available — full 6-pass prefix range join logic is in `Coco/tmp/20260331/example_sql_for_snowflake_locid_matching.sql`. Confirm with Ryan this POC SQL represents the final approach before productionizing. |
 | HomeBiz_Type entitlement details | Pending product iteration (Ash/David) |
 | Additional FC50 columns / new entitlements | Pending DE R&D spike outcome |
