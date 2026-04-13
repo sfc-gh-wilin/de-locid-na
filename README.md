@@ -332,15 +332,15 @@ The app has six views accessible from a left-side navigation bar. All views run 
 **Layout:**
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  LocID for Snowflake                      [DE logo] │
+┌────────────────────────────────────────────────────┐
+│  LocID for Snowflake                               │
 ├──────────────┬──────────────┬──────────────────────┤
 │ License      │ LocID Central│ Last Job             │
 │ ACTIVE       │ CONNECTED    │ Encrypt · 1.2M rows  │
 │ Exp: 2027-01 │ Refreshed 2m │ 4m 12s · SUCCESS     │
 ├──────────────┴──────────────┴──────────────────────┤
-│  [ Run Encrypt ]   [ Run Decrypt ]   [ View History]│
-└─────────────────────────────────────────────────────┘
+│ [ Run Encrypt ]   [ Run Decrypt ]  [ View History] │
+└────────────────────────────────────────────────────┘
 ```
 
 **Key elements:**
@@ -469,14 +469,14 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 **Layout:**
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  Filter: [ All Operations ▼ ]  [ All Statuses ▼ ]  [ Date ▼ ] │
+┌────────────────────────────────────────────────────────────────┐
+│  Filter: [ All Operations ▼ ]  [ All Statuses ▼ ]  [ Date ▼ ]  │
 ├──────────┬───────────┬──────────────┬────────┬────────┬────────┤
 │ Job ID   │ Operation │ Run Date     │ Rows In│ Matched│ Status │
 ├──────────┼───────────┼──────────────┼────────┼────────┼────────┤
-│ job_0042 │ Encrypt   │ 2026-04-08   │ 1.2M   │ 980K   │ ✓ OK  │
-│ job_0041 │ Decrypt   │ 2026-04-07   │ 450K   │ 450K   │ ✓ OK  │
-│ job_0040 │ Encrypt   │ 2026-04-05   │ 800K   │ 612K   │ ✗ FAIL│
+│ job_0042 │ Encrypt   │ 2026-04-08   │ 1.2M   │ 980K   │ ✓ OK   │
+│ job_0041 │ Decrypt   │ 2026-04-07   │ 450K   │ 450K   │ ✓ OK   │
+│ job_0040 │ Encrypt   │ 2026-04-05   │ 800K   │ 612K   │ ✗ FAIL │
 └──────────┴───────────┴──────────────┴────────┴────────┴────────┘
 ```
 
