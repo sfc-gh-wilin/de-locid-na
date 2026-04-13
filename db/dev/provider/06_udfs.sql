@@ -264,13 +264,13 @@ class Handler {
   }
 
   def generate(encryptedLocid: String, baseLocidKey: String, namespaceGuid: String,
-               clientId: Int, encClientId: Int, tier: String): String = {
+               clientId: Long, encClientId: Long, tier: String): String = {
     // Step 1: Decrypt the base LocID stored in LOCID_BUILDS
     val baseEnc = BaseLocIdEncryption(toKey(baseLocidKey))
     val locId   = new String(baseEnc.decrypt(Base64.getUrlDecoder.decode(encryptedLocid)),
                              StandardCharsets.UTF_8)
     // Step 2: Generate publisher-specific stable CLOC
-    StableCloc(locId).encode(namespaceGuid, clientId, Some(encClientId), Some(tier))
+    StableCloc(locId).encode(namespaceGuid, clientId, encClientId, Some(tier))
   }
 }
 $$;
