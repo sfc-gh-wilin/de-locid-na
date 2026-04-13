@@ -116,24 +116,15 @@ GRANT SELECT ON TABLE APP_SCHEMA.JOB_LOG
 
 
 -- =============================================================================
--- 6. External Access Integration — LocID Central
---    Outbound HTTPS to central.locid.com:
---      - GET  /api/0/location_id/license/{id}  → secrets + entitlements
---      - POST /api/0/location_id/stats          → usage statistics
---
--- ⚠ FLAGGED: Validate EAI creation approach for Snowflake Native App Framework.
---   The network rule is a schema-level object (APP_SCHEMA.LOCID_CENTRAL_RULE).
---   The EAI is an account-level object — confirm naming/scoping requirements
---   with Native App Framework docs before deploying to app package.
+-- 6. Network Rule — LocID Central
+--    Schema-level object; referenced by LOCID_CENTRAL_EAI declared in manifest.yml.
+--    The External Access Integration itself is an account-level object and is
+--    declared in manifest.yml (external_access_integrations), not created here.
 -- =============================================================================
 CREATE OR REPLACE NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE
     TYPE       = HOST_PORT
     MODE       = EGRESS
     VALUE_LIST = ('central.locid.com:443');
-
-CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS LOCID_CENTRAL_EAI
-    ALLOWED_NETWORK_RULES = (APP_SCHEMA.LOCID_CENTRAL_RULE)
-    ENABLED               = TRUE;
 
 
 -- =============================================================================

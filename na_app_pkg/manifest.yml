@@ -27,16 +27,29 @@ privileges:
         The app will not schedule or execute tasks without explicit
         action from the user in the app's UI.
 
-# ⚠ FLAGGED — External Access Integration (EAI):
-#   The app makes outbound HTTPS calls to central.locid.com for:
-#     - License validation and cryptographic secret retrieval
-#     - Usage statistics reporting after each job run
+# External Access Integration — LocID Central
+# The app makes outbound HTTPS calls to central.locid.com for:
+#   - License validation and cryptographic secret retrieval
+#   - Usage statistics reporting after each job run
 #
-#   The EAI (LOCID_CENTRAL_EAI) is created in setup.sql using an
-#   app-owned network rule. Validate with Snowflake Native App Framework
-#   docs whether consumer approval of external access is declared here
-#   in the manifest (e.g. as a privilege entry) or handled solely via
-#   the setup script + consumer GRANT at install time.
+# LOCID_CENTRAL_EAI is an account-level object and must be declared here
+# rather than created in setup.sql. The network rule (schema-level) is
+# still created in setup.sql. The consumer approves external access at
+# install time via the Snowflake installation UI.
+#
+# The EAI is referenced by name in:
+#   - APP_SCHEMA.HTTP_PING()            (setup.sql)
+#   - APP_SCHEMA.LOCID_ENCRYPT(...)     (src/procs/encrypt.sql)
+#   - APP_SCHEMA.LOCID_DECRYPT(...)     (src/procs/decrypt.sql)
+external_access_integrations:
+  - name:        LOCID_CENTRAL_EAI
+    description: >
+      Allows the app to reach central.locid.com over HTTPS (port 443).
+      Used for license validation, cryptographic secret retrieval, and
+      usage statistics reporting. No customer data is sent — only
+      job-level metrics (row counts, runtime).
+    allowed_network_rules:
+      - APP_SCHEMA.LOCID_CENTRAL_RULE
 
 configuration:
   log_level:   INFO
