@@ -18,14 +18,8 @@ artifacts:
   # Primary Streamlit entry point: auto-launched when consumer opens the app
   default_streamlit: streamlit/app.py
 
-# Permissions the consumer must approve at install time.
-# These are displayed as "Required Permissions" in the installation UI.
-privileges:
-  - EXECUTE TASK:
-      description: >
-        Required to create and run scheduled LocID enrichment tasks.
-        The app will not schedule or execute tasks without explicit
-        action from the user in the app's UI.
+# All enrichment jobs are triggered on-demand via the Streamlit UI.
+privileges: []
 
 # External Access Integration — LocID Central
 # The app makes outbound HTTPS calls to central.locid.com for:

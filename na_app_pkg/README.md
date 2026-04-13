@@ -35,7 +35,6 @@ Results are written to a table you specify. All processing happens inside your S
 
    | Permission | Why |
    |-----------|-----|
-   | `EXECUTE TASK` | Allows the app to run scheduled enrichment tasks |
    | External access to `central.locid.com` | Required for license validation and usage reporting |
 
 4. Click **Activate**.
