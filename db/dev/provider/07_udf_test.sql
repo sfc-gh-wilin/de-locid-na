@@ -118,6 +118,14 @@ SET tx_cloc = (
 );
 SELECT $tx_cloc AS tx_cloc;
 
+-- 20260413 Error:
+-- Hi @David and @Ryan Bessey, I am getting error when testing Jar file inside Snowflake UDF.
+-- Error:
+--     - Class files were compiled with an unsupported version of the JDK. Use the '-target' or '-release' option when compiling your class files to target Java 11 in function LOCID_TXCLOC_ENCRYPT with handler Handler.encode
+-- Can you please help with below?
+--     - Recompile the fat JAR with -release 11 on the protobuf Java plugin (or the project-wide javac target) so TxClocProto and related classes are Java 11-compatible.
+--     - The io.ol.locationid.proto classes in encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar are compiled with Java 17 (major version: 61).
+--     - Snowflake's Scala 2.12 runtime targets Java 11 (major version: 55 max).
 
 -- ===========================================================================
 -- TEST 3: LOCID_TXCLOC_DECRYPT — round-trip assertion
