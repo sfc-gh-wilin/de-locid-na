@@ -63,9 +63,9 @@ locid-native-app/
 │   │   ├── encrypt.sql           # Encrypt stored procedure
 │   │   └── decrypt.sql           # Decrypt stored procedure
 │   ├── udfs/
-│   │   └── locid_udf.sql         # Scala UDF definitions wrapping the JAR
+│   │   └── locid_udf.sql         # Java UDF definitions wrapping the JAR
 │   └── lib/
-│       └── encode-lib-*.jar      # Bundled Scala JAR (stage artifact)
+│       └── encode-lib-*.jar      # Bundled Java 17 fat JAR (stage artifact)
 └── streamlit/
     ├── app.py                    # Main Streamlit entry point
     ├── pages/
@@ -86,19 +86,29 @@ APP_SCHEMA.APP_CONFIG          -- License key, cached secrets, entitlements, out
 APP_SCHEMA.JOB_LOG             -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
 APP_SCHEMA.LOCID_ENCRYPT(...)  -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)  -- Decrypt stored procedure
-APP_SCHEMA.LOCID_UDF(...)      -- Scala UDF (encrypt/decrypt via JAR)
+APP_SCHEMA.LOCID_UDF(...)      -- Java UDF (encrypt/decrypt via JAR)
 APP_SCHEMA.HTTP_PING()         -- Python UDF to verify EAI connectivity during setup
 ```
 
-### Scala UDF Design
+### Java UDF Design
 
-The `encode-lib` JAR is bundled in the app stage and registered as Snowflake Scala UDFs. Key functions:
+The `encode-lib` JAR is bundled in the app stage and registered as `LANGUAGE JAVA RUNTIME_VERSION = '17'` UDFs. DE provides a public `io.ol.locationid.SnowflakeHandler` wrapper class with one static method per UDF operation.
 
-| UDF | Inputs | Output |
-|-----|--------|--------|
-| `locid_encrypt` | `encrypted_locid`, `timestamp`, `scheme_key`, `base_locid_key`, `client_id` | `tx_cloc` |
-| `locid_stable` | `encrypted_locid`, `namespace_guid`, `client_id`, `tier` | `stable_cloc` (UUID) |
-| `locid_decrypt` | `tx_cloc`, `scheme_key` | `location_id`, `timestamp`, `enc_client_id` |
+| UDF | Inputs | Output | Notes |
+|-----|--------|--------|-------|
+| `locid_encrypt` | `encrypted_locid`, `timestamp`, `scheme_key`, `base_locid_key`, `client_id` | `tx_cloc` | Decrypts base LocID, re-encrypts as TX_CLOC |
+| `locid_stable` | `encrypted_locid`, `namespace_guid`, `client_id`, `tier` | `stable_cloc` | Produces stable UUID-format CLOC |
+| `locid_decrypt` | `tx_cloc`, `scheme_key` | `VARIANT` (locid, timestamp, enc_client_id) | Decrypts TX_CLOC |
+
+Handler method signatures (`io.ol.locationid.SnowflakeHandler`):
+
+```java
+public static String encrypt(String locId, String keyStr)
+public static String decrypt(String encryptedLocId, String keyStr)
+public static String txClocEncrypt(String encryptedLocid, String baseLocidKey, String schemeKey, long timestampSec, long clientId)
+public static String txClocDecrypt(String txCloc, String schemeKey)
+public static String stableCloc(String encryptedLocid, String baseLocidKey, String namespaceGuid, long clientId, long encClientId, String tier)
+```
 
 Cryptographic keys are retrieved from LocID Central at job start and passed directly into UDF calls — never stored in plaintext in any table.
 
@@ -473,6 +483,10 @@ Header: de-access-token: <api_key>
 }]
 ```
 
+> **Pending from DE:** The example above shows `encrypt_usage` only. DE needs to confirm the complete telemetry contract before implementation:
+> - All `metric_key` values they want reported (e.g. `encrypt_usage`, `decrypt_usage`, and any others)
+> - The full `dimensions` schema for each metric key — field names, types, and semantics of `hit` and `tier`
+
 Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `APP_SCHEMA.JOB_LOG` for the customer's own visibility.
 
 ---
@@ -484,7 +498,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | **1 — Foundation** | Provider DB DDL (build tables, clustering, exploded IPv4 table) |
 | | Native App package scaffold (`manifest.yml`, `setup.sql`, directory structure) |
 | | External Access Integration (network rule + EAI for `central.locid.com`) |
-| **2 — Core Engine** | Scala UDFs (encrypt, decrypt, stable CLOC) registered via bundled JAR |
+| **2 — Core Engine** | Java UDFs (encrypt, decrypt, stable CLOC) registered via bundled JAR |
 | | APP_CONFIG table + entitlement logic (dynamic output column registry) |
 | | LocID Central integration (fetch/cache secrets, report usage stats) |
 | **3 — Processing** | Encrypt stored procedure (IPv4 + IPv6 matching → UDF → output table) |

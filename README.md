@@ -577,6 +577,10 @@ Header: de-access-token: <api_key from entitlements>
 }]
 ```
 
+> **Pending from DE:** The example above shows `encrypt_usage` only. DE needs to confirm the complete telemetry contract before implementation:
+> - All `metric_key` values they want reported (e.g. `encrypt_usage`, `decrypt_usage`, and any others)
+> - The full `dimensions` schema for each metric key — field names, types, and semantics of `hit` and `tier`
+
 Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `APP_SCHEMA.JOB_LOG` for the customer's own visibility.
 
 ---
