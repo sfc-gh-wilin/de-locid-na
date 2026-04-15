@@ -1,6 +1,6 @@
 -- =============================================================================
 -- 06_udfs.sql
--- LocID Dev: Scala UDFs wrapping encode-lib JAR
+-- LocID Dev: Java UDFs wrapping encode-lib JAR
 --
 -- Run order: after 05_stage_setup.sql AND after the JAR has been PUT to stage.
 -- All UDFs are created in LOCID_DEV.STAGING.
@@ -18,16 +18,24 @@
 --   EncryptionTestWithTS.scala used for local JAR testing.
 --
 --   PRODUCTION key derivation (from LocID Central) is:
---     Base64.getUrlDecoder.decode(secret.replace('~','='))  →  16 bytes (AES-128)
+--     Base64.getUrlDecoder().decode(secret.replace('~','='))  →  16 bytes (AES-128)
 --   This discrepancy MUST be resolved with Digital Envoy before production deploy.
 --
--- JAR: encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar  (Scala 2.12)
+-- JAR: encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar  (Java 17 build — pending DE)
+--
+-- ⚠ HANDLER CLASS:
+--   All UDFs point to io.ol.locationid.SnowflakeHandler — a public Java class that
+--   DE must include in the fat JAR.  Method signatures are documented per UDF below.
+--   Confirm exact class name and method names with DE before running this file.
+--
+-- ⚠ TYPE MAPPING:
+--   Snowflake maps SQL INT and BIGINT → Java long for LANGUAGE JAVA UDFs.
+--   All integer handler parameters must be declared as long, not int.
 -- =============================================================================
 
 USE DATABASE LOCID_DEV;
 USE SCHEMA   LOCID_DEV.STAGING;
 
--- Define stage path as a local constant for readability in comments.
 -- Full stage reference used inline in each IMPORTS clause:
 --   @LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar
 
@@ -40,36 +48,19 @@ USE SCHEMA   LOCID_DEV.STAGING;
 --    Maps to EncryptionTest.scala behaviour.
 --    Input:  loc_id  — raw base LocID string  e.g. '31F24ZE1W1YX58K2R1139'
 --            key_str — license key string (dev mode: UTF-8 bytes padded to 32)
+--
+--    Expected Java method in SnowflakeHandler (DE to implement):
+--      public static String encrypt(String locId, String keyStr)
 -- =============================================================================
 CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT(
     LOC_ID    VARCHAR,
     KEY_STR   VARCHAR
 )
 RETURNS VARCHAR
-LANGUAGE SCALA
-RUNTIME_VERSION = '2.12'
+LANGUAGE JAVA
+RUNTIME_VERSION = '17'
 IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar')
-HANDLER = 'Handler.encrypt'
-AS $$
-import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
-import java.util.Base64
-import java.nio.charset.StandardCharsets
-import javax.crypto.spec.SecretKeySpec
-
-class Handler {
-  // TEST-MODE key derivation: UTF-8 bytes of key string padded to 32 bytes (AES-256)
-  // PRODUCTION: replace with Base64.getUrlDecoder.decode(centralSecret) → 16 bytes (AES-128)
-  private def toKey(keyStr: String): SecretKeySpec = {
-    val raw = keyStr.getBytes(StandardCharsets.UTF_8)
-    new SecretKeySpec(java.util.Arrays.copyOf(raw, 32), "AES")
-  }
-
-  def encrypt(locId: String, keyStr: String): String = {
-    val enc = BaseLocIdEncryption(toKey(keyStr))
-    Base64.getUrlEncoder.encodeToString(enc.encrypt(locId.getBytes(StandardCharsets.UTF_8)))
-  }
-}
-$$;
+HANDLER = 'io.ol.locationid.SnowflakeHandler.encrypt';
 
 
 -- =============================================================================
@@ -78,34 +69,19 @@ $$;
 --
 --    Input:  encrypted_loc_id — base64-URL encoded ciphertext (output of LOCID_BASE_ENCRYPT)
 --            key_str          — same license key used to encrypt
+--
+--    Expected Java method in SnowflakeHandler (DE to implement):
+--      public static String decrypt(String encryptedLocId, String keyStr)
 -- =============================================================================
 CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_BASE_DECRYPT(
     ENCRYPTED_LOC_ID  VARCHAR,
     KEY_STR           VARCHAR
 )
 RETURNS VARCHAR
-LANGUAGE SCALA
-RUNTIME_VERSION = '2.12'
+LANGUAGE JAVA
+RUNTIME_VERSION = '17'
 IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar')
-HANDLER = 'Handler.decrypt'
-AS $$
-import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
-import java.util.Base64
-import java.nio.charset.StandardCharsets
-import javax.crypto.spec.SecretKeySpec
-
-class Handler {
-  private def toKey(keyStr: String): SecretKeySpec = {
-    val raw = keyStr.getBytes(StandardCharsets.UTF_8)
-    new SecretKeySpec(java.util.Arrays.copyOf(raw, 32), "AES")
-  }
-
-  def decrypt(encryptedLocId: String, keyStr: String): String = {
-    val enc = BaseLocIdEncryption(toKey(keyStr))
-    new String(enc.decrypt(Base64.getUrlDecoder.decode(encryptedLocId)), StandardCharsets.UTF_8)
-  }
-}
-$$;
+HANDLER = 'io.ol.locationid.SnowflakeHandler.decrypt';
 
 
 -- =============================================================================
@@ -123,8 +99,12 @@ $$;
 --            base_locid_key   — key used to encrypt the base locid at ingest time
 --            scheme_key       — EncScheme0 key (may differ from base_locid_key in production)
 --            timestamp_sec    — Unix timestamp in seconds (BIGINT)
---            client_id        — encClientId for TxCloc (publisher/consumer ID)
+--            client_id        — encClientId for TxCloc (publisher/consumer ID) (INT → long)
 --    Returns: TX_CLOC string
+--
+--    Expected Java method in SnowflakeHandler (DE to implement):
+--      public static String txClocEncrypt(String encryptedLocid, String baseLocidKey,
+--                                         String schemeKey, long timestampSec, long clientId)
 -- =============================================================================
 CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_TXCLOC_ENCRYPT(
     ENCRYPTED_LOCID  VARCHAR,
@@ -134,41 +114,10 @@ CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_TXCLOC_ENCRYPT(
     CLIENT_ID        INT
 )
 RETURNS VARCHAR
-LANGUAGE SCALA
-RUNTIME_VERSION = '2.12'
+LANGUAGE JAVA
+RUNTIME_VERSION = '17'
 IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar')
-HANDLER = 'Handler.encode'
-AS $$
-import io.ol.locationid.TxCloc
-import io.ol.locationid.GeoContext
-import io.ol.locationid.encoding.EncScheme0
-import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
-import java.util.Base64
-import java.nio.charset.StandardCharsets
-import javax.crypto.spec.SecretKeySpec
-
-class Handler {
-  private def toKey(keyStr: String): SecretKeySpec = {
-    val raw = keyStr.getBytes(StandardCharsets.UTF_8)
-    new SecretKeySpec(java.util.Arrays.copyOf(raw, 32), "AES")
-  }
-
-  def encode(encryptedLocid: String, baseLocidKey: String, schemeKey: String,
-             timestampSec: Long, clientId: Int): String = {
-    // Step 1: Decrypt the base LocID stored in LOCID_BUILDS
-    val baseEnc = BaseLocIdEncryption(toKey(baseLocidKey))
-    val locId   = new String(baseEnc.decrypt(Base64.getUrlDecoder.decode(encryptedLocid)),
-                             StandardCharsets.UTF_8)
-    // Step 2: Encode as TX_CLOC (5-param constructor confirmed from EncryptionTestWithTS.scala)
-    val scheme = new EncScheme0(toKey(schemeKey))
-    val txCloc = TxCloc(locId, timestampSec, clientId, GeoContext(), None)
-    scheme.encoder.encode(txCloc) match {
-      case Right(result) => result
-      case Left(err)     => throw new RuntimeException(s"TX_CLOC encode failed: ${err.getMessage}")
-    }
-  }
-}
-$$;
+HANDLER = 'io.ol.locationid.SnowflakeHandler.txClocEncrypt';
 
 
 -- =============================================================================
@@ -181,40 +130,19 @@ $$;
 --
 --    Input:  tx_cloc    — TX_CLOC string (output of LOCID_TXCLOC_ENCRYPT)
 --            scheme_key — same EncScheme0 key used to encrypt
+--
+--    Expected Java method in SnowflakeHandler (DE to implement):
+--      public static String txClocDecrypt(String txCloc, String schemeKey)
 -- =============================================================================
 CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_TXCLOC_DECRYPT(
     TX_CLOC    VARCHAR,
     SCHEME_KEY VARCHAR
 )
 RETURNS VARCHAR
-LANGUAGE SCALA
-RUNTIME_VERSION = '2.12'
+LANGUAGE JAVA
+RUNTIME_VERSION = '17'
 IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar')
-HANDLER = 'Handler.decode'
-AS $$
-import io.ol.locationid.encoding.EncScheme0
-import java.nio.charset.StandardCharsets
-import javax.crypto.spec.SecretKeySpec
-
-class Handler {
-  private def toKey(keyStr: String): SecretKeySpec = {
-    val raw = keyStr.getBytes(StandardCharsets.UTF_8)
-    new SecretKeySpec(java.util.Arrays.copyOf(raw, 32), "AES")
-  }
-
-  def decode(txCloc: String, schemeKey: String): String = {
-    val scheme = new EncScheme0(toKey(schemeKey))
-    scheme.encoder.decode(txCloc) match {
-      case Right(cloc) =>
-        // Escape locationId to guard against quotes in the value
-        val locId = cloc.locationId.replace("\\", "\\\\").replace("\"", "\\\"")
-        s"""{"location_id":"$locId","timestamp":${cloc.timestamp},"enc_client_id":${cloc.encClientId}}"""
-      case Left(err) =>
-        throw new RuntimeException(s"TX_CLOC decode failed: ${err.getMessage}")
-    }
-  }
-}
-$$;
+HANDLER = 'io.ol.locationid.SnowflakeHandler.txClocDecrypt';
 
 
 -- =============================================================================
@@ -231,11 +159,15 @@ $$;
 --            base_locid_key   — key used to encrypt the base locid at ingest time
 --            namespace_guid   — customer namespace GUID (hex string, no dashes)
 --                               e.g. 'ffffffff111122223333444444444444'
---            client_id        — decrypting client ID (consumer)
---            enc_client_id    — encrypting client ID (publisher); use same as client_id
---                               for publisher-independent CLOC behaviour
+--            client_id        — decrypting client ID (consumer) (INT → long)
+--            enc_client_id    — encrypting client ID (publisher) (INT → long)
 --            tier             — location tier: 'T0' (rooftop) or 'T1' (low accuracy)
 --    Returns: UUID string
+--
+--    Expected Java method in SnowflakeHandler (DE to implement):
+--      public static String stableCloc(String encryptedLocid, String baseLocidKey,
+--                                      String namespaceGuid, long clientId,
+--                                      long encClientId, String tier)
 -- =============================================================================
 CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
     ENCRYPTED_LOCID  VARCHAR,
@@ -246,31 +178,7 @@ CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
     TIER             VARCHAR
 )
 RETURNS VARCHAR
-LANGUAGE SCALA
-RUNTIME_VERSION = '2.12'
+LANGUAGE JAVA
+RUNTIME_VERSION = '17'
 IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar')
-HANDLER = 'Handler.generate'
-AS $$
-import io.ol.locationid.StableCloc
-import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
-import java.util.Base64
-import java.nio.charset.StandardCharsets
-import javax.crypto.spec.SecretKeySpec
-
-class Handler {
-  private def toKey(keyStr: String): SecretKeySpec = {
-    val raw = keyStr.getBytes(StandardCharsets.UTF_8)
-    new SecretKeySpec(java.util.Arrays.copyOf(raw, 32), "AES")
-  }
-
-  def generate(encryptedLocid: String, baseLocidKey: String, namespaceGuid: String,
-               clientId: Long, encClientId: Long, tier: String): String = {
-    // Step 1: Decrypt the base LocID stored in LOCID_BUILDS
-    val baseEnc = BaseLocIdEncryption(toKey(baseLocidKey))
-    val locId   = new String(baseEnc.decrypt(Base64.getUrlDecoder.decode(encryptedLocid)),
-                             StandardCharsets.UTF_8)
-    // Step 2: Generate publisher-specific stable CLOC
-    StableCloc(locId).encode(namespaceGuid, clientId, encClientId, Some(tier))
-  }
-}
-$$;
+HANDLER = 'io.ol.locationid.SnowflakeHandler.stableCloc';

@@ -11,7 +11,7 @@ Customers who use LocID today call cloud or on-premise APIs to enrich their data
 
 1. Customer provides a table with `(unique_id, ip_address, timestamp)` rows.
 2. The app matches each IP + timestamp against Digital Envoy's weekly LocID data lake.
-3. For each matched row, the Scala UDF generates encrypted identifiers (TX_CLOC, STABLE_CLOC) and optional geo context.
+3. For each matched row, the Java UDF generates encrypted identifiers (TX_CLOC, STABLE_CLOC) and optional geo context.
 4. Results are written to a customer-specified output table — all within the customer's account.
 5. Usage statistics are reported back to LocID Central over HTTPS.
 
@@ -30,7 +30,7 @@ Two operations are supported:
 |---|-----------|-------|
 | 1 | Native App package scaffolding | `manifest.yml`, `setup.sql`, directory structure |
 | 2 | External Access Integration (EAI) | Outbound HTTPS to `central.locid.com` |
-| 3 | Scala UDF | Wrap `encode-lib` JAR; functions: encrypt, decrypt, stable CLOC |
+| 3 | Java UDF | Wrap `encode-lib` JAR; functions: encrypt, decrypt, stable CLOC |
 | 4 | Config table design | Dynamic entitlements and output column registry |
 | 5 | LocID Central integration | Fetch license/secrets/entitlements, cache, report stats |
 | 6 | Encrypt stored procedure | IP matching (IPv4 + IPv6) + UDF call → output table |
@@ -52,7 +52,7 @@ Ordered phases from first artifact to production-ready app.
 | **1 — Foundation** | 1    | Provider DB DDL | `db/dev/provider/` |
 | | 2    | Native App package scaffold | `na_app_pkg/` skeleton |
 | | 3    | External Access Integration (EAI) | Network rule + EAI for `central.locid.com` |
-| **2 — Core Engine** | 4    | Scala UDF | JAR registered, encrypt/decrypt/stable functions |
+| **2 — Core Engine** | 4    | Java UDF | JAR registered, encrypt/decrypt/stable functions |
 | | 5    | APP_CONFIG table + entitlement logic | Dynamic output column registry |
 | | 6    | LocID Central integration | Fetch/cache secrets, report stats |
 | | 7    | Usage telemetry | POST stats to LocID Central post-job |
@@ -81,9 +81,9 @@ locid-native-app/
 │   │   ├── encrypt.sql           # Encrypt stored procedure
 │   │   └── decrypt.sql           # Decrypt stored procedure
 │   ├── udfs/
-│   │   └── locid_udf.sql         # Scala UDF definitions wrapping the JAR
+│   │   └── locid_udf.sql         # Java UDF definitions wrapping the JAR
 │   └── lib/
-│       └── encode-lib-*.jar      # Bundled Scala JAR (stage artifact)
+│       └── encode-lib-*.jar      # Bundled Java 17 fat JAR (stage artifact)
 └── streamlit/
     ├── app.py                    # Main Streamlit entry point
     ├── pages/
@@ -116,15 +116,17 @@ APP_SCHEMA.APP_CONFIG          -- License key, cached secrets, entitlements, out
 APP_SCHEMA.JOB_LOG             -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
 APP_SCHEMA.LOCID_ENCRYPT(...)  -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)  -- Decrypt stored procedure
-APP_SCHEMA.LOCID_UDF(...)      -- Scala UDF (encrypt/decrypt via JAR)
+APP_SCHEMA.LOCID_UDF(...)      -- Java UDF (encrypt/decrypt via JAR)
 APP_SCHEMA.HTTP_PING()         -- Python UDF to test EAI connectivity during setup
 ```
 
 ---
 
-## Scala UDF Design
+## Java UDF Design
 
-The `encode-lib` JAR is bundled in the app stage and registered as a Java/Scala UDF. Snowflake's Scala 2.12 runtime targets **Java 11** (class file major version 55 max) — the JAR must be compiled with `-release 11` across all bundled classes, including protobuf-generated ones. See Open Items.
+The `encode-lib` JAR is bundled in the app stage and registered as a `LANGUAGE JAVA RUNTIME_VERSION = '17'` UDF. Snowflake supports Java 11 and Java 17 runtimes; Java 17 is the target here because the JAR's protobuf-generated classes (`io.ol.locationid.proto.*`) compile to class file major version 61 (Java 17). DE is providing a pure Java 17 fat JAR with a public `SnowflakeHandler` wrapper class exposing one static method per UDF operation.
+
+> **Handler class ask to DE**: please include `io.ol.locationid.SnowflakeHandler` in the JAR with public static methods matching the signatures documented in `src/udfs/locid_udf.sql`. Confirm the exact class and method names before the UDF definitions are run.
 
 Key functions:
 
@@ -583,7 +585,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 
 | Item | Status |
 |------|--------|
-| encode-lib JAR Java 11 compatibility | `io.ol.locationid.proto` classes compiled with Java 17 (class file major version 61); Snowflake Scala 2.12 runtime caps at Java 11 (version 55). `LOCID_TXCLOC_ENCRYPT` and `LOCID_TXCLOC_DECRYPT` UDFs blocked until DE recompiles fat JAR with `-release 11`. `BaseLocIdEncryption` and `StableCloc` UDFs work today. DE notified. |
+| encode-lib JAR — switching to Java 17 UDF | Root cause confirmed: `io.ol.locationid.proto.*` classes compiled at Java 17 (class file major version 61); Snowflake Scala 2.12 runtime caps at Java 11 (version 55). **Resolution path agreed with DE**: DE to provide a pure Java 17 fat JAR. All UDF definitions updated to `LANGUAGE JAVA RUNTIME_VERSION = '17'`. DE to include a public Java handler class (suggested: `io.ol.locationid.SnowflakeHandler`) with one static method per UDF — method signatures documented in `src/udfs/locid_udf.sql`. Pending: DE delivers new JAR and confirms handler class name. |
 | AES key size (test vs. production) | Local test files use AES-256 (32-byte UTF-8 key). Integration guide specifies AES-128 (16-byte Base64-URL decoded key from LocID Central). Confirm with DE which key size the production JAR expects. |
 | IPv6 matching SQL | Available — full 6-pass prefix range join logic is in `Coco/tmp/20260331/example_sql_for_snowflake_locid_matching.sql`. Confirm with Ryan this POC SQL represents the final approach before productionizing. |
 | HomeBiz_Type entitlement details | Pending product iteration (Ash/David) |
