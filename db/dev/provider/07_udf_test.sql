@@ -39,7 +39,7 @@ SET namespace_guid = 'ffffffff111122223333444444444444';
 -- ---------------------------------------------------------------------------
 -- PREREQUISITE: Verify JAR is on stage
 -- ---------------------------------------------------------------------------
--- Expected: one row for encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar
+-- Expected: one row for encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
 -- If this returns zero rows, run the PUT command in 05_stage_setup.sql first.
 LIST @LOCID_DEV.STAGING.LOCID_STAGE;
 
@@ -60,14 +60,14 @@ SET encrypted_locid_1 = (
 );
 SELECT $encrypted_locid_1 AS encrypted_locid_1;
 -- Input: 31F24ZE1W1YX58K2R1139
--- Output: BLFk1c06vOqIQExr6WKRLPK21c_V5WTssoCta0D7NTX6mk6HGoJZEZovi4B7wqovHQ==
+-- Output: VvOPJrPpJm6CwNEXCg_91DmS9ue7TUdPJQ0sbyFvfmlVTMPJliA63ZSnFlWZqhTWrQ==
 
 -- 1b. Decrypt
 SET decrypted_locid_1 = (
     SELECT LOCID_DEV.STAGING.LOCID_BASE_DECRYPT($encrypted_locid_1, $dev_key)
 );
 SELECT $decrypted_locid_1 AS decrypted_locid_1;
--- Input: BLFk1c06vOqIQExr6WKRLPK21c_V5WTssoCta0D7NTX6mk6HGoJZEZovi4B7wqovHQ==
+-- Input: VvOPJrPpJm6CwNEXCg_91DmS9ue7TUdPJQ0sbyFvfmlVTMPJliA63ZSnFlWZqhTWrQ==
 -- Output: 31F24ZE1W1YX58K2R1139
 
 -- 1c. Assert
@@ -95,14 +95,14 @@ SET encrypted_locid_2 = (
 );
 SELECT $encrypted_locid_2 AS encrypted_locid_2;
 -- Input: 4SV5XGYRWPT8AS6M04A8SMGVBZ
--- Output: a9JoEhI4b9dRjPuuYfHyv-sFoly060h945j40lP4qp4m1QLV-Wxw5EotrPJoxiN-VyYmD2ZL
+-- Output: 1YOzH76UctsEdsxwOM7l2BgThtqumS69TBfyhPFcW2lc4fACeLHzZ2r2GucaJhHVYbkfD9CP
 
 -- 2b. Capture current Unix timestamp (seconds)
 SET ts_now = (
     SELECT DATE_PART('epoch_second', CURRENT_TIMESTAMP::TIMESTAMP_NTZ)::BIGINT
 );
 SELECT $ts_now AS timestamp_sec;
--- 1776089593
+-- 1776320434
 
 -- 2c. Encrypt → TX_CLOC
 --     Using same key for base_locid_key and scheme_key (valid for dev testing)
@@ -117,15 +117,10 @@ SET tx_cloc = (
     )
 );
 SELECT $tx_cloc AS tx_cloc;
+-- YjRFjkdgbrRlZB0F3D5078a8dfjeVFCLa-a0ACVcW4hJn3GusjsfLmgISrfYNo2a2x0438-3GidvO4wh7t7UoOZ7srQ~.0
 
--- 20260413 Error:
--- Hi @David and @Ryan Bessey, I am getting error when testing Jar file inside Snowflake UDF.
--- Error:
---     - Class files were compiled with an unsupported version of the JDK. Use the '-target' or '-release' option when compiling your class files to target Java 11 in function LOCID_TXCLOC_ENCRYPT with handler Handler.encode
--- Can you please help with below?
---     - Recompile the fat JAR with -release 11 on the protobuf Java plugin (or the project-wide javac target) so TxClocProto and related classes are Java 11-compatible.
---     - The io.ol.locationid.proto classes in encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar are compiled with Java 17 (major version: 61).
---     - Snowflake's Scala 2.12 runtime targets Java 11 (major version: 55 max).
+-- ✓ RESOLVED (2026-04-15): Switched to LANGUAGE SCALA RUNTIME_VERSION = '2.13' with inline
+--   handlers. SnowflakeHandler wrapper from DE is no longer required.
 
 -- ===========================================================================
 -- TEST 3: LOCID_TXCLOC_DECRYPT — round-trip assertion
@@ -142,6 +137,7 @@ SET decoded_json = (
     SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_DECRYPT($tx_cloc, $dev_key)
 );
 SELECT $decoded_json AS decoded_json;
+-- {"location_id":"4SV5XGYRWPT8AS6M04A8SMGVBZ","timestamp":1776320434,"enc_client_id":1}
 
 -- 3b. Parse JSON and assert
 SELECT
@@ -153,7 +149,7 @@ SELECT
         PARSE_JSON($decoded_json):location_id::VARCHAR = $locid_2,
         'PASS', 'FAIL'
     ) AS test_txcloc_roundtrip;
-
+-- PASS
 
 -- ===========================================================================
 -- TEST 4: LOCID_STABLE_CLOC — produces UUID
@@ -176,7 +172,7 @@ SET stable_cloc = (
     )
 );
 SELECT $stable_cloc AS stable_cloc;
-
+-- T0-81751ea7-fe52-5663-b339-18f2ace84623
 
 -- ===========================================================================
 -- TEST 5: Summary — all tests in one row
@@ -205,3 +201,5 @@ SELECT
     -- Informational: captured values
     $tx_cloc     AS tx_cloc,
     $stable_cloc AS stable_cloc;
+-- tx_cloc: YjRFjkdgbrRlZB0F3D5078a8dfjeVFCLa-a0ACVcW4hJn3GusjsfLmgISrfYNo2a2x0438-3GidvO4wh7t7UoOZ7srQ~.0
+-- stable_cloc: T0-81751ea7-fe52-5663-b339-18f2ace84623

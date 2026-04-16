@@ -25,14 +25,14 @@ CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_STAGE
 --
 -- Option B — SnowSQL PUT (absolute path):
 --
---   PUT file:///absolute/path/to/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar
+--   PUT file:///absolute/path/to/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
 --       @LOCID_DEV.STAGING.LOCID_STAGE
 --       AUTO_COMPRESS = FALSE
 --       OVERWRITE     = TRUE;
 --
 -- Option C — SnowSQL PUT (from repo root):
 --
---   PUT file://Coco/tmp/encode-lib-2.1.4-feature-OLDE-262-SNAPSHOT-fat.jar
+--   PUT file://20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
 --       @LOCID_DEV.STAGING.LOCID_STAGE
 --       AUTO_COMPRESS = FALSE
 --       OVERWRITE     = TRUE;

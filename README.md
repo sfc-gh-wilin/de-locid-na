@@ -11,7 +11,7 @@ Customers who use LocID today call cloud or on-premise APIs to enrich their data
 
 1. Customer provides a table with `(unique_id, ip_address, timestamp)` rows.
 2. The app matches each IP + timestamp against Digital Envoy's weekly LocID data lake.
-3. For each matched row, the Java UDF generates encrypted identifiers (TX_CLOC, STABLE_CLOC) and optional geo context.
+3. For each matched row, the Scala UDF generates encrypted identifiers (TX_CLOC, STABLE_CLOC) and optional geo context.
 4. Results are written to a customer-specified output table — all within the customer's account.
 5. Usage statistics are reported back to LocID Central over HTTPS.
 
@@ -19,8 +19,8 @@ Two operations are supported:
 
 | Operation | Input | Output |
 |-----------|-------|--------|
-| **Encrypt** | `unique_id`, `ip_address`, `timestamp` | `TX_CLOC`, `STABLE_CLOC`, geo context, `HomeBiz_Type` |
-| **Decrypt** | `unique_id`, `tx_cloc` | `STABLE_CLOC`, geo context, `HomeBiz_Type` |
+| **Encrypt** | `unique_id`, `ip_address`, `timestamp` | `TX_CLOC`, `STABLE_CLOC`, geo context |
+| **Decrypt** | `unique_id`, `tx_cloc` | `STABLE_CLOC`, geo context |
 
 ---
 
@@ -30,12 +30,12 @@ Two operations are supported:
 |---|-----------|-------|
 | 1 | Native App package scaffolding | `manifest.yml`, `setup.sql`, directory structure |
 | 2 | External Access Integration (EAI) | Outbound HTTPS to `central.locid.com` |
-| 3 | Java UDF | Wrap `encode-lib` JAR; functions: encrypt, decrypt, stable CLOC |
+| 3 | Scala UDF | Wrap `encode-lib` JAR; functions: encrypt, decrypt, stable CLOC |
 | 4 | Config table design | Dynamic entitlements and output column registry |
 | 5 | LocID Central integration | Fetch license/secrets/entitlements, cache, report stats |
 | 6 | Encrypt stored procedure | IP matching (IPv4 + IPv6) + UDF call → output table |
 | 7 | Decrypt stored procedure | TX_CLOC decode → STABLE_CLOC + context → output table |
-| 8 | Streamlit onboarding wizard | 8-screen setup flow (see below) |
+| 8 | Streamlit onboarding wizard | 9-screen setup flow (see below) |
 | 9 | Streamlit main app views | Job submission, history, config |
 | 10 | Performance tuning | Clustering keys / search optimization on provider build tables |
 | 11 | Usage telemetry | POST stats to LocID Central after each job run |
@@ -52,13 +52,13 @@ Ordered phases from first artifact to production-ready app.
 | **1 — Foundation** | 1    | Provider DB DDL | `db/dev/provider/` |
 | | 2    | Native App package scaffold | `na_app_pkg/` skeleton |
 | | 3    | External Access Integration (EAI) | Network rule + EAI for `central.locid.com` |
-| **2 — Core Engine** | 4    | Java UDF | JAR registered, encrypt/decrypt/stable functions |
+| **2 — Core Engine** | 4    | Scala UDF | JAR registered, encrypt/decrypt/stable functions |
 | | 5    | APP_CONFIG table + entitlement logic | Dynamic output column registry |
 | | 6    | LocID Central integration | Fetch/cache secrets, report stats |
 | | 7    | Usage telemetry | POST stats to LocID Central post-job |
 | **3 — Processing** | 8    | Encrypt stored procedure | IPv4 + IPv6 matching + UDF → output table |
 | | 9    | Decrypt stored procedure | TX_CLOC decode → STABLE_CLOC + context |
-| **4 — UI** | 10   | Streamlit onboarding wizard | 8-screen setup flow |
+| **4 — UI** | 10   | Streamlit onboarding wizard | 9-screen setup flow |
 | | 11   | Streamlit main views | Home, Run, History, Config |
 | **5 — Polish** | 12   | Performance tuning | Clustering keys, SOS evaluation |
 | | 13   | End-to-end testing | Encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates |
@@ -81,7 +81,7 @@ locid-native-app/
 │   │   ├── encrypt.sql           # Encrypt stored procedure
 │   │   └── decrypt.sql           # Decrypt stored procedure
 │   ├── udfs/
-│   │   └── locid_udf.sql         # Java UDF definitions wrapping the JAR
+│   │   └── locid_udf.sql         # Scala UDF definitions wrapping the JAR
 │   └── lib/
 │       └── encode-lib-*.jar      # Bundled Java 17 fat JAR (stage artifact)
 └── streamlit/
@@ -116,17 +116,17 @@ APP_SCHEMA.APP_CONFIG          -- License key, cached secrets, entitlements, out
 APP_SCHEMA.JOB_LOG             -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
 APP_SCHEMA.LOCID_ENCRYPT(...)  -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)  -- Decrypt stored procedure
-APP_SCHEMA.LOCID_UDF(...)      -- Java UDF (encrypt/decrypt via JAR)
+APP_SCHEMA.LOCID_UDF(...)      -- Scala UDF (encrypt/decrypt via JAR)
 APP_SCHEMA.HTTP_PING()         -- Python UDF to test EAI connectivity during setup
 ```
 
 ---
 
-## Java UDF Design
+## Scala UDF Design
 
-The `encode-lib` JAR is bundled in the app stage and registered as a `LANGUAGE JAVA RUNTIME_VERSION = '17'` UDF. Snowflake supports Java 11 and Java 17 runtimes; Java 17 is the target here because the JAR's protobuf-generated classes (`io.ol.locationid.proto.*`) compile to class file major version 61 (Java 17). DE is providing a pure Java 17 fat JAR with a public `SnowflakeHandler` wrapper class exposing one static method per UDF operation.
+The `encode-lib` JAR (Scala 2.13 / Java 17) is bundled in the app stage and registered as `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` UDFs with inline Scala handlers — no external wrapper class required. Each UDF embeds its handler class in the `AS $$...$$` block, calling into the JAR's public API directly.
 
-> **Handler class ask to DE**: please include `io.ol.locationid.SnowflakeHandler` in the JAR with public static methods matching the signatures documented in `src/udfs/locid_udf.sql`. Confirm the exact class and method names before the UDF definitions are run.
+> **Status (2026-04-15):** Inline Scala approach validated in dev environment (`LOCID_DEV.STAGING`). SnowflakeHandler wrapper is no longer required. Working handler implementations: `db/dev/provider/06_udfs.sql`. Native app UDF file: `na_app_pkg/src/udfs/locid_udf.sql`.
 
 Key functions:
 
@@ -153,35 +153,50 @@ TxCloc(
 
 ### Key Material Note
 
-Local tests (`EncryptionTest.scala`, `EncryptionTestWithTS.scala`) derive the AES key by taking the **license key string's raw UTF-8 bytes padded to 32 bytes (AES-256)**. This is a test shortcut only.
+In production, the key material comes from LocID Central:
+- `base_locid_secret` → `secret.replaceAll("~","=")` → `Base64.getUrlDecoder().decode()` → `SecretKeySpec` for `BaseLocIdEncryption`
+- `scheme_secret` → same decode → `SecretKeySpec` for `EncScheme0`
 
-In production, the key material must come from LocID Central:
-- `base_locid_secret` → Base64-URL decode → `SecretKeySpec` for `BaseLocIdEncryption`
-- `scheme_secret` → Base64-URL decode → `SecretKeySpec` for `EncScheme0`
-
-The integration guide specifies these decode to **16 bytes (AES-128)**. The test files use 32 bytes. **Clarify with DE which key size the production JAR expects** before finalizing the UDF implementation.
+Confirmed per `developer-integration-guide.md` (2026-04-15). All UDF `toKey()` handlers in `06_udfs.sql` and `locid_udf.sql` use this production derivation.
 
 ---
 
 ## LocID Central Integration
 
-```
-GET  https://central.locid.com/api/0/location_id/license/{license_id}
-  → license metadata, access[] (entitlements), secrets (AES-128 keys)
+**License endpoint:**
 
+```
+GET  https://central.locid.com/api/0/location_id/license/{license_key}
+→  {
+     "license":  { "client_id", "client_name", "license_key", "expiration_date", "scheme_version" },
+     "access":   [
+       { "api_key", "api_key_id", "client_id", "provider_id", "status",
+         "namespace_guid", "allow_encrypt", "allow_decrypt", "allow_tx",
+         "allow_stable", "allow_geo_context" },
+       …
+     ],
+     "secrets":  { "base_locid_secret", "scheme_secret", "scheme_version" }
+   }
+```
+
+**Key data model points:**
+- `access[]` is an array — one entry per API key. Each carries its own `namespace_guid`, `provider_id`, and per-key entitlements. Only entries with `"status": "ACTIVE"` are valid for job execution.
+- `secrets` are license-level — `base_locid_secret` and `scheme_secret` are shared across all API keys under the same license. These are Base64-URL encoded (with `~` as alternate padding).
+- The customer selects which API key to use during onboarding. The selected `api_key_id`, `namespace_guid`, and `provider_id` are stored in `APP_CONFIG` and used for all STABLE_CLOC calculations and stats reporting.
+
+**Usage stats endpoint:**
+
+```
 POST https://central.locid.com/api/0/location_id/stats
-  Header: de-access-token: <api_key>
+  Header: de-access-token: <selected_api_key>
   Body:   [{ identifier, source, timestamp, data_type, data: { metric_key, dimensions, metric_value } }]
 ```
 
-**Caching strategy** (implemented inside the stored procedure / Streamlit session):
-- Fetch on first job run of the session.
-- Refresh every 60 minutes in background.
-- Cache expiry: 1 week.
-- If initial fetch fails → abort job (secrets are required).
-- If refresh fails → use cached values, log warning.
-
-The license key is stored as a Snowflake `SECRET` (via the EAI), referenced by the app — never exposed in query results or UI.
+**Caching and refresh strategy:**
+- On app launch: check `license_last_verified_at` in `APP_CONFIG`. If older than 24 hours (or not set), re-fetch from LocID Central and update `APP_CONFIG`.
+- On job run: use cached values. If cache is missing → abort (secrets required).
+- If refresh fails: use cached values, log warning.
+- The license key is stored as a Snowflake `SECRET`, referenced by the EAI — never exposed in query results or UI.
 
 ---
 
@@ -197,7 +212,8 @@ Multi-screen Streamlit wizard, runs once post-install.
                         → [Review & Request Privileges]
                             → [Create Shared App Objects]
                                 → [Test EAI Connectivity]
-                                    → [Setup Complete]
+                                    → [Select API Key]
+                                        → [Setup Complete]
 ```
 
 ### Screen Details
@@ -211,7 +227,8 @@ Multi-screen Streamlit wizard, runs once post-install.
 | **E. Review Privileges** | Grant check | Check EAI, DB/schema grants; show SQL for ACCOUNTADMIN |
 | **F. Create App Objects** | Bootstrap | Create APP_SHARED schema, APP_CONFIG, JOB_LOG, HTTP_PING UDF |
 | **G. Test Connectivity** | Validate EAI | Call LocID Central license endpoint; show status + latency |
-| **H. Success** | Done | Summary checklist, link to docs, "Launch App" |
+| **H. Select API Key** | API key picker | List ACTIVE keys from `access[]` with masked api_key, api_key_id, provider_id, namespace_guid; user selects which to use; stored in APP_CONFIG |
+| **I. Success** | Done | Summary checklist, link to docs, "Launch App" |
 
 ---
 
@@ -227,6 +244,8 @@ Customer Input Table
   LOCID_ENCRYPT stored procedure
          │
          ├─ 1. Fetch secrets + entitlements from LocID Central (cached)
+         │       Resolve selected API key from APP_CONFIG:
+         │       namespace_guid, provider_id, client_id → used for STABLE_CLOC
          │
          ├─ 2. IP Matching (see matching strategy below)
          │       → returns: unique_id, ip_address, timestamp,
@@ -254,10 +273,12 @@ Customer Input Table
   LOCID_DECRYPT stored procedure
          │
          ├─ 1. Fetch secrets + entitlements from LocID Central (cached)
+         │       Resolve selected API key from APP_CONFIG:
+         │       namespace_guid, provider_id, client_id → used for STABLE_CLOC
          │
          ├─ 2. Call LOCID_UDF per row
          │       tx_cloc → decrypt → base LocID + embedded geo_context
-         │       → STABLE_CLOC, geo fields, HomeBiz_Type
+          │       → STABLE_CLOC, geo fields
          │
          ├─ 3. Apply entitlement filter on output columns
          │
@@ -299,8 +320,8 @@ Entitlements are fetched from LocID Central per license key and cached in `APP_C
 | `allow_decrypt` | Permission to run Decrypt jobs |
 | `allow_tx` | TX_CLOC included in output |
 | `allow_stable` | STABLE_CLOC included in output |
-| `allow_geocontext` | Geo context fields included in output |
-| *(future)* `allow_homebiz` | HomeBiz_Type included in output |
+| `allow_geo_context` | Geo context fields included in output |
+| *(future — de-scoped from v1)* `allow_homebiz` | HomeBiz_Type included in output |
 
 Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so new entitlements/fields can be added by DE without app code changes — only a config table update and a new app version release if schema changes.
 
@@ -308,15 +329,25 @@ Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so n
 
 ```sql
 APP_CONFIG (
-    config_key        VARCHAR,   -- e.g. 'license_key', 'api_key', 'scheme_version'
+    config_key        VARCHAR,   -- see key rows below
     config_value      VARCHAR,   -- encrypted or plaintext depending on sensitivity
     last_refreshed_at TIMESTAMP,
     is_active         BOOLEAN
 )
 
+-- System config rows (populated at onboarding and refreshed daily):
+--   'license_key'              → masked reference (actual secret stored as Snowflake SECRET)
+--   'api_key'                  → selected API key (masked in UI)
+--   'api_key_id'               → integer ID of selected API key  (access[].api_key_id)
+--   'namespace_guid'           → namespace GUID of selected key  (access[].namespace_guid)
+--   'provider_id'              → provider ID of selected key     (access[].provider_id)
+--   'client_id'                → customer client ID              (license.client_id)
+--   'scheme_version'           → crypto scheme version           (secrets.scheme_version)
+--   'license_last_verified_at' → ISO timestamp of last successful LocID Central fetch
+
 -- Entitlement/output column registry rows:
 -- config_key = 'output_col.<name>'
--- config_value = JSON: { "operation": "encrypt|decrypt|both", "requires_entitlement": "allow_geocontext" }
+-- config_value = JSON: { "operation": "encrypt|decrypt|both", "requires_entitlement": "allow_geo_context" }
 ```
 
 This allows the stored procedure to dynamically build the SELECT list and gate columns by entitlement without changing code.
@@ -360,7 +391,7 @@ The app has six views accessible from a left-side navigation bar. All views run 
 
 **Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in ~5 minutes.
 
-See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow (Welcome → License Key → Privileges → App Objects → EAI Test → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
+See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 9-screen flow (Welcome → License Key → Privileges → App Objects → EAI Test → Select API Key → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
 
 ---
 
@@ -403,11 +434,11 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
   |--------|---------------------|---------|
   | TX_CLOC | `allow_tx` | ✓ |
   | STABLE_CLOC | `allow_stable` | ✓ |
-  | Country / Country Code | `allow_geocontext` | ✓ |
-  | Region / Region Code | `allow_geocontext` | ✓ |
-  | City / City Code | `allow_geocontext` | ✓ |
-  | Postal Code | `allow_geocontext` | ✓ |
-  | HomeBiz_Type | *(future entitlement)* | — |
+  | Country / Country Code | `allow_geo_context` | ✓ |
+  | Region / Region Code | `allow_geo_context` | ✓ |
+  | City / City Code | `allow_geo_context` | ✓ |
+  | Postal Code | `allow_geo_context` | ✓ |
+  | HomeBiz_Type | *(future — de-scoped from v1)* | — |
 
 - Columns the customer is not entitled to are shown greyed out with a tooltip explaining why
 
@@ -451,11 +482,11 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
   | Column | Entitlement Required | Default |
   |--------|---------------------|---------|
   | STABLE_CLOC | `allow_stable` | ✓ |
-  | Country / Country Code | `allow_geocontext` | ✓ |
-  | Region / Region Code | `allow_geocontext` | ✓ |
-  | City / City Code | `allow_geocontext` | ✓ |
-  | Postal Code | `allow_geocontext` | ✓ |
-  | HomeBiz_Type | *(future entitlement)* | — |
+  | Country / Country Code | `allow_geo_context` | ✓ |
+  | Region / Region Code | `allow_geo_context` | ✓ |
+  | City / City Code | `allow_geo_context` | ✓ |
+  | Postal Code | `allow_geo_context` | ✓ |
+  | HomeBiz_Type | *(future — de-scoped from v1)* | — |
 
 **Step 5 — Review & Run**
 - Same summary + warehouse selector + Run Job button as Encrypt
@@ -506,8 +537,20 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 **License & Credentials**
 - License key: shown masked (`1569-****-****-****`), with "Update" button that re-triggers the Enter Key screen
 - Client name and expiration date (read-only, from LocID Central)
-- API key: shown masked, used for stats reporting only
-- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; shows last refreshed timestamp
+- Last verified: timestamp of last successful LocID Central fetch (`license_last_verified_at`)
+- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; daily auto-refresh also runs at app launch
+
+**API Key Selection**
+- Table of all `access[]` entries from the last LocID Central fetch, with columns: API Key (masked), API Key ID, Provider ID, Namespace GUID, Status, and a "Use this key" radio selector:
+
+  | API Key | Key ID | Provider ID | Namespace GUID | Status | Use |
+  |---------|--------|-------------|----------------|--------|-----|
+  | `2c7c****` | 4 | 2844 | `fb71a5a0-…` | ACTIVE | ◉ |
+  | `dbf4****` | 3 | 2844 | `044a471b-…` | INACTIVE | — |
+  | … | … | … | … | … | — |
+
+- Only ACTIVE entries are selectable. Changing the selected API key updates `APP_CONFIG` (`api_key`, `api_key_id`, `namespace_guid`, `provider_id`) and takes effect on the next job run.
+- **Note:** each API key has its own `namespace_guid` — switching keys changes the STABLE_CLOC output for new jobs.
 
 **Current Entitlements**
 - Read-only badge list reflecting the live `access[]` record from LocID Central:
@@ -515,7 +558,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
   ```
   ✓ allow_encrypt    ✓ allow_decrypt
   ✓ allow_tx         ✓ allow_stable
-  ✓ allow_geocontext ✗ allow_homebiz (not provisioned)
+  ✓ allow_geo_context ✗ allow_homebiz (not provisioned)
   ```
 
 **Output Column Registry**
@@ -525,7 +568,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
   |------------|-----------|---------------------|--------|
   | TX_CLOC | Encrypt | allow_tx | ✓ |
   | STABLE_CLOC | Both | allow_stable | ✓ |
-  | locid_country | Both | allow_geocontext | ✓ |
+  | locid_country | Both | allow_geo_context | ✓ |
   | … | … | … | … |
 
 - Read-only for customers; updated by DE via app version releases when new fields are added
@@ -589,11 +632,16 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 
 | Item | Status |
 |------|--------|
-| encode-lib JAR — switching to Java 17 UDF | Root cause confirmed: `io.ol.locationid.proto.*` classes compiled at Java 17 (class file major version 61); Snowflake Scala 2.12 runtime caps at Java 11 (version 55). **Resolution path agreed with DE**: DE to provide a pure Java 17 fat JAR. All UDF definitions updated to `LANGUAGE JAVA RUNTIME_VERSION = '17'`. DE to include a public Java handler class (suggested: `io.ol.locationid.SnowflakeHandler`) with one static method per UDF — method signatures documented in `src/udfs/locid_udf.sql`. Pending: DE delivers new JAR and confirms handler class name. |
-| AES key size (test vs. production) | Local test files use AES-256 (32-byte UTF-8 key). Integration guide specifies AES-128 (16-byte Base64-URL decoded key from LocID Central). Confirm with DE which key size the production JAR expects. |
+| encode-lib JAR — switching to Scala UDF | ✓ Resolved 2026-04-15. JAR delivered: `encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar` (Scala 2.13 / Java 17). Approach changed from `LANGUAGE JAVA` + SnowflakeHandler wrapper to `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with inline handlers. Dev UDFs (`db/dev/provider/06_udfs.sql`) and native app UDFs (`na_app_pkg/src/udfs/locid_udf.sql`) both updated. |
+| AES key derivation (test vs. production) | ✓ Resolved 2026-04-15/16. Production derivation confirmed: `secret.replaceAll("~","=")` → `Base64.getUrlDecoder().decode()` → AES key bytes. All `toKey()` handlers in `06_udfs.sql` and `locid_udf.sql` updated to production mode. Cross-compatibility test: `08_cross_compat_test.sql`. |
 | IPv6 matching SQL | Available — full 6-pass prefix range join logic is in `Coco/tmp/20260331/example_sql_for_snowflake_locid_matching.sql`. Confirm with Ryan this POC SQL represents the final approach before productionizing. |
-| HomeBiz_Type entitlement details | Pending product iteration (Ash/David) |
+| HomeBiz_Type entitlement details | De-scoped from v1 (2026-04-16). No solid spec yet. Retained as a future entitlement flag (`allow_homebiz`); will be scoped and implemented in a subsequent version. |
 | Additional FC50 columns / new entitlements | Pending DE R&D spike outcome |
 | Telemetry payload examples from existing real-time services | David to provide |
 | Reference Docker container for encrypt/decrypt validation | David to investigate |
 | V6 data confirmation in sandbox account | David to chase down |
+| Multiple API keys per license key | ✓ Spec'd (2026-04-16). `access[]` array confirmed via live API: each entry has its own `api_key`, `api_key_id`, `namespace_guid`, `provider_id`, `status`, and per-key entitlements. `secrets` are license-level (shared). Architecture updated: APP_CONFIG now stores selected key fields; onboarding wizard (Screen H) presents ACTIVE API keys for selection; View 6 Configuration provides a key-switcher table. |
+| Consumer/provider deployment role | ACCOUNTADMIN is correct for both provider-side publish and consumer-side install (standard practice per Snowflake Native App Framework). Provider side requires `CREATE APPLICATION PACKAGE`, `CREATE SHARE`, `MANAGE LISTING` — all need ACCOUNTADMIN or an equivalent role. Consumer side: `CREATE APPLICATION` privilege can technically be granted to a custom role, but ACCOUNTADMIN is the standard path for marketplace installs. Investigation into a narrower custom role is low priority — ACCOUNTADMIN is acceptable. |
+| UAT test account strategy | Separate Snowflake accounts required for UAT to surface multi-account permission issues. Coordinate with Alyssa for throwaway account creation and Snowflake credits. William's sandbox available as fallback. |
+| Key status / expiry handling | License keys in LocID Central have status and expiry date fields. Implement configurable handling — surface warnings when key is nearing expiry or inactive; optionally gate job execution if key is expired. |
+| Step-by-step deployment guides | Provide guides for deploying the native app to multiple environments (dev, UAT, prod), including config changes required per environment. |
