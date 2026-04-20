@@ -16,9 +16,16 @@
 --   account. Both roles are created here in a single script.
 --   In production, run the LOCID_APP_ADMIN block on the provider account and
 --   the LOCID_APP_INSTALLER block on the consumer account.
---
--- Replace <YOUR_WAREHOUSE> with your actual warehouse name before running.
 -- =============================================================================
+
+
+-- =============================================================================
+-- CONFIGURATION — set these values before running
+-- =============================================================================
+SET my_warehouse = 'DEV_WH';         -- warehouse name for both roles
+SET my_username  = 'YOUR_USERNAME';  -- Snowflake username to receive both roles
+-- =============================================================================
+
 
 USE ROLE ACCOUNTADMIN;
 
@@ -46,12 +53,10 @@ GRANT CREATE SHARE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 GRANT MANAGE LISTING ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 
 -- Warehouse access for builds and testing
--- Replace <YOUR_WAREHOUSE> with the actual warehouse name
-GRANT USAGE ON WAREHOUSE <YOUR_WAREHOUSE> TO ROLE LOCID_APP_ADMIN;
+EXECUTE IMMEDIATE 'GRANT USAGE ON WAREHOUSE ' || $my_warehouse || ' TO ROLE LOCID_APP_ADMIN';
 
--- Assign to the user(s) who manage the app package
--- Replace <username> with the actual Snowflake user
-GRANT ROLE LOCID_APP_ADMIN TO USER <username>;
+-- Assign to the user who manages the app package
+EXECUTE IMMEDIATE 'GRANT ROLE LOCID_APP_ADMIN TO USER ' || $my_username;
 
 
 -- =============================================================================
@@ -71,15 +76,13 @@ GRANT CREATE APPLICATION ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
 GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
 
 -- Warehouse access for running Encrypt / Decrypt jobs
--- Replace <YOUR_WAREHOUSE> with the actual warehouse name
-GRANT USAGE ON WAREHOUSE <YOUR_WAREHOUSE> TO ROLE LOCID_APP_INSTALLER;
+EXECUTE IMMEDIATE 'GRANT USAGE ON WAREHOUSE ' || $my_warehouse || ' TO ROLE LOCID_APP_INSTALLER';
 
--- Assign to the user(s) who install and manage the app
--- Replace <username> with the actual Snowflake user
-GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
+-- Assign to the user who installs and manages the app
+EXECUTE IMMEDIATE 'GRANT ROLE LOCID_APP_INSTALLER TO USER ' || $my_username;
 
 -- Optional: integrate into the standard role hierarchy
--- GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
+-- EXECUTE IMMEDIATE 'GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN';
 
 
 -- =============================================================================

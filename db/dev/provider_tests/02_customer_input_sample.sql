@@ -16,6 +16,13 @@
 --   INSERT/SELECT on NA_TEST_OUTPUT (the app creates the output table itself).
 -- =============================================================================
 
+-- =============================================================================
+-- CONFIGURATION — set these values before running Step 5
+-- =============================================================================
+SET app_name     = 'LOCID_DEV_APP';  -- installed application name
+SET my_warehouse = 'DEV_WH';         -- warehouse for the app
+-- =============================================================================
+
 USE DATABASE LOCID_DEV;
 
 
@@ -60,21 +67,20 @@ SELECT * FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT LIMIT 5;
 
 -- ---------------------------------------------------------------------------
 -- STEP 5: Grant the Native App access
---         Replace <app_name> with the actual installed application name
---         (e.g. LOCID_DEV_APP).  Run after the app is installed in Step 3
---         of the test guide.
+--         Set $app_name and $my_warehouse in the CONFIGURATION block above,
+--         then uncomment and run after the app is installed (Phase 3 of the
+--         test guide).
 -- ---------------------------------------------------------------------------
 
 -- Allow the app to read the input table
--- GRANT SELECT ON TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
---     TO APPLICATION <app_name>;
+-- EXECUTE IMMEDIATE 'GRANT SELECT ON TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT TO APPLICATION ' || $app_name;
 
 -- Allow the app to create/write the output table in this schema
--- GRANT USAGE  ON SCHEMA   LOCID_DEV.CONSUMER_TEST TO APPLICATION <app_name>;
--- GRANT CREATE TABLE ON SCHEMA LOCID_DEV.CONSUMER_TEST TO APPLICATION <app_name>;
+-- EXECUTE IMMEDIATE 'GRANT USAGE ON SCHEMA LOCID_DEV.CONSUMER_TEST TO APPLICATION ' || $app_name;
+-- EXECUTE IMMEDIATE 'GRANT CREATE TABLE ON SCHEMA LOCID_DEV.CONSUMER_TEST TO APPLICATION ' || $app_name;
 
 -- Allow the app to use the test warehouse
--- GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION <app_name>;
+-- EXECUTE IMMEDIATE 'GRANT USAGE ON WAREHOUSE ' || $my_warehouse || ' TO APPLICATION ' || $app_name;
 
 
 -- ---------------------------------------------------------------------------
