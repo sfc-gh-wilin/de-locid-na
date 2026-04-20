@@ -76,13 +76,13 @@ INSERT INTO APP_SCHEMA.APP_CONFIG (config_key, config_value, is_active)
 SELECT col, val, TRUE FROM (VALUES
     ('output_col.tx_cloc',             '{"operation":"encrypt","requires_entitlement":"allow_tx"}'),
     ('output_col.stable_cloc',         '{"operation":"both","requires_entitlement":"allow_stable"}'),
-    ('output_col.locid_country',       '{"operation":"both","requires_entitlement":"allow_geocontext"}'),
-    ('output_col.locid_country_code',  '{"operation":"both","requires_entitlement":"allow_geocontext"}'),
-    ('output_col.locid_region',        '{"operation":"both","requires_entitlement":"allow_geocontext"}'),
-    ('output_col.locid_region_code',   '{"operation":"both","requires_entitlement":"allow_geocontext"}'),
-    ('output_col.locid_city',          '{"operation":"both","requires_entitlement":"allow_geocontext"}'),
-    ('output_col.locid_city_code',     '{"operation":"both","requires_entitlement":"allow_geocontext"}'),
-    ('output_col.locid_postal_code',   '{"operation":"both","requires_entitlement":"allow_geocontext"}')
+    ('output_col.locid_country',       '{"operation":"both","requires_entitlement":"allow_geo_context"}'),
+    ('output_col.locid_country_code',  '{"operation":"both","requires_entitlement":"allow_geo_context"}'),
+    ('output_col.locid_region',        '{"operation":"both","requires_entitlement":"allow_geo_context"}'),
+    ('output_col.locid_region_code',   '{"operation":"both","requires_entitlement":"allow_geo_context"}'),
+    ('output_col.locid_city',          '{"operation":"both","requires_entitlement":"allow_geo_context"}'),
+    ('output_col.locid_city_code',     '{"operation":"both","requires_entitlement":"allow_geo_context"}'),
+    ('output_col.locid_postal_code',   '{"operation":"both","requires_entitlement":"allow_geo_context"}')
 ) AS t(col, val)
 WHERE NOT EXISTS (
     SELECT 1 FROM APP_SCHEMA.APP_CONFIG WHERE config_key = t.col
@@ -161,24 +161,21 @@ GRANT USAGE ON FUNCTION APP_SCHEMA.HTTP_PING()
 -- =============================================================================
 -- 8. Scala UDFs  (encode-lib JAR)
 --
--- ⚠ BLOCKED: encode-lib JAR must be recompiled with -release 11 (Java 11)
---   before these UDFs can be deployed. The io.ol.locationid.proto classes
---   are currently compiled with Java 17 which Snowflake's Scala 2.12
---   runtime (Java 11 max) cannot load. DE has been notified.
+-- JAR: encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
+--      (Scala 2.13 / Java 17 — validated 2026-04-15)
 --
--- Once a Java 11-compatible JAR is confirmed:
---   1. Upload JAR to @APP_SCHEMA.APP_STAGE/lib/
---   2. Uncomment the EXECUTE IMMEDIATE line below
+-- Upload JAR to @APP_SCHEMA.APP_STAGE/lib/ before installing this version.
+-- UDFs defined: LOCID_BASE_ENCRYPT, LOCID_BASE_DECRYPT, LOCID_TXCLOC_ENCRYPT,
+--               LOCID_TXCLOC_DECRYPT, LOCID_STABLE_CLOC, LOCID_STABLE_CLOC_FROM_PLAIN
 -- =============================================================================
--- EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/udfs/locid_udf.sql';
+EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/udfs/locid_udf.sql';
 
 
 -- =============================================================================
 -- 9. Stored Procedures
---    Uncomment after UDFs are deployed and LocID Central integration is complete.
 -- =============================================================================
--- EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/procs/encrypt.sql';
--- EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/procs/decrypt.sql';
+EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/procs/encrypt.sql';
+EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/procs/decrypt.sql';
 
 
 -- =============================================================================

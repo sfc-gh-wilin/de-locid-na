@@ -38,6 +38,8 @@ The app is distributed via the Snowflake Native App Framework. Digital Envoy pub
 
 **All customer data stays in the customer's Snowflake account.** Digital Envoy's LocID data lake is shared as read-only — no customer rows are written to Digital Envoy's account.
 
+> **Data visibility:** The shared LocID tables (`LOCID_BUILDS`, `LOCID_BUILDS_IPV4_EXPLODED`, `LOCID_BUILD_DATES`) are **not directly queryable by consumers**. The Snowflake Native App Framework enforces this boundary at the platform level — only the app's own stored procedures and UDFs, executing within the app container, can read those tables. Consumer account users and roles have no visibility into DE's underlying data.
+
 ---
 
 ## What Digital Envoy Provides
@@ -104,7 +106,7 @@ customer_input.ip_address = locid_builds_ipv4_exploded.ip_address
 joined back to locid_builds on (build_dt, start_ip, end_ip)
 ```
 
-**IPv6** — Cascading 6-pass hex-prefix range join:
+**IPv6** — Reference implementation: cascading 6-pass hex-prefix range join:
 ```
 Pass 1: hex prefix[0:12] match + range join
 Pass 2: prefix[0:10], excluding Pass 1 hits
@@ -112,6 +114,8 @@ Pass 2: prefix[0:10], excluding Pass 1 hits
 Pass 6: full range join on remaining rows
 UNION ALL all results
 ```
+
+> **Implementation note:** The 6-pass cascading approach above is the reference implementation DE provided as one efficient strategy for IPv6 range joins in Snowflake. It is not prescribed — alternative strategies (e.g. a single full range join, a different prefix-length sequence, or Snowflake's native `ASOF JOIN`) are valid approaches. The right choice depends on data distribution and performance testing; DE is open to alternatives.
 
 Both strategies filter to relevant build dates covering the input timestamp.
 
@@ -323,6 +327,18 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 - Dropdowns are pre-filled with best-guess matches (e.g. a column named `ip` auto-selects for IP Address)
 - Timestamp format selector: epoch seconds, epoch milliseconds, or TIMESTAMP string
 
+**Input Validation (on column selection)**
+
+Validation runs automatically after columns are mapped and is **advisory** — warnings are shown but the job can still proceed:
+
+| Check | How | Behavior |
+|-------|-----|----------|
+| **IP format** | Sample 100 rows from the IP column; test each against IPv4 (`x.x.x.x`) and IPv6 (`hex-colon`) patterns | Badge shows `IPv4 / IPv6 / Mixed`; error count shown if unparseable values found |
+| **Timestamp range** | Check min/max of the timestamp column | Warning if any timestamps are older than 52 weeks — those rows will not match any LocID build and will be returned as unmatched |
+| **Null / empty values** | Count NULL or empty values in IP and timestamp columns | Shown as informational — nulls are skipped during matching |
+
+> **Note from DE (2026-04-20):** These validation checks are in scope for v1. Timestamp age limit of 52 weeks aligns with DE's build retention window.
+
 **Step 3 — Configure Output**
 - Radio: *Create new table* or *Overwrite existing table*
 - Text input: output table name (e.g. `MY_DB.MY_SCHEMA.LOCID_RESULTS`)
@@ -457,6 +473,72 @@ Read-only for customers. Updated by DE via app version releases when new fields 
 - License key stored as a Snowflake `SECRET`, referenced by the External Access Integration — not visible in query results or logs.
 - Cryptographic keys (AES) fetched at runtime from LocID Central, passed as UDF parameters, never persisted in tables.
 - Masking policy on `APP_CONFIG` for sensitive configuration rows.
+
+---
+
+## Role Setup for App Package & App Deployment
+
+Using `ACCOUNTADMIN` for day-to-day deployment is a common concern in enterprise environments. The custom roles below minimize privilege scope while covering everything needed to build, publish, and install the LocID Native App.
+
+### Provider Account — `LOCID_APP_ADMIN`
+
+Used by Digital Envoy's engineering or ops team to manage the Application Package, stage contents, and Marketplace listing.
+
+```sql
+-- Run as ACCOUNTADMIN (one-time setup)
+USE ROLE ACCOUNTADMIN;
+
+CREATE ROLE IF NOT EXISTS LOCID_APP_ADMIN;
+
+-- Manage the Application Package and its versions/patches
+GRANT CREATE APPLICATION PACKAGE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Create and manage the provider-side database (LOCID_BUILDS, staging objects)
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Create the data share that backs the app's shared read-only objects
+GRANT CREATE SHARE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Publish and manage the Snowflake Marketplace listing
+GRANT MANAGE LISTING ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Warehouse for builds and testing
+GRANT USAGE ON WAREHOUSE <provider_warehouse> TO ROLE LOCID_APP_ADMIN;
+
+-- Assign to user(s) who manage the app
+GRANT ROLE LOCID_APP_ADMIN TO USER <username>;
+```
+
+Once `LOCID_APP_ADMIN` owns the Application Package, all routine operations — adding versions, applying patches, updating release directives — are performed under this role. No further `ACCOUNTADMIN` involvement is needed for day-to-day work.
+
+### Consumer Account — `LOCID_APP_INSTALLER`
+
+Used by the customer's admin team to install, configure, and manage the LocID Native App instance.
+
+```sql
+-- Run as ACCOUNTADMIN (one-time setup)
+USE ROLE ACCOUNTADMIN;
+
+CREATE ROLE IF NOT EXISTS LOCID_APP_INSTALLER;
+
+-- Install Native Apps from the Snowflake Marketplace
+GRANT CREATE APPLICATION ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
+-- Create the output database/schema for job results (if using a new database)
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
+-- Warehouse access for running Encrypt / Decrypt jobs
+GRANT USAGE ON WAREHOUSE <customer_warehouse> TO ROLE LOCID_APP_INSTALLER;
+
+-- Assign to user(s) who install and manage the app
+GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
+```
+
+After installation, the app's `setup.sql` creates all internal objects (schemas, tables, UDFs, stored procedures) within the app container — no additional consumer-side grants are required for those.
+
+### Notes
+
+- The one-time `GRANT ... TO ROLE` steps must be executed by `ACCOUNTADMIN`. This is unavoidable, but it is a **one-time setup only** — all routine operations use the custom role thereafter.
+- The app's onboarding wizard (Screen E — Review Privileges) checks required grants and surfaces the remediation SQL to the installer if any are missing.
+- If the customer's environment uses a standard role hierarchy (e.g. `SYSADMIN` → custom roles), grant `LOCID_APP_INSTALLER` to `SYSADMIN` for hierarchy compliance:
+  ```sql
+  GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
+  ```
+- For Marketplace installs, `CREATE APPLICATION` on a custom role is the supported least-privilege path. `ACCOUNTADMIN` is not required for the install itself once the grant is in place.
 
 ---
 

@@ -257,6 +257,51 @@ $$;
 
 
 -- =============================================================================
+-- 6. LOCID_STABLE_CLOC_FROM_PLAIN  (decrypt path)
+--    Generates a STABLE_CLOC from a plaintext base LocID string.
+--    Used in the Decrypt stored procedure, where LOCID_TXCLOC_DECRYPT returns
+--    the raw location_id directly — no base-encryption round-trip needed.
+--
+--    For the encrypt path, use LOCID_STABLE_CLOC (takes encrypted_locid).
+--
+--    STABLE_CLOC semantics (from developer-integration-guide.md):
+--      - encClientId: client that created the original TX_CLOC
+--      - decClientId: client decrypting it (same as encClientId on the encrypt path)
+--      - tier: "T0" (rooftop) or "T1" (low accuracy) — prepended to the UUID
+--
+--    NOTE: Tier is not embedded in TX_CLOC. The decrypt stored procedure
+--    defaults to 'T0'. A future version may allow the caller to supply tier.
+--
+--    Input:  base_loc_id    — plaintext base LocID from LOCID_TXCLOC_DECRYPT result
+--            namespace_guid — customer namespace GUID (from APP_CONFIG)
+--            dec_client_id  — decrypting client ID  (license.client_id)
+--            enc_client_id  — encrypting client ID  (from TX_CLOC decode)
+--            tier           — "T0" or "T1"
+-- =============================================================================
+CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN(
+    BASE_LOC_ID    VARCHAR,
+    NAMESPACE_GUID VARCHAR,
+    DEC_CLIENT_ID  INT,
+    ENC_CLIENT_ID  INT,
+    TIER           VARCHAR
+)
+RETURNS VARCHAR
+LANGUAGE SCALA
+RUNTIME_VERSION = '2.13'
+IMPORTS = ('@APP_SCHEMA.APP_STAGE/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+HANDLER = 'Handler.stableClocFromPlain'
+AS $$
+  import io.ol.locationid.StableCloc
+
+  class Handler {
+    def stableClocFromPlain(baseLocId: String, namespaceGuid: String,
+                            decClientId: Int, encClientId: Int, tier: String): String =
+      StableCloc(baseLocId).encode(namespaceGuid, decClientId, encClientId, Some(tier))
+  }
+$$;
+
+
+-- =============================================================================
 -- Grants
 -- =============================================================================
 GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_BASE_ENCRYPT(VARCHAR, VARCHAR)
@@ -268,4 +313,6 @@ GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_TXCLOC_ENCRYPT(VARCHAR, VARCHAR, VARCHA
 GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(VARCHAR, VARCHAR)
     TO APPLICATION ROLE APP_ADMIN;
 GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_STABLE_CLOC(VARCHAR, VARCHAR, VARCHAR, INT, INT, VARCHAR)
+    TO APPLICATION ROLE APP_ADMIN;
+GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN(VARCHAR, VARCHAR, INT, INT, VARCHAR)
     TO APPLICATION ROLE APP_ADMIN;

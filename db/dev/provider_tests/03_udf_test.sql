@@ -1,8 +1,11 @@
 -- =============================================================================
--- 07_udf_test.sql
+-- 03_udf_test.sql
 -- LocID Dev: Round-trip validation tests for encode-lib UDFs
 --
--- Run order: after 06_udfs.sql (all UDFs must exist).
+-- Moved from: db/dev/provider/07_udf_test.sql
+--
+-- Run order: after 01_load_test_data.sql and db/dev/provider/06_udfs.sql
+--            (all UDFs must exist, JAR must be on stage).
 -- Run step by step — each SET feeds into subsequent tests.
 --
 -- Test coverage:
@@ -40,7 +43,7 @@ SET namespace_guid = 'ffffffff111122223333444444444444';
 -- PREREQUISITE: Verify JAR is on stage
 -- ---------------------------------------------------------------------------
 -- Expected: one row for encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
--- If this returns zero rows, run the PUT command in 05_stage_setup.sql first.
+-- If this returns zero rows, run db/dev/provider/09_deploy_jar.sql first.
 LIST @LOCID_DEV.STAGING.LOCID_STAGE;
 
 

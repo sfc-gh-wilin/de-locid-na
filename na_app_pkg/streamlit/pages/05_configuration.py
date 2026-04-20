@@ -29,21 +29,37 @@ def mask(val: str | None, visible: int = 4) -> str:
         return "—"
     return val[:visible] + "-****-****-****"
 
-# TODO: read from Snowflake SECRET (not APP_CONFIG plaintext)
-license_key = "1569"   # placeholder — show prefix only
+license_key_row = session.sql(
+    "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'license_id_ref' LIMIT 1"
+).collect()
+license_key = license_key_row[0][0] if license_key_row else None
+
 api_key_row = session.sql(
     "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key' LIMIT 1"
 ).collect()
 api_key = api_key_row[0][0] if api_key_row else None
+
+# Read client name and expiry from cached_license
+cached_lic_raw = session.sql(
+    "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'cached_license' LIMIT 1"
+).collect()
+client_name, lic_expiry = "—", "—"
+if cached_lic_raw and cached_lic_raw[0][0]:
+    try:
+        _ld = json.loads(cached_lic_raw[0][0]).get("license", {})
+        client_name = _ld.get("client_name", "—")
+        exp = _ld.get("expiration_date", "")
+        lic_expiry  = exp[:10] if exp else "—"
+    except Exception:
+        pass
 
 col1, col2 = st.columns(2)
 with col1:
     st.text_input("License Key", value=mask(license_key), disabled=True)
     st.text_input("API Key",     value=mask(api_key),     disabled=True)
 with col2:
-    # TODO: read client name and expiry from cached_license in APP_CONFIG
-    st.text_input("Client",      value="—", disabled=True)
-    st.text_input("Expires",     value="—", disabled=True)
+    st.text_input("Client",  value=client_name, disabled=True)
+    st.text_input("Expires", value=lic_expiry,  disabled=True)
 
 colA, colB = st.columns(2)
 with colA:
@@ -71,13 +87,26 @@ cached_license_row = session.sql(
 ).collect()
 
 ALL_FLAGS = [
-    "allow_encrypt", "allow_decrypt", "allow_tx",
-    "allow_stable",  "allow_geocontext", "allow_homebiz"
+    "allow_encrypt", "allow_decrypt",
+    "allow_tx",      "allow_stable",
+    "allow_geo_context", "allow_homebiz",
 ]
 
 if cached_license_row and cached_license_row[0][0]:
     data        = json.loads(cached_license_row[0][0])
-    active_flags = set(data.get("access", []))
+    # Find the selected API key entry and extract True-valued flags
+    _key_row = session.sql(
+        "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key_id' LIMIT 1"
+    ).collect()
+    _sel_id = int(_key_row[0][0]) if _key_row and _key_row[0][0] else None
+    _entry = None
+    for _item in data.get("access", []):
+        if _item.get("status") == "ACTIVE":
+            if _sel_id is None or _item.get("api_key_id") == _sel_id:
+                _entry = _item
+                if _sel_id is not None:
+                    break
+    active_flags = {f for f in ALL_FLAGS if _entry and _entry.get(f) is True}
 else:
     active_flags = set()
 

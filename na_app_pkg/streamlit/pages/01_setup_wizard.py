@@ -2,25 +2,44 @@
 streamlit/pages/01_setup_wizard.py
 LocID Native App — Setup Wizard (View 2)
 
-8-screen onboarding wizard:
+9-screen onboarding wizard:
   A. Welcome
   B. Have a license key?
   C. Contact Sales (no-key dead end)
-  D. Enter License Key
+  D. Enter License Key       → validates + fetches license from LocID Central
   E. Review Privileges
   F. Create App Objects
   G. Test Connectivity
-  H. Setup Complete
+  H. Select API Key          → writes api_key / api_key_id / namespace_guid / client_id
+  I. Setup Complete
 """
+
+import json
 
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
+from utils.locid_central import fetch_license
 
 session = get_active_session()
 
 st.title("Setup Wizard")
 st.caption("Complete this wizard once after installing the app.")
 st.divider()
+
+
+# ---------------------------------------------------------------------------
+# APP_CONFIG upsert helper
+# ---------------------------------------------------------------------------
+def _upsert_config(key: str, value: str) -> None:
+    session.sql(
+        "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
+        "USING (SELECT ? AS k, ? AS v) AS s ON t.config_key = s.k "
+        "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP "
+        "WHEN NOT MATCHED THEN INSERT (config_key, config_value, last_refreshed_at, is_active) "
+        "VALUES (s.k, s.v, CURRENT_TIMESTAMP, TRUE)",
+        params=[key, value]
+    ).collect()
+
 
 # ---------------------------------------------------------------------------
 # Wizard state
@@ -90,11 +109,16 @@ elif step == "D":
             if not key_input:
                 st.error("Please enter your license key.")
             else:
-                # TODO: validate key format + store as Snowflake SECRET
-                # TODO: call locid_central.fetch_license(session, key_input)
-                st.session_state.license_key = key_input
-                st.session_state.wizard_step = "E"
-                st.rerun()
+                with st.spinner("Validating license with LocID Central…"):
+                    try:
+                        data = fetch_license(session, key_input)
+                        _upsert_config("license_id_ref", key_input)
+                        st.session_state.license_key  = key_input
+                        st.session_state.license_data = data
+                        st.session_state.wizard_step  = "E"
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"License validation failed: {e}")
 
 # ---------------------------------------------------------------------------
 # Screen E — Review Privileges
@@ -158,18 +182,84 @@ elif step == "G":
             st.rerun()
     with col2:
         if st.button("Continue", disabled=not st.session_state.get("connectivity_ok")):
-            # Mark onboarding complete
-            session.sql(
-                "UPDATE APP_SCHEMA.APP_CONFIG SET config_value = 'true' "
-                "WHERE config_key = 'onboarding_complete'"
-            ).collect()
             st.session_state.wizard_step = "H"
             st.rerun()
 
 # ---------------------------------------------------------------------------
-# Screen H — Setup Complete
+# Screen H — Select API Key
 # ---------------------------------------------------------------------------
 elif step == "H":
+    st.header("Select API Key")
+    st.write(
+        "Your license includes one or more API keys. Select the key this "
+        "Snowflake account should use for LocID lookups."
+    )
+
+    # Load active access entries from cached license
+    cached_rows = session.sql(
+        "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
+        "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
+    ).collect()
+
+    active_entries = []
+    client_id      = 0
+    if cached_rows and cached_rows[0][0]:
+        try:
+            lic_data       = json.loads(cached_rows[0][0])
+            client_id      = int(lic_data.get("license", {}).get("client_id", 0))
+            active_entries = [
+                e for e in lic_data.get("access", [])
+                if e.get("status") == "ACTIVE"
+            ]
+        except Exception:
+            pass
+
+    if not active_entries:
+        st.error(
+            "No active API keys found in your license response. "
+            "Go back and re-validate your license key, or contact Digital Envoy."
+        )
+        if st.button("← Back"):
+            st.session_state.wizard_step = "G"
+            st.rerun()
+    else:
+        # Build display labels — show api_key_id and a masked key value
+        def _mask_key(k: str) -> str:
+            return k[:8] + "****" if k and len(k) > 8 else "****"
+
+        labels = [
+            f"API Key #{e.get('api_key_id')} — {_mask_key(e.get('api_key', ''))}"
+            for e in active_entries
+        ]
+
+        # Auto-select single key; radio for multiple
+        if len(active_entries) == 1:
+            st.info(f"One active API key found: **{labels[0]}**")
+            chosen_idx = 0
+        else:
+            choice     = st.radio("Available API keys:", labels)
+            chosen_idx = labels.index(choice)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("← Back"):
+                st.session_state.wizard_step = "G"
+                st.rerun()
+        with col2:
+            if st.button("Confirm Selection", type="primary"):
+                entry = active_entries[chosen_idx]
+                _upsert_config("api_key_id",     str(entry.get("api_key_id", "")))
+                _upsert_config("api_key",         entry.get("api_key", ""))
+                _upsert_config("namespace_guid",  entry.get("namespace_guid", ""))
+                _upsert_config("client_id",       str(client_id))
+                _upsert_config("onboarding_complete", "true")
+                st.session_state.wizard_step = "I"
+                st.rerun()
+
+# ---------------------------------------------------------------------------
+# Screen I — Setup Complete
+# ---------------------------------------------------------------------------
+elif step == "I":
     st.header("Setup Complete!")
     st.success("Your LocID license is connected and verified.")
     st.write("**What's next:**")

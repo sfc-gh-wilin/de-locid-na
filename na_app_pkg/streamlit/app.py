@@ -10,9 +10,9 @@ Entry point for the multi-page Streamlit app. Displays the status dashboard:
   - Setup banner (if onboarding not complete)
 """
 
+import json
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
-from utils.entitlements import get_entitlements
 
 st.set_page_config(page_title="LocID for Snowflake", layout="wide")
 
@@ -66,19 +66,51 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Status cards
 # ---------------------------------------------------------------------------
+def get_license_status() -> tuple[str, str]:
+    """Return (status_label, expiry_label) from cached_license in APP_CONFIG."""
+    row = get_config("cached_license")
+    if not row:
+        return "NOT CONFIGURED", "—"
+    try:
+        lic = json.loads(row).get("license", {})
+        status  = lic.get("status", "UNKNOWN")
+        expiry  = lic.get("expiration_date", "")
+        exp_str = expiry[:7] if expiry else "—"    # "2027-01-15" → "2027-01"
+        return status, exp_str
+    except Exception:
+        return "UNKNOWN", "—"
+
+
+def get_central_refresh_label() -> str:
+    """Return a human-readable 'refreshed N ago' string for cached_license."""
+    rows = session.sql(
+        "SELECT DATEDIFF('minute', last_refreshed_at, CURRENT_TIMESTAMP) "
+        "FROM APP_SCHEMA.APP_CONFIG "
+        "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
+    ).collect()
+    if not rows or rows[0][0] is None:
+        return "Never refreshed"
+    mins = int(rows[0][0])
+    if mins < 2:
+        return "Just now"
+    if mins < 60:
+        return f"Refreshed {mins}m ago"
+    return f"Refreshed {mins // 60}h ago"
+
+
 col_lic, col_central, col_job = st.columns(3)
 
 with col_lic:
     st.subheader("License")
-    # TODO: read license status from APP_CONFIG / LocID Central cache
-    st.metric("Status", "ACTIVE")          # placeholder
-    st.caption("Exp: 2027-01")             # placeholder
+    lic_status, lic_expiry = get_license_status()
+    st.metric("Status", lic_status)
+    st.caption(f"Exp: {lic_expiry}")
 
 with col_central:
     st.subheader("LocID Central")
-    # TODO: read last_refreshed_at from APP_CONFIG
-    st.metric("Status", "CONNECTED")       # placeholder
-    st.caption("Refreshed 2m ago")         # placeholder
+    central_status = "CONNECTED" if get_config("cached_license") else "NOT CONNECTED"
+    st.metric("Status", central_status)
+    st.caption(get_central_refresh_label())
 
 with col_job:
     st.subheader("Last Job")

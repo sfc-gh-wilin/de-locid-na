@@ -14,36 +14,66 @@ from typing import Any
 import snowflake.snowpark as snowpark
 
 
-# Entitlement flags returned by LocID Central in the access[] array
+# Entitlement flags as returned by LocID Central in the access[] array.
+# Each flag is a boolean field on the access entry object.
 KNOWN_FLAGS = {
     "allow_encrypt",
     "allow_decrypt",
     "allow_tx",
     "allow_stable",
-    "allow_geocontext",
-    "allow_homebiz",   # future
+    "allow_geo_context",   # matches API field name (underscore)
+    "allow_homebiz",       # future
 }
 
 
 def _get_active_entitlements(session: snowpark.Session) -> set[str]:
     """
-    Returns the set of active entitlement flags from the cached license.
-    Reads APP_CONFIG.cached_license and extracts the access[] array.
+    Returns the set of active entitlement flag names for the selected API key.
+
+    Reads the cached LocID Central license response from APP_CONFIG, locates
+    the selected API key entry (via api_key_id in APP_CONFIG), and returns the
+    set of flags that are True on that entry.
+
+    access[] structure from LocID Central:
+      [{ "api_key_id": 4, "status": "ACTIVE",
+         "allow_encrypt": true, "allow_decrypt": true, ... }, ...]
     """
-    rows = session.sql(
+    # 1. Read selected api_key_id
+    key_rows = session.sql(
+        "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
+        "WHERE config_key = 'api_key_id' AND is_active = TRUE LIMIT 1"
+    ).collect()
+    selected_key_id = int(key_rows[0][0]) if key_rows and key_rows[0][0] else None
+
+    # 2. Read cached license payload
+    lic_rows = session.sql(
         "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
         "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
     ).collect()
-    if not rows or not rows[0][0]:
+    if not lic_rows or not lic_rows[0][0]:
         return set()
-    data: dict[str, Any] = json.loads(rows[0][0])
-    # LocID Central returns entitlements as: { "access": ["allow_encrypt", ...] }
-    return set(data.get("access", []))
+
+    data: dict[str, Any] = json.loads(lic_rows[0][0])
+
+    # 3. Find the selected (or first ACTIVE) access entry
+    entry = None
+    for item in data.get("access", []):
+        if item.get("status") == "ACTIVE":
+            if selected_key_id is None or item.get("api_key_id") == selected_key_id:
+                entry = item
+                if selected_key_id is not None:
+                    break  # exact match found
+
+    if not entry:
+        return set()
+
+    # 4. Return flag names where the boolean value is True
+    return {flag for flag in KNOWN_FLAGS if entry.get(flag) is True}
 
 
 def check_entitlement(session: snowpark.Session, flag: str) -> None:
     """
-    Raises PermissionError if the license does not include `flag`.
+    Raises PermissionError if the active API key's license does not include flag.
     Call at the start of each stored procedure before doing any work.
     """
     active = _get_active_entitlements(session)
@@ -74,8 +104,8 @@ def get_active_output_cols(session: snowpark.Session,
     for row in rows:
         key  = row[0]
         meta = json.loads(row[1]) if row[1] else {}
-        col_operation  = meta.get("operation", "both")
-        required_flag  = meta.get("requires_entitlement", "")
+        col_operation = meta.get("operation", "both")
+        required_flag = meta.get("requires_entitlement", "")
 
         # Filter by operation
         if col_operation not in (operation, "both"):

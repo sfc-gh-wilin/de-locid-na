@@ -1,6 +1,8 @@
 -- =============================================================================
--- 08_cross_compat_test.sql
+-- 04_cross_compat_test.sql
 -- LocID Dev: Cross-compatibility validation test
+--
+-- Moved from: db/dev/provider/08_cross_compat_test.sql
 --   Based on note from David Moser (DE), 2026-04-15
 --
 -- PURPOSE:

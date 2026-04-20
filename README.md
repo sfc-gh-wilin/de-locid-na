@@ -295,16 +295,25 @@ customer_input.ip_address = locid_builds_ipv4_exploded.ip_address
 joined back to locid_builds on (build_dt, start_ip, end_ip)
 ```
 
-**IPv6** — Cascading prefix range joins (6 passes):
+**IPv6** — Optimised 6-pass cascading hex-prefix range join:
 ```
-Pass 1: hex prefix[0:12] match + range join  → temp_ipv6_prefix12
-Pass 2: prefix[0:10], exclude prefix12 hits  → temp_ipv6_prefix10
-Pass 3: prefix[0:8],  exclude above          → temp_ipv6_prefix8
-Pass 4: prefix[0:6],  exclude above          → temp_ipv6_prefix6
-Pass 5: prefix[0:4],  exclude above          → temp_ipv6_prefix4
-Pass 6: full range join on remaining rows    → temp_ipv6_remaining
-UNION ALL all results
+Pre-step: materialise IPv6 input rows once (ip_hex pre-computed)
+          materialise relevant IPv6 build rows once (date-filtered)
+          pre-join each input row to its build_dt (avoids 6× DATES range join)
+
+Pass 1: hex prefix[0:12] match + range join  → matched rows accumulated
+Pass 2: prefix[0:10], exclude matched IPs    → (single accumulator anti-join)
+Pass 3: prefix[0:8],  exclude matched IPs    → (single accumulator anti-join)
+Pass 4: prefix[0:6],  exclude matched IPs    → (single accumulator anti-join)
+Pass 5: prefix[0:4],  exclude matched IPs    → (single accumulator anti-join)
+Pass 6: full range join on remaining rows    → (single accumulator anti-join)
 ```
+
+Key optimisations vs. reference POC (important for big-data performance):
+- `PARSE_IP` / `ip_hex` computed once per row (not 6×)
+- `LOCID_BUILDS` scanned once (not 6×), pre-filtered to relevant build dates
+- Prefix filter applied **before** the range join on the builds side (not after)
+- Single accumulator anti-join per pass (O(1)) vs. growing exclusion chain (O(passes))
 
 Both IPv4 and IPv6 results are filtered to `relevant_builds` (build dates whose range covers the input timestamp).
 
@@ -421,6 +430,15 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 - Column dropdowns are pre-filled with best-guess matches (e.g. a column named `ip` auto-selects for IP Address)
 - Timestamp format selector: epoch seconds, epoch milliseconds, or TIMESTAMP string
+- **"Run Input Validation"** button runs advisory checks after columns are mapped:
+
+  | Check | Scope | Behaviour |
+  |-------|-------|-----------|
+  | IP format | Sample 1,000 rows | Badge shows IPv4 / IPv6 / Mixed; warns on unparseable or NULL values |
+  | Timestamp range | Full table | Warns if any values are older than 52 weeks (will not match any build) |
+  | NULL timestamps | Full table | Informational count — NULLs are skipped during matching |
+
+  Validation is advisory — warnings are shown but the job can always proceed.
 
 **Step 3 — Configure Output**
 - Radio: *Create new table* or *Overwrite existing table*
@@ -598,6 +616,72 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
+## Role Setup for App Package & App Deployment
+
+Using `ACCOUNTADMIN` for day-to-day deployment is a common concern in enterprise environments. The custom roles below minimize privilege scope while covering everything needed to build, publish, and install the LocID Native App.
+
+### Provider Account — `LOCID_APP_ADMIN`
+
+Used by Digital Envoy's engineering or ops team to manage the Application Package, stage contents, and Marketplace listing.
+
+```sql
+-- Run as ACCOUNTADMIN (one-time setup)
+USE ROLE ACCOUNTADMIN;
+
+CREATE ROLE IF NOT EXISTS LOCID_APP_ADMIN;
+
+-- Manage the Application Package and its versions/patches
+GRANT CREATE APPLICATION PACKAGE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Create and manage the provider-side database (LOCID_BUILDS, staging objects)
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Create the data share that backs the app's shared read-only objects
+GRANT CREATE SHARE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Publish and manage the Snowflake Marketplace listing
+GRANT MANAGE LISTING ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Warehouse for builds and testing
+GRANT USAGE ON WAREHOUSE <provider_warehouse> TO ROLE LOCID_APP_ADMIN;
+
+-- Assign to user(s) who manage the app
+GRANT ROLE LOCID_APP_ADMIN TO USER <username>;
+```
+
+Once `LOCID_APP_ADMIN` owns the Application Package, all routine operations — adding versions, applying patches, updating release directives — are performed under this role. No further `ACCOUNTADMIN` involvement is needed for day-to-day work.
+
+### Consumer Account — `LOCID_APP_INSTALLER`
+
+Used by the customer's admin team to install, configure, and manage the LocID Native App instance.
+
+```sql
+-- Run as ACCOUNTADMIN (one-time setup)
+USE ROLE ACCOUNTADMIN;
+
+CREATE ROLE IF NOT EXISTS LOCID_APP_INSTALLER;
+
+-- Install Native Apps from the Snowflake Marketplace
+GRANT CREATE APPLICATION ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
+-- Create the output database/schema for job results (if using a new database)
+GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
+-- Warehouse access for running Encrypt / Decrypt jobs
+GRANT USAGE ON WAREHOUSE <customer_warehouse> TO ROLE LOCID_APP_INSTALLER;
+
+-- Assign to user(s) who install and manage the app
+GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
+```
+
+After installation, the app's `setup.sql` creates all internal objects (schemas, tables, UDFs, stored procedures) within the app container — no additional consumer-side grants are required for those.
+
+### Notes
+
+- The one-time `GRANT ... TO ROLE` steps must be executed by `ACCOUNTADMIN`. This is unavoidable, but it is a **one-time setup only** — all routine operations use the custom role thereafter.
+- The app's onboarding wizard (Screen E — Review Privileges) checks required grants and surfaces the remediation SQL to the installer if any are missing.
+- If the customer's environment uses a standard role hierarchy (e.g. `SYSADMIN` → custom roles), grant `LOCID_APP_INSTALLER` to `SYSADMIN` for hierarchy compliance:
+  ```sql
+  GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
+  ```
+- For Marketplace installs, `CREATE APPLICATION` on a custom role is the supported least-privilege path. `ACCOUNTADMIN` is not required for the install itself once the grant is in place.
+
+---
+
 ## Usage Telemetry
 
 After each job run, the stored procedure calls LocID Central stats endpoint:
@@ -634,14 +718,14 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 |------|--------|
 | encode-lib JAR — switching to Scala UDF | ✓ Resolved 2026-04-15. JAR delivered: `encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar` (Scala 2.13 / Java 17). Approach changed from `LANGUAGE JAVA` + SnowflakeHandler wrapper to `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with inline handlers. Dev UDFs (`db/dev/provider/06_udfs.sql`) and native app UDFs (`na_app_pkg/src/udfs/locid_udf.sql`) both updated. |
 | AES key derivation (test vs. production) | ✓ Resolved 2026-04-15/16. Production derivation confirmed: `secret.replaceAll("~","=")` → `Base64.getUrlDecoder().decode()` → AES key bytes. All `toKey()` handlers in `06_udfs.sql` and `locid_udf.sql` updated to production mode. Cross-compatibility test: `08_cross_compat_test.sql`. |
-| IPv6 matching SQL | Available — full 6-pass prefix range join logic is in `Coco/tmp/20260331/example_sql_for_snowflake_locid_matching.sql`. Confirm with Ryan this POC SQL represents the final approach before productionizing. |
+| IPv6 matching SQL | ✓ Implemented (2026-04-20). Optimised 6-pass cascading hex-prefix range join implemented in `na_app_pkg/src/procs/encrypt.sql`. Key optimisations vs. reference POC: ip_hex pre-computed once (not 6×), LOCID_BUILDS scanned once (date-filtered pre-materialisation), prefix filter applied before range join, single accumulator anti-join per pass. |
 | HomeBiz_Type entitlement details | De-scoped from v1 (2026-04-16). No solid spec yet. Retained as a future entitlement flag (`allow_homebiz`); will be scoped and implemented in a subsequent version. |
 | Additional FC50 columns / new entitlements | Pending DE R&D spike outcome |
 | Telemetry payload examples from existing real-time services | David to provide |
 | Reference Docker container for encrypt/decrypt validation | David to investigate |
 | V6 data confirmation in sandbox account | David to chase down |
 | Multiple API keys per license key | ✓ Spec'd (2026-04-16). `access[]` array confirmed via live API: each entry has its own `api_key`, `api_key_id`, `namespace_guid`, `provider_id`, `status`, and per-key entitlements. `secrets` are license-level (shared). Architecture updated: APP_CONFIG now stores selected key fields; onboarding wizard (Screen H) presents ACTIVE API keys for selection; View 6 Configuration provides a key-switcher table. |
-| Consumer/provider deployment role | ACCOUNTADMIN is correct for both provider-side publish and consumer-side install (standard practice per Snowflake Native App Framework). Provider side requires `CREATE APPLICATION PACKAGE`, `CREATE SHARE`, `MANAGE LISTING` — all need ACCOUNTADMIN or an equivalent role. Consumer side: `CREATE APPLICATION` privilege can technically be granted to a custom role, but ACCOUNTADMIN is the standard path for marketplace installs. Investigation into a narrower custom role is low priority — ACCOUNTADMIN is acceptable. |
+| Consumer/provider deployment role | ✓ Resolved. Custom roles defined — see [Role Setup for App Package & App Deployment](#role-setup-for-app-package--app-deployment). Provider: `LOCID_APP_ADMIN` with `CREATE APPLICATION PACKAGE`, `CREATE DATABASE`, `CREATE SHARE`, `MANAGE LISTING`. Consumer: `LOCID_APP_INSTALLER` with `CREATE APPLICATION`, `CREATE DATABASE`. One-time grants require `ACCOUNTADMIN`; all routine operations use the custom role. |
 | UAT test account strategy | Separate Snowflake accounts required for UAT to surface multi-account permission issues. Coordinate with Alyssa for throwaway account creation and Snowflake credits. William's sandbox available as fallback. |
 | Key status / expiry handling | License keys in LocID Central have status and expiry date fields. Implement configurable handling — surface warnings when key is nearing expiry or inactive; optionally gate job execution if key is expired. |
 | Step-by-step deployment guides | Provide guides for deploying the native app to multiple environments (dev, UAT, prod), including config changes required per environment. |

@@ -10,6 +10,10 @@ LocID Native App — Run Encrypt (View 3)
   5. Review & Run
 """
 
+import json
+import re
+from datetime import datetime, timedelta, timezone
+
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.entitlements import get_active_output_cols, check_entitlement
@@ -19,6 +23,119 @@ session = get_active_session()
 st.title("Run Encrypt")
 st.caption("Match IP + timestamp data against the LocID data lake.")
 st.divider()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _load_columns(table_fqn: str) -> list[str]:
+    """Return ordered column names for a fully qualified table via INFORMATION_SCHEMA."""
+    parts = [p.strip().strip('"') for p in table_fqn.strip().split(".")]
+    if len(parts) != 3:
+        return []
+    db, schema_name, table_name = parts
+    if not re.match(r'^[A-Za-z0-9_$]+$', db):
+        return []
+    try:
+        rows = session.sql(
+            f"SELECT COLUMN_NAME FROM {db}.INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
+            params=[schema_name.upper(), table_name.upper()]
+        ).collect()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+
+def _validate_inputs(table: str, ip_col: str, ts_col: str,
+                     ts_fmt: str) -> dict:
+    """
+    Run advisory pre-flight checks on the mapped columns.
+    Returns a dict with keys: ip_types, null_ip, null_ts, bad_ip,
+                               ts_min_epoch, ts_max_epoch, stale_count.
+    All errors are caught — validation never blocks the job.
+    """
+    result = {}
+    try:
+        # IP format distribution (sample 1 000 rows for speed)
+        ip_rows = session.sql(f"""
+            SELECT
+                SUM(IFF({ip_col} IS NULL, 1, 0))                       AS null_ip,
+                SUM(IFF({ip_col} IS NOT NULL
+                        AND {ip_col} NOT LIKE '%:%'
+                        AND TRY_CAST(SPLIT_PART({ip_col}, '.', 1) AS INT) IS NOT NULL
+                        AND ARRAY_SIZE(SPLIT({ip_col}, '.')) = 4, 1, 0)) AS cnt_v4,
+                SUM(IFF({ip_col} LIKE '%:%', 1, 0))                     AS cnt_v6,
+                SUM(IFF({ip_col} IS NOT NULL
+                        AND {ip_col} NOT LIKE '%:%'
+                        AND NOT (TRY_CAST(SPLIT_PART({ip_col}, '.', 1) AS INT) IS NOT NULL
+                                 AND ARRAY_SIZE(SPLIT({ip_col}, '.')) = 4), 1, 0)) AS cnt_bad
+            FROM (SELECT {ip_col} FROM {table} LIMIT 1000)
+        """).collect()[0]
+        result["null_ip"]  = int(ip_rows[0] or 0)
+        result["cnt_v4"]   = int(ip_rows[1] or 0)
+        result["cnt_v6"]   = int(ip_rows[2] or 0)
+        result["bad_ip"]   = int(ip_rows[3] or 0)
+    except Exception:
+        result["null_ip"] = result["cnt_v4"] = result["cnt_v6"] = result["bad_ip"] = None
+
+    try:
+        # Timestamp range — convert to epoch seconds for comparison
+        if ts_fmt == "epoch_ms":
+            ts_expr = f"FLOOR({ts_col}::DOUBLE / 1000.0)::BIGINT"
+        elif ts_fmt == "timestamp_string":
+            ts_expr = f"DATE_PART(epoch_second, TRY_TO_TIMESTAMP({ts_col}))::BIGINT"
+        else:
+            ts_expr = f"{ts_col}::BIGINT"
+
+        cutoff_epoch = int(
+            (datetime.now(timezone.utc) - timedelta(weeks=52)).timestamp()
+        )
+        ts_rows = session.sql(f"""
+            SELECT
+                MIN({ts_expr})                                            AS ts_min,
+                MAX({ts_expr})                                            AS ts_max,
+                SUM(IFF({ts_col} IS NULL, 1, 0))                        AS null_ts,
+                SUM(IFF({ts_expr} < {cutoff_epoch}, 1, 0))              AS stale_cnt
+            FROM {table}
+        """).collect()[0]
+        result["ts_min"]     = ts_rows[0]
+        result["ts_max"]     = ts_rows[1]
+        result["null_ts"]    = int(ts_rows[2] or 0)
+        result["stale_count"] = int(ts_rows[3] or 0)
+    except Exception:
+        result["ts_min"] = result["ts_max"] = result["null_ts"] = result["stale_count"] = None
+
+    return result
+
+
+def _show_validation(v: dict, total_sample: int = 1000) -> None:
+    """Render advisory validation results."""
+    # IP summary
+    if v.get("cnt_v4") is not None:
+        v4, v6, bad, nul = v["cnt_v4"], v["cnt_v6"], v["bad_ip"], v["null_ip"]
+        ip_label = []
+        if v4:  ip_label.append(f"IPv4: {v4:,}")
+        if v6:  ip_label.append(f"IPv6: {v6:,}")
+        st.info(f"IP types (sample {total_sample:,}): " + " · ".join(ip_label) if ip_label
+                else "No parseable IPs found in sample")
+        if bad:
+            st.warning(f"{bad:,} unparseable IP value(s) in sample — will be skipped during matching.")
+        if nul:
+            st.warning(f"{nul:,} NULL IP value(s) in sample — will be skipped.")
+
+    # Timestamp range
+    if v.get("stale_count") is not None:
+        if v["stale_count"]:
+            st.warning(
+                f"{v['stale_count']:,} row(s) have timestamps older than 52 weeks. "
+                "These will not match any LocID build and will be returned as unmatched."
+            )
+        if v.get("null_ts"):
+            st.warning(f"{v['null_ts']:,} NULL timestamp value(s) — will be skipped.")
+        if v["ts_min"] and v["stale_count"] == 0:
+            st.success("Timestamp range looks good — all values within the 52-week window.")
+
 
 # ---------------------------------------------------------------------------
 # Step state
@@ -38,36 +155,61 @@ st.divider()
 # ---------------------------------------------------------------------------
 if step == 1:
     st.subheader("Step 1 — Select Input Table")
-    # TODO: query INFORMATION_SCHEMA for tables the app has SELECT on
     input_table = st.text_input("Input table (fully qualified)",
                                 placeholder="MY_DB.MY_SCHEMA.MY_TABLE")
     if input_table:
         st.caption("Preview (first 5 rows):")
-        # TODO: SELECT * FROM <input_table> LIMIT 5
-        st.info("Table preview will appear here.")
+        try:
+            preview = session.sql(f"SELECT * FROM {input_table} LIMIT 5").to_pandas()
+            st.dataframe(preview, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not load preview: {e}")
     if st.button("Next →", disabled=not input_table):
-        st.session_state.enc_input_table = input_table
-        st.session_state.enc_step = 2
-        st.rerun()
+        cols = _load_columns(input_table)
+        if not cols:
+            st.error("Could not read columns from that table. Check the name and your SELECT privilege.")
+        else:
+            st.session_state.enc_input_table   = input_table
+            st.session_state.enc_input_columns = cols
+            st.session_state.enc_step          = 2
+            st.rerun()
 
 # ---------------------------------------------------------------------------
 # Step 2 — Map Columns
 # ---------------------------------------------------------------------------
 elif step == 2:
     st.subheader("Step 2 — Map Columns")
-    # TODO: load column list from selected input table
-    columns = ["(load columns from table)"]
-    col_id = st.selectbox("Unique Row ID", columns)
-    col_ip = st.selectbox("IP Address",    columns)
-    col_ts = st.selectbox("Timestamp",     columns)
-    ts_fmt = st.selectbox("Timestamp Format",
-                          ["epoch_sec", "epoch_ms", "timestamp_string"])
+    columns = st.session_state.get("enc_input_columns", [])
+    if not columns:
+        st.error("Column list is empty — please go back and re-enter the table name.")
+    else:
+        col_id = st.selectbox("Unique Row ID", columns)
+        col_ip = st.selectbox("IP Address",    columns)
+        col_ts = st.selectbox("Timestamp",     columns)
+        ts_fmt = st.selectbox("Timestamp Format",
+                              ["epoch_sec", "epoch_ms", "timestamp_string"])
+
+        st.divider()
+
+        # Advisory validation — runs on demand, never blocks the job
+        if st.button("Run Input Validation"):
+            with st.spinner("Checking IP format and timestamp range…"):
+                v = _validate_inputs(
+                    st.session_state.enc_input_table, col_ip, col_ts, ts_fmt
+                )
+                st.session_state.enc_validation = v
+                st.session_state.enc_validation_cols = (col_ip, col_ts, ts_fmt)
+
+        if "enc_validation" in st.session_state:
+            _show_validation(st.session_state.enc_validation)
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
+            st.session_state.pop("enc_validation", None)
             st.session_state.enc_step = 1; st.rerun()
     with col2:
-        if st.button("Next →"):
+        if st.button("Next →", disabled=not columns):
             st.session_state.enc_col_id = col_id
             st.session_state.enc_col_ip = col_ip
             st.session_state.enc_col_ts = col_ts
@@ -128,7 +270,6 @@ elif step == 5:
              f"IP={st.session_state.get('enc_col_ip')}, TS={st.session_state.get('enc_col_ts')}")
     st.write(f"**Output columns:** {', '.join(st.session_state.get('enc_output_cols', []))}")
 
-    # TODO: warehouse selector (dropdown of warehouses app has USAGE on)
     warehouse = st.text_input("Warehouse", placeholder="MY_WAREHOUSE")
 
     col1, col2 = st.columns(2)
@@ -138,7 +279,30 @@ elif step == 5:
     with col2:
         if st.button("Run Job", disabled=not warehouse, type="primary"):
             with st.spinner("Running LocID Encrypt job…"):
-                # TODO: call LOCID_ENCRYPT stored procedure
-                # session.call("APP_SCHEMA.LOCID_ENCRYPT", ...)
-                st.success("Job completed successfully.")  # placeholder
+                try:
+                    raw = session.call(
+                        "APP_SCHEMA.LOCID_ENCRYPT",
+                        st.session_state.enc_input_table,
+                        st.session_state.enc_output_table,
+                        st.session_state.enc_col_id,
+                        st.session_state.enc_col_ip,
+                        st.session_state.enc_col_ts,
+                        st.session_state.enc_ts_fmt,
+                        st.session_state.enc_output_cols,
+                        warehouse,
+                    )
+                    result = json.loads(raw) if isinstance(raw, str) else raw
+                    status = result.get("status", "UNKNOWN")
+                    if status == "SUCCESS":
+                        st.success(
+                            f"Job complete — "
+                            f"{result.get('rows_matched', 0):,} rows matched "
+                            f"out of {result.get('rows_in', 0):,} "
+                            f"in {result.get('runtime_s', 0):.1f}s"
+                        )
+                        st.caption(f"Job ID: {result.get('job_id', '—')}")
+                    else:
+                        st.error(f"Job failed — {result.get('error', status)}")
+                except Exception as e:
+                    st.error(f"Error running encrypt job: {e}")
             st.session_state.enc_step = 1  # reset for next run
