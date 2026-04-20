@@ -47,13 +47,10 @@ Two custom roles are used throughout this guide — created once by `ACCOUNTADMI
 All SQL paths below are relative to the repository root. Run Snow CLI from the repository root directory.
 
 ```bash
-cd /path/to/de-locid-na
+cd /Users/wilin/Docs/LocalProjects/GitHub/de-locid-na
 
 # Verify connection
 snow connection test -c wl_sandbox
-
-# Example: run a SQL file
-snow -c wl_sandbox sql -f "db/dev/provider/01_setup.sql"
 ```
 
 ---
