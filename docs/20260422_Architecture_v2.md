@@ -1,6 +1,6 @@
 # LocID Snowflake Native App — Architecture
 
-**Version:** 1.0  
+**Version:** 2.0  
 **Provider:** Digital Envoy / Matchbook Data  
 **Prepared by:** Snowflake Solutions Architecture
 
@@ -95,8 +95,6 @@ APP_SCHEMA.HTTP_PING()         -- Python UDF to verify EAI connectivity during s
 ### Scala UDF Design
 
 The `encode-lib` JAR (Scala 2.13 / Java 17) is bundled in the app stage and registered as `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` UDFs with inline Scala handlers — no external wrapper class required. Each UDF embeds its handler class in the `AS $$...$$` block, calling the JAR's public API directly.
-
-> **Status (2026-04-15):** Inline Scala approach validated. SnowflakeHandler wrapper is no longer required from DE. See `db/dev/provider/06_udfs.sql` and `na_app_pkg/src/udfs/locid_udf.sql`.
 
 ### IP Matching Strategy
 
@@ -572,8 +570,8 @@ Snowflake supports **vectorized Python UDFs** (`LANGUAGE PYTHON` with `@vectoriz
 
 ```
 Scalar UDF (current):      Python vectorized UDF (target):
-  call(row_1) → result         call(Series[row_1, row_2, ... row_N]) → Series[result_1, ... result_N]
-  call(row_2) → result
+  call(row_1) → result         call(Series[row_1, row_2, ... row_N]) 
+  call(row_2) → result           → Series[result_1, ... result_N]
   ...
   call(row_N) → result
   (N function calls)           (1 function call per batch)
