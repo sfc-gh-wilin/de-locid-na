@@ -466,7 +466,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 - **Run Job** button
 
 **During execution:**
-- Live progress bar with status messages (e.g. "Matching IPv4 records…", "Calling LocID UDF…", "Writing output…")
+- Live progress bar with status messages (e.g. "Matching IP records…", "Generating LocIDs…", "Writing output…")
 - Cancel button available during run
 
 **On completion:**
