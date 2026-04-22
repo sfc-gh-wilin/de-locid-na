@@ -24,6 +24,14 @@
 --
 -- TYPE MAPPING:
 --   Snowflake maps SQL INT → Scala Int, BIGINT → Scala Long for LANGUAGE SCALA UDFs.
+--
+-- PERFORMANCE NOTE:
+--   Each handler class uses a companion object (Cache) to memoize AES keys and
+--   encryption objects by key string. The companion object is JVM-class-level
+--   (static equivalent) and persists across rows within the same worker JVM
+--   instance. Key derivation (Base64 decode + SecretKeySpec construction) and
+--   encryption object allocation therefore happen once per unique key per worker,
+--   not once per row.
 -- =============================================================================
 
 
@@ -50,14 +58,18 @@ AS $$
   import java.nio.charset.StandardCharsets
   import javax.crypto.spec.SecretKeySpec
 
-  class Handler {
-    private def toKey(keyStr: String): SecretKeySpec = {
-      val decoded = java.util.Base64.getUrlDecoder.decode(keyStr.replaceAll("~", "="))
-      new SecretKeySpec(decoded, "AES")
-    }
+  // Cache BaseLocIdEncryption by key string — persists across rows in the same worker JVM
+  object Cache {
+    private val encs = new java.util.concurrent.ConcurrentHashMap[String, BaseLocIdEncryption]()
+    def enc(k: String): BaseLocIdEncryption = encs.computeIfAbsent(k, s => {
+      val b = Base64.getUrlDecoder.decode(s.replaceAll("~", "="))
+      BaseLocIdEncryption(new SecretKeySpec(b, "AES"))
+    })
+  }
 
+  class Handler {
     def encrypt(locId: String, keyStr: String): String = {
-      val enc = BaseLocIdEncryption(toKey(keyStr))
+      val enc = Cache.enc(keyStr)
       Base64.getUrlEncoder.encodeToString(enc.encrypt(locId.getBytes(StandardCharsets.UTF_8)))
     }
   }
@@ -86,14 +98,18 @@ AS $$
   import java.nio.charset.StandardCharsets
   import javax.crypto.spec.SecretKeySpec
 
-  class Handler {
-    private def toKey(keyStr: String): SecretKeySpec = {
-      val decoded = java.util.Base64.getUrlDecoder.decode(keyStr.replaceAll("~", "="))
-      new SecretKeySpec(decoded, "AES")
-    }
+  // Cache BaseLocIdEncryption by key string — persists across rows in the same worker JVM
+  object Cache {
+    private val encs = new java.util.concurrent.ConcurrentHashMap[String, BaseLocIdEncryption]()
+    def enc(k: String): BaseLocIdEncryption = encs.computeIfAbsent(k, s => {
+      val b = Base64.getUrlDecoder.decode(s.replaceAll("~", "="))
+      BaseLocIdEncryption(new SecretKeySpec(b, "AES"))
+    })
+  }
 
+  class Handler {
     def decrypt(encryptedLocId: String, keyStr: String): String = {
-      val enc     = BaseLocIdEncryption(toKey(keyStr))
+      val enc     = Cache.enc(keyStr)
       val decoded = Base64.getUrlDecoder.decode(encryptedLocId)
       new String(enc.decrypt(decoded), StandardCharsets.UTF_8)
     }
@@ -138,22 +154,28 @@ AS $$
   import java.nio.charset.StandardCharsets
   import javax.crypto.spec.SecretKeySpec
 
-  class Handler {
-    private def toKey(keyStr: String): SecretKeySpec = {
-      val decoded = java.util.Base64.getUrlDecoder.decode(keyStr.replaceAll("~", "="))
-      new SecretKeySpec(decoded, "AES")
+  // Cache BaseLocIdEncryption (by base key) and EncScheme0 (by scheme key) separately —
+  // both are constant across all rows in a query and expensive to construct.
+  object Cache {
+    private def toKey(s: String): SecretKeySpec = {
+      val b = Base64.getUrlDecoder.decode(s.replaceAll("~", "="))
+      new SecretKeySpec(b, "AES")
     }
+    private val baseEncs = new java.util.concurrent.ConcurrentHashMap[String, BaseLocIdEncryption]()
+    private val schemes  = new java.util.concurrent.ConcurrentHashMap[String, EncScheme0]()
+    def baseEnc(k: String): BaseLocIdEncryption = baseEncs.computeIfAbsent(k, s => BaseLocIdEncryption(toKey(s)))
+    def scheme(k: String):  EncScheme0          = schemes.computeIfAbsent(k,  s => new EncScheme0(toKey(s)))
+  }
 
+  class Handler {
     def txClocEncrypt(encryptedLocid: String, baseLocidKey: String, schemeKey: String,
                       timestampSec: Long, clientId: Int): String = {
       // 1. Decrypt encrypted_locid → raw base LocID
-      val baseEnc   = BaseLocIdEncryption(toKey(baseLocidKey))
       val decoded   = Base64.getUrlDecoder.decode(encryptedLocid)
-      val baseLocId = new String(baseEnc.decrypt(decoded), StandardCharsets.UTF_8)
+      val baseLocId = new String(Cache.baseEnc(baseLocidKey).decrypt(decoded), StandardCharsets.UTF_8)
       // 2. Build TxCloc and encode via EncScheme0
-      val scheme = new EncScheme0(toKey(schemeKey))
       val txCloc = TxCloc(baseLocId, timestampSec, clientId, GeoContext())
-      scheme.encoder.encode(txCloc).fold(t => throw t, identity)
+      Cache.scheme(schemeKey).encoder.encode(txCloc).fold(t => throw t, identity)
     }
   }
 $$;
@@ -183,15 +205,18 @@ AS $$
   import io.ol.locationid.encoding.EncScheme0
   import javax.crypto.spec.SecretKeySpec
 
-  class Handler {
-    private def toKey(keyStr: String): SecretKeySpec = {
-      val decoded = java.util.Base64.getUrlDecoder.decode(keyStr.replaceAll("~", "="))
-      new SecretKeySpec(decoded, "AES")
-    }
+  // Cache EncScheme0 by key string — constant for all rows in a query
+  object Cache {
+    private val schemes = new java.util.concurrent.ConcurrentHashMap[String, EncScheme0]()
+    def scheme(k: String): EncScheme0 = schemes.computeIfAbsent(k, s => {
+      val b = java.util.Base64.getUrlDecoder.decode(s.replaceAll("~", "="))
+      new EncScheme0(new SecretKeySpec(b, "AES"))
+    })
+  }
 
+  class Handler {
     def txClocDecrypt(txCloc: String, schemeKey: String): String = {
-      val scheme = new EncScheme0(toKey(schemeKey))
-      scheme.encoder.decode(txCloc).fold(
+      Cache.scheme(schemeKey).encoder.decode(txCloc).fold(
         t => throw t,
         d => s"""{"location_id":"${d.locationId}","timestamp":${d.timestamp},"enc_client_id":${d.encClientId}}"""
       )
@@ -237,18 +262,21 @@ AS $$
   import java.nio.charset.StandardCharsets
   import javax.crypto.spec.SecretKeySpec
 
-  class Handler {
-    private def toKey(keyStr: String): SecretKeySpec = {
-      val decoded = java.util.Base64.getUrlDecoder.decode(keyStr.replaceAll("~", "="))
-      new SecretKeySpec(decoded, "AES")
-    }
+  // Cache BaseLocIdEncryption by key string — constant for all rows in a query
+  object Cache {
+    private val encs = new java.util.concurrent.ConcurrentHashMap[String, BaseLocIdEncryption]()
+    def enc(k: String): BaseLocIdEncryption = encs.computeIfAbsent(k, s => {
+      val b = Base64.getUrlDecoder.decode(s.replaceAll("~", "="))
+      BaseLocIdEncryption(new SecretKeySpec(b, "AES"))
+    })
+  }
 
+  class Handler {
     def stableCloc(encryptedLocid: String, baseLocidKey: String, namespaceGuid: String,
                    clientId: Int, encClientId: Int, tier: String): String = {
       // 1. Decrypt encrypted_locid → raw base LocID
-      val baseEnc   = BaseLocIdEncryption(toKey(baseLocidKey))
       val decoded   = Base64.getUrlDecoder.decode(encryptedLocid)
-      val baseLocId = new String(baseEnc.decrypt(decoded), StandardCharsets.UTF_8)
+      val baseLocId = new String(Cache.enc(baseLocidKey).decrypt(decoded), StandardCharsets.UTF_8)
       // 2. Generate stable CLOC
       StableCloc(baseLocId).encode(namespaceGuid, clientId, encClientId, Some(tier))
     }
@@ -293,6 +321,8 @@ HANDLER = 'Handler.stableClocFromPlain'
 AS $$
   import io.ol.locationid.StableCloc
 
+  // No key derivation in this UDF — StableCloc is built from the plaintext locId
+  // which varies per row, so nothing to cache here.
   class Handler {
     def stableClocFromPlain(baseLocId: String, namespaceGuid: String,
                             decClientId: Int, encClientId: Int, tier: String): String =
