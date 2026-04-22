@@ -637,22 +637,31 @@ Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typic
 
 ### What DE Needs to Provide
 
-A **pip-installable Python package** (`locid-python` or equivalent) exposing the same encoding operations currently provided by `encode-lib`:
+Python source implementing the same encoding operations currently provided by `encode-lib`. **A pip package is not required** — plain `.py` files are sufficient. Snowflake Python UDFs support `IMPORTS = ('@stage/locid.py')` to load staged source files directly, the same way the JAR is staged today.
 
-| Current (JAR — Scala) | Target (pip — Python) |
-|-----------------------|----------------------|
+**Delivery options (any of these works):**
+
+| Option | What DE provides | How it's used in the UDF |
+|--------|-----------------|--------------------------|
+| **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')` |
+| **Wheel file** | A `.whl` built from the source | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid-x.y.z-py3-none-any.whl')` |
+| **pip package** | Published to Anaconda or private PyPI | `PACKAGES = ('locid-python==x.y.z')` |
+| **Scala/Java source** | Share the relevant encoding source files | We port the logic to Python on our side |
+
+**Required API surface** — five functions matching the JAR's operations:
+
+| Current (JAR — Scala) | Target (Python) |
+|-----------------------|----------------|
 | `BaseLocIdEncryption.encrypt(locId, key)` | `locid.base_encrypt(loc_id: str, key: str) -> str` |
 | `BaseLocIdEncryption.decrypt(ciphertext, key)` | `locid.base_decrypt(ciphertext: str, key: str) -> str` |
 | `TxCloc` + `EncScheme0.encode(...)` | `locid.txcloc_encrypt(encrypted_locid, base_key, scheme_key, ts, client_id) -> str` |
 | `EncScheme0.decode(txCloc)` | `locid.txcloc_decrypt(tx_cloc: str, scheme_key: str) -> dict` |
 | `StableCloc.encode(...)` | `locid.stable_cloc(encrypted_locid, base_key, ns_guid, client_id, enc_client_id, tier) -> str` |
 
-The package does not need to be public — it can be distributed as a private PyPI channel, a `.whl` file bundled in the app stage, or via Snowflake's Anaconda channel. Any of these options works with Snowflake's `PACKAGES = (...)` clause.
-
 ### What the Vectorized UDF Would Look Like
 
 ```sql
--- LOCID_TXCLOC_DECRYPT — vectorized Python example
+-- LOCID_TXCLOC_DECRYPT — vectorized Python example (source file delivery)
 CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
     TX_CLOC    VARCHAR,
     SCHEME_KEY VARCHAR
@@ -660,11 +669,11 @@ CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-PACKAGES = ('locid-python')   -- DE-provided pip package
+IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')   -- DE-provided source file
 HANDLER = 'decrypt_batch'
 AS $$
 import pandas as pd
-import locid  # DE's Python package
+import locid  # sourced from the staged locid.py
 
 # _scheme_cache: key string → EncScheme0 object; persists across batches in the same worker
 _scheme_cache = {}
@@ -681,18 +690,26 @@ $$;
 
 No changes are required to the stored procedures (`encrypt.sql`, `decrypt.sql`) — they call the UDFs via SQL and are unaffected by the language change.
 
-### Additional Benefits of a Python Package
+### Additional Benefits of Moving to Python
 
-| Concern | JAR (current) | Python package (target) |
-|---------|--------------|------------------------|
+| Concern | JAR (current) | Python (target) |
+|---------|--------------|-----------------|
 | JVM version compatibility | Must compile to match Snowflake's supported JVM target; caused one integration delay | No JVM dependency — runs on CPython 3.11 |
-| Distribution | Bundle `.jar` in app stage; re-bundle on JAR changes | `PACKAGES = ('locid-python==x.y.z')` — version-pinned, no file management |
+| Distribution | Bundle `.jar` in app stage; re-bundle on JAR changes | Stage `.py` file(s) alongside other app sources — same process already in place |
 | Testing | Requires Snowflake sandbox to validate | Standard `pytest` on any developer machine |
-| Customer inspection | Opaque binary | Python source or `.whl` — auditable if DE prefers |
+| Customer inspection | Opaque binary | Python source — auditable if DE prefers |
+
+### Request to DE
+
+1. **Provide Python source** implementing the five encoding operations listed above — plain `.py` file(s) are sufficient. A pip package or `.whl` is welcome but not required.
+2. **Alternatively**, share the relevant Scala/Java encoding source (the crypto and encoding classes from `encode-lib`) and we will handle the Python port on our side.
+3. **Version alignment**: The Python implementation should be kept in sync with `encode-lib` releases so encode/decode results remain byte-compatible across both paths.
 
 ### Status
 
 This is a **v2 roadmap item** — the current JAR-based implementation is fully functional and in use. Added to Open Items for tracking.
+
+> **Note:** If DE shares Scala/Java source for us to port, the Python implementation must be validated to produce byte-identical output to `encode-lib` (same ciphertext, same TX_CLOC encoding, same STABLE_CLOC UUIDs). A cross-compatibility test — running both the Scala UDFs and the Python UDFs against the same input and asserting identical output — is required before the Python path can be used in production.
 
 ---
 
