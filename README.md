@@ -606,6 +606,96 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
+## Roadmap: Python Package for Vectorized UDFs
+
+### Background
+
+The current implementation uses Scala UDFs backed by the `encode-lib` JAR. Each UDF is a scalar function — Snowflake calls it once per row within a SQL query. Snowflake's MPP engine distributes rows across warehouse nodes in parallel, which is already efficient. However, within each node the per-row call overhead accumulates:
+
+- Key derivation (`Base64.decode` + `SecretKeySpec`) runs per row (partially mitigated in v1.1 via JVM-level companion object caching)
+- Object allocation (`BaseLocIdEncryption`, `EncScheme0`) runs per row
+- JVM call dispatch overhead applies to every row
+
+For workloads in the tens or hundreds of millions of rows, this per-row overhead becomes measurable wall-clock time.
+
+There is also an ongoing practical concern: the JAR must be compiled to match Snowflake's supported JVM target. This has already caused one integration delay (Java 17 vs. Java 11 — see Open Items history). Each new Snowflake runtime version requires a JAR recompile and re-bundle.
+
+### Snowflake Python Vectorized UDFs
+
+Snowflake supports **vectorized Python UDFs** (`LANGUAGE PYTHON` with `@vectorized`). Instead of receiving one scalar value per call, the function receives a `pandas.Series` containing a **batch of rows** (typically thousands at a time) and returns a `pandas.Series`. This eliminates per-row dispatch overhead and allows the encoding logic to operate on the full batch using efficient array operations.
+
+```
+Scalar UDF (current):      Python vectorized UDF (target):
+  call(row_1) → result         call(Series[row_1, row_2, ... row_N]) → Series[result_1, ... result_N]
+  call(row_2) → result
+  ...
+  call(row_N) → result
+  (N function calls)           (1 function call per batch)
+```
+
+Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes.
+
+### What DE Needs to Provide
+
+A **pip-installable Python package** (`locid-python` or equivalent) exposing the same encoding operations currently provided by `encode-lib`:
+
+| Current (JAR — Scala) | Target (pip — Python) |
+|-----------------------|----------------------|
+| `BaseLocIdEncryption.encrypt(locId, key)` | `locid.base_encrypt(loc_id: str, key: str) -> str` |
+| `BaseLocIdEncryption.decrypt(ciphertext, key)` | `locid.base_decrypt(ciphertext: str, key: str) -> str` |
+| `TxCloc` + `EncScheme0.encode(...)` | `locid.txcloc_encrypt(encrypted_locid, base_key, scheme_key, ts, client_id) -> str` |
+| `EncScheme0.decode(txCloc)` | `locid.txcloc_decrypt(tx_cloc: str, scheme_key: str) -> dict` |
+| `StableCloc.encode(...)` | `locid.stable_cloc(encrypted_locid, base_key, ns_guid, client_id, enc_client_id, tier) -> str` |
+
+The package does not need to be public — it can be distributed as a private PyPI channel, a `.whl` file bundled in the app stage, or via Snowflake's Anaconda channel. Any of these options works with Snowflake's `PACKAGES = (...)` clause.
+
+### What the Vectorized UDF Would Look Like
+
+```sql
+-- LOCID_TXCLOC_DECRYPT — vectorized Python example
+CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
+    TX_CLOC    VARCHAR,
+    SCHEME_KEY VARCHAR
+)
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('locid-python')   -- DE-provided pip package
+HANDLER = 'decrypt_batch'
+AS $$
+import pandas as pd
+import locid  # DE's Python package
+
+# _scheme_cache: key string → EncScheme0 object; persists across batches in the same worker
+_scheme_cache = {}
+
+@vectorized(input=pd.DataFrame)
+def decrypt_batch(df: pd.DataFrame) -> pd.Series:
+    scheme_key = df.iloc[0, 1]  # constant for all rows in this query
+    if scheme_key not in _scheme_cache:
+        _scheme_cache[scheme_key] = locid.EncScheme0(scheme_key)
+    scheme = _scheme_cache[scheme_key]
+    return df.iloc[:, 0].apply(lambda tx: scheme.decode_json(tx))
+$$;
+```
+
+No changes are required to the stored procedures (`encrypt.sql`, `decrypt.sql`) — they call the UDFs via SQL and are unaffected by the language change.
+
+### Additional Benefits of a Python Package
+
+| Concern | JAR (current) | Python package (target) |
+|---------|--------------|------------------------|
+| JVM version compatibility | Must compile to match Snowflake's supported JVM target; caused one integration delay | No JVM dependency — runs on CPython 3.11 |
+| Distribution | Bundle `.jar` in app stage; re-bundle on JAR changes | `PACKAGES = ('locid-python==x.y.z')` — version-pinned, no file management |
+| Testing | Requires Snowflake sandbox to validate | Standard `pytest` on any developer machine |
+| Customer inspection | Opaque binary | Python source or `.whl` — auditable if DE prefers |
+
+### Status
+
+This is a **v2 roadmap item** — the current JAR-based implementation is fully functional and in use. Added to Open Items for tracking.
+
+---
+
 ## Security & Data Boundary
 
 - All customer data remains in the customer's Snowflake account at all times.
@@ -729,3 +819,4 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | UAT test account strategy | Separate Snowflake accounts required for UAT to surface multi-account permission issues. Coordinate with Alyssa for throwaway account creation and Snowflake credits. William's sandbox available as fallback. |
 | Key status / expiry handling | License keys in LocID Central have status and expiry date fields. Implement configurable handling — surface warnings when key is nearing expiry or inactive; optionally gate job execution if key is expired. |
 | Step-by-step deployment guides | Provide guides for deploying the native app to multiple environments (dev, UAT, prod), including config changes required per environment. |
+| Python package for vectorized UDFs | **v2 roadmap item.** Request DE to publish `locid-python` (pip-installable) implementing the five encoding operations in `encode-lib`. Enables `LANGUAGE PYTHON @vectorized` UDFs — 5–10× throughput improvement for large batches; also eliminates JVM version compatibility concerns. Distribution can be private (`.whl`, private PyPI, or Snowflake Anaconda channel). No stored procedure changes required. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
