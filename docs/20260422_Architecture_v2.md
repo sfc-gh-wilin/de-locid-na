@@ -254,7 +254,6 @@ Entitlements are fetched from LocID Central and cached in `APP_CONFIG`. They con
 | `allow_tx` | TX_CLOC column included in output |
 | `allow_stable` | STABLE_CLOC column included in output |
 | `allow_geo_context` | Geo context fields included in output |
-| *(future — de-scoped from v1)* `allow_homebiz` | HomeBiz_Type included in output |
 
 Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so new entitlements and fields can be added by DE without app code changes — only a config update and, if the schema changes, a new app version release.
 
@@ -352,7 +351,6 @@ Validation runs automatically after columns are mapped and is **advisory** — w
 | Region / Region Code | `allow_geo_context` | ✓ |
 | City / City Code | `allow_geo_context` | ✓ |
 | Postal Code | `allow_geo_context` | ✓ |
-| HomeBiz_Type | *(future — de-scoped from v1)* | — |
 
 Columns the customer is not entitled to are shown greyed out with a tooltip explaining why.
 
@@ -393,7 +391,6 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 | Region / Region Code | `allow_geo_context` | ✓ |
 | City / City Code | `allow_geo_context` | ✓ |
 | Postal Code | `allow_geo_context` | ✓ |
-| HomeBiz_Type | *(future — de-scoped from v1)* | — |
 
 **On completion:**
 - Result summary: rows in, rows decoded, rows written, runtime
@@ -445,7 +442,7 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 ```
 ✓ allow_encrypt    ✓ allow_decrypt
 ✓ allow_tx         ✓ allow_stable
-✓ allow_geo_context ✗ allow_homebiz (not provisioned)
+✓ allow_geo_context 
 ```
 
 **Output Column Registry**
