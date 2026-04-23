@@ -126,7 +126,7 @@ st.markdown("### :material/verified: Current Entitlements")
 ALL_FLAGS = [
     "allow_encrypt", "allow_decrypt",
     "allow_tx",      "allow_stable",
-    "allow_geo_context", "allow_homebiz",
+    "allow_geo_context",
 ]
 
 active_flags = _get_active_entitlements(sid)

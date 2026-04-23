@@ -209,7 +209,7 @@ with ent_col:
     st.caption("Fetched from LocID Central — drives output columns.")
 
     ALL_FLAGS = ["allow_encrypt", "allow_decrypt", "allow_tx",
-                 "allow_stable", "allow_geo_context", "allow_homebiz"]
+                 "allow_stable", "allow_geo_context"]
     active_flags: set[str] = set()
     if cached_raw:
         try:

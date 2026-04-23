@@ -25,7 +25,6 @@ KNOWN_FLAGS = {
     "allow_tx",
     "allow_stable",
     "allow_geo_context",
-    "allow_homebiz",
 }
 
 
