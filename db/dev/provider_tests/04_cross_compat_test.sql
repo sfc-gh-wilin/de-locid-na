@@ -3,7 +3,7 @@
 -- LocID Dev: Cross-compatibility validation test
 --
 -- Moved from: db/dev/provider/08_cross_compat_test.sql
---   Based on note from David Moser (DE), 2026-04-15
+--   Based on note from David Moser (LocID), 2026-04-15
 --
 -- PURPOSE:
 --   Verify that UDF output is cross-compatible with the production LocID API.
@@ -17,7 +17,7 @@
 --       If the IP lookup returns NULL, Test 1 will fail at step 1a.
 --
 --   Test 2 — Decrypt path:
---     Decode known tx_cloc from DE → LOCID_TXCLOC_DECRYPT → LOCID_STABLE_CLOC
+--     Decode known tx_cloc from LocID → LOCID_TXCLOC_DECRYPT → LOCID_STABLE_CLOC
 --
 -- ⚠ PRODUCTION KEY DERIVATION REQUIRED:
 --   Current 06_udfs.sql uses TEST-MODE key derivation (UTF-8 padded, AES-256).
@@ -143,7 +143,7 @@ SELECT
 
 
 -- ===========================================================================
--- TEST 2: Decrypt path — known tx_cloc from DE → STABLE_CLOC
+-- TEST 2: Decrypt path — known tx_cloc from LocID → STABLE_CLOC
 --
 -- tx_cloc: YwQ9ZH5MNvmkwK3cW3unpt-...  (David Moser, 2026-04-15)
 -- Expected: $stable_cloc_2 = T1-56c17ed5-69ac-5393-9327-aadc4e255e3f
@@ -203,3 +203,5 @@ SELECT
     $tx_cloc_1    AS tx_cloc_from_encrypt,
     $stable_cloc_1 AS stable_cloc_1,
     $stable_cloc_2 AS stable_cloc_2;
+
+

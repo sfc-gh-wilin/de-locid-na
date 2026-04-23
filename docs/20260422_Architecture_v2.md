@@ -1,14 +1,14 @@
 # LocID Snowflake Native App — Architecture
 
 **Version:** 2.0  
-**Provider:** Digital Envoy / Matchbook Data  
+**Provider:** LocID  
 **Prepared by:** Snowflake Solutions Architecture
 
 ---
 
 ## Overview
 
-The LocID Native App brings Digital Envoy's location identity enrichment capabilities natively into a customer's Snowflake account. Customers who today call cloud or on-premise APIs to enrich data with LocID identifiers can now run the same enrichment as a batch workflow — entirely within their own Snowflake environment, with no data leaving their account.
+The LocID Native App brings LocID's location identity enrichment capabilities natively into a customer's Snowflake account. Customers who today call cloud or on-premise APIs to enrich data with LocID identifiers can now run the same enrichment as a batch workflow — entirely within their own Snowflake environment, with no data leaving their account.
 
 **Two operations are supported:**
 
@@ -21,11 +21,11 @@ The LocID Native App brings Digital Envoy's location identity enrichment capabil
 
 ## How It Works
 
-The app is distributed via the Snowflake Native App Framework. Digital Envoy publishes the app to the Snowflake Marketplace; customers install it in their own account in a few clicks.
+The app is distributed via the Snowflake Native App Framework. LocID publishes the app to the Snowflake Marketplace; customers install it in their own account in a few clicks.
 
 ```
 ┌─────────────────────────────────┐      ┌──────────────────────────────┐
-│   Digital Envoy (Provider)      │      │   Customer (Consumer)        │
+│   LocID (Provider)      │      │   Customer (Consumer)        │
 │                                 │      │                              │
 │  LOCID_BUILDS (shared)          │◄─────│  App queries via share       │
 │  LOCID_BUILDS_IPV4_EXPLODED     │      │                              │
@@ -36,13 +36,13 @@ The app is distributed via the Snowflake Native App Framework. Digital Envoy pub
 └─────────────────────────────────┘      └──────────────────────────────┘
 ```
 
-**All customer data stays in the customer's Snowflake account.** Digital Envoy's LocID data lake is shared as read-only — no customer rows are written to Digital Envoy's account.
+**All customer data stays in the customer's Snowflake account.** LocID's data lake is shared as read-only — no customer rows are written to LocID's account.
 
-> **Data visibility:** The shared LocID tables (`LOCID_BUILDS`, `LOCID_BUILDS_IPV4_EXPLODED`, `LOCID_BUILD_DATES`) are **not directly queryable by consumers**. The Snowflake Native App Framework enforces this boundary at the platform level — only the app's own stored procedures and UDFs, executing within the app container, can read those tables. Consumer account users and roles have no visibility into DE's underlying data.
+> **Data visibility:** The shared LocID tables (`LOCID_BUILDS`, `LOCID_BUILDS_IPV4_EXPLODED`, `LOCID_BUILD_DATES`) are **not directly queryable by consumers**. The Snowflake Native App Framework enforces this boundary at the platform level — only the app's own stored procedures and UDFs, executing within the app container, can read those tables. Consumer account users and roles have no visibility into LocID's underlying data.
 
 ---
 
-## What Digital Envoy Provides
+## What LocID Provides
 
 | Component | Description |
 |-----------|-------------|
@@ -113,7 +113,7 @@ Pass 6: full range join on remaining rows
 UNION ALL all results
 ```
 
-> **Implementation note:** The 6-pass cascading approach above is the reference implementation DE provided as one efficient strategy for IPv6 range joins in Snowflake. It is not prescribed — alternative strategies (e.g. a single full range join, a different prefix-length sequence, or Snowflake's native `ASOF JOIN`) are valid approaches. The right choice depends on data distribution and performance testing; DE is open to alternatives.
+> **Implementation note:** The 6-pass cascading approach above is the reference implementation LocID provided as one efficient strategy for IPv6 range joins in Snowflake. It is not prescribed — alternative strategies (e.g. a single full range join, a different prefix-length sequence, or Snowflake's native `ASOF JOIN`) are valid approaches. The right choice depends on data distribution and performance testing; LocID is open to alternatives.
 
 Both strategies filter to relevant build dates covering the input timestamp.
 
@@ -178,7 +178,7 @@ A guided wizard runs once after install and can be re-accessed from the Configur
 |--------|---------|
 | **A. Welcome** | Introduction and "Get started" CTA |
 | **B. Have a key?** | Gate — Yes/No selection |
-| **C. Contact Sales** | Dead end for users without a key — shows DE contact info |
+| **C. Contact Sales** | Dead end for users without a key — shows LocID contact info |
 | **D. Enter License Key** | Masked input, format validation, stores key as Snowflake SECRET |
 | **E. Review Privileges** | Checks required grants; provides SQL for ACCOUNTADMIN if missing |
 | **F. Create App Objects** | Bootstraps `APP_CONFIG`, `JOB_LOG`, and the `HTTP_PING` UDF |
@@ -255,7 +255,7 @@ Entitlements are fetched from LocID Central and cached in `APP_CONFIG`. They con
 | `allow_stable` | STABLE_CLOC column included in output |
 | `allow_geo_context` | Geo context fields included in output |
 
-Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so new entitlements and fields can be added by DE without app code changes — only a config update and, if the schema changes, a new app version release.
+Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so new entitlements and fields can be added by LocID without app code changes — only a config update and, if the schema changes, a new app version release.
 
 ---
 
@@ -334,7 +334,7 @@ Validation runs automatically after columns are mapped and is **advisory** — w
 | **Timestamp range** | Check min/max of the timestamp column | Warning if any timestamps are older than 52 weeks — those rows will not match any LocID build and will be returned as unmatched |
 | **Null / empty values** | Count NULL or empty values in IP and timestamp columns | Shown as informational — nulls are skipped during matching |
 
-> **Note from DE (2026-04-20):** These validation checks are in scope for v1. Timestamp age limit of 52 weeks aligns with DE's build retention window.
+> **Note from LocID (2026-04-20):** These validation checks are in scope for v1. Timestamp age limit of 52 weeks aligns with LocID's build retention window.
 
 **Step 3 — Configure Output**
 - Radio: *Create new table* or *Overwrite existing table*
@@ -454,7 +454,7 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 | locid_country | Both | allow_geo_context | ✓ |
 | … | … | … | … |
 
-Read-only for customers. Updated by DE via app version releases when new fields are added.
+Read-only for customers. Updated by LocID via app version releases when new fields are added.
 
 **Advanced**
 - "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting connectivity
@@ -464,7 +464,7 @@ Read-only for customers. Updated by DE via app version releases when new fields 
 ## Security & Data Boundary
 
 - All customer data remains in the customer's Snowflake account at all times.
-- Digital Envoy's LocID data lake is shared as read-only objects — no customer rows are written to DE's account.
+- LocID's data lake is shared as read-only objects — no customer rows are written to LocID's account.
 - License key stored as a Snowflake `SECRET`, referenced by the External Access Integration — not visible in query results or logs.
 - Cryptographic keys (AES) fetched at runtime from LocID Central, passed as UDF parameters, never persisted in tables.
 - Masking policy on `APP_CONFIG` for sensitive configuration rows.
@@ -477,7 +477,7 @@ Using `ACCOUNTADMIN` for day-to-day deployment is a common concern in enterprise
 
 ### Provider Account — `LOCID_APP_ADMIN`
 
-Used by Digital Envoy's engineering or ops team to manage the Application Package, stage contents, and Marketplace listing.
+Used by LocID's engineering or ops team to manage the Application Package, stage contents, and Marketplace listing.
 
 ```sql
 -- Run as ACCOUNTADMIN (one-time setup)
@@ -576,13 +576,13 @@ Scalar UDF (current):      Python vectorized UDF (target):
 
 Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes.
 
-### What We Are Asking DE to Provide
+### What We Are Asking LocID to Provide
 
 Python source implementing the same encoding operations currently provided by `encode-lib`. **A pip package is not required** — plain `.py` files are sufficient. Snowflake Python UDFs support `IMPORTS = ('@stage/locid.py')` to load staged source files directly, the same way the JAR is staged today.
 
 **Delivery options (any of these works):**
 
-| Option | What DE provides | How it's used in the UDF |
+| Option | What LocID provides | How it's used in the UDF |
 |--------|-----------------|--------------------------|
 | **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')` |
 | **Wheel file** | A `.whl` built from the source | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid-x.y.z-py3-none-any.whl')` |
@@ -610,7 +610,7 @@ CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')   -- DE-provided source file
+IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')   -- LocID-provided source file
 HANDLER = 'decrypt_batch'
 AS $$
 import pandas as pd
@@ -638,17 +638,17 @@ No changes are required to the stored procedures (`encrypt.sql`, `decrypt.sql`) 
 | JVM version compatibility | Must compile to match Snowflake's supported JVM target; caused one integration delay | No JVM dependency — runs on CPython 3.11 |
 | Distribution | Bundle `.jar` in app stage; re-bundle on JAR changes | Stage `.py` file(s) alongside other app sources — same process already in place |
 | Testing | Requires Snowflake sandbox to validate | Standard `pytest` on any developer machine |
-| Customer inspection | Opaque binary | Python source — auditable if DE prefers |
+| Customer inspection | Opaque binary | Python source — auditable if LocID prefers |
 
-### Request to DE
+### Request to LocID
 
 1. **Provide Python source** implementing the five encoding operations listed above — plain `.py` file(s) are sufficient. A pip package or `.whl` is welcome but not required.
 2. **Alternatively**, share the relevant Scala/Java encoding source (the crypto and encoding classes from `encode-lib`) and we will handle the Python port on our side.
 3. **Version alignment**: The Python implementation should be kept in sync with `encode-lib` releases so encode/decode results remain byte-compatible across both paths.
 
-This is a **v2 roadmap item** — the current JAR-based implementation is fully functional and in use. We raise it now so DE can plan accordingly and so we have a clear upgrade path as customer data volumes grow.
+This is a **v2 roadmap item** — the current JAR-based implementation is fully functional and in use. We raise it now so LocID can plan accordingly and so we have a clear upgrade path as customer data volumes grow.
 
-> **Note:** If DE shares Scala/Java source for us to port, the Python implementation must be validated to produce byte-identical output to `encode-lib` (same ciphertext, same TX_CLOC encoding, same STABLE_CLOC UUIDs). A cross-compatibility test — running both the Scala UDFs and the Python UDFs against the same input and asserting identical output — is required before the Python path can be used in production.
+> **Note:** If LocID shares Scala/Java source for us to port, the Python implementation must be validated to produce byte-identical output to `encode-lib` (same ciphertext, same TX_CLOC encoding, same STABLE_CLOC UUIDs). A cross-compatibility test — running both the Scala UDFs and the Python UDFs against the same input and asserting identical output — is required before the Python path can be used in production.
 
 ---
 
@@ -674,7 +674,7 @@ Header: de-access-token: <api_key>
 }]
 ```
 
-> **Pending from DE:** The example above shows `encrypt_usage` only. DE needs to confirm the complete telemetry contract before implementation:
+> **Pending from LocID:** The example above shows `encrypt_usage` only. LocID needs to confirm the complete telemetry contract before implementation:
 > - All `metric_key` values they want reported (e.g. `encrypt_usage`, `decrypt_usage`, and any others)
 > - The full `dimensions` schema for each metric key — field names, types, and semantics of `hit` and `tier`
 
@@ -698,3 +698,4 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | | Streamlit main views (Home, Run Encrypt, Run Decrypt, History, Config) |
 | **5 — Polish** | Performance tuning (clustering keys, Search Optimization Service evaluation) |
 | | End-to-end testing (encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates) |
+

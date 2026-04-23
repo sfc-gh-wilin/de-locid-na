@@ -153,7 +153,7 @@ def _check_entitlement(session, flag: str) -> None:
 
     raise PermissionError(
         f"Your LocID license does not include '{flag}'. "
-        "Contact Digital Envoy to upgrade your access."
+        "Contact LocID to upgrade your access."
     )
 
 
@@ -378,3 +378,5 @@ $$;
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_DECRYPT(
     VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY, VARCHAR
 ) TO APPLICATION ROLE APP_ADMIN;
+
+

@@ -80,7 +80,7 @@ def check_entitlement(session: snowpark.Session, flag: str) -> None:
     if flag not in active:
         raise PermissionError(
             f"Your LocID license does not include '{flag}'. "
-            "Contact Digital Envoy to upgrade your access."
+            "Contact LocID to upgrade your access."
         )
 
 
@@ -122,3 +122,5 @@ def get_active_output_cols(session: snowpark.Session,
         })
 
     return result
+
+

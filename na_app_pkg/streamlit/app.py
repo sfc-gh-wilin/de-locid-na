@@ -60,7 +60,7 @@ if not onboarding_complete:
 # Header
 # ---------------------------------------------------------------------------
 st.title("LocID for Snowflake")
-st.caption("Digital Envoy / Matchbook Data — Batch LocID Enrichment")
+st.caption("LocID — Batch Enrichment")
 st.divider()
 
 # ---------------------------------------------------------------------------
@@ -138,3 +138,5 @@ with btn_col2:
 with btn_col3:
     if st.button("View History", use_container_width=True):
         st.switch_page("pages/04_job_history.py")
+
+

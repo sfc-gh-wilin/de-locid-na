@@ -123,7 +123,7 @@ SELECT $tx_cloc AS tx_cloc;
 -- YjRFjkdgbrRlZB0F3D5078a8dfjeVFCLa-a0ACVcW4hJn3GusjsfLmgISrfYNo2a2x0438-3GidvO4wh7t7UoOZ7srQ~.0
 
 -- ✓ RESOLVED (2026-04-15): Switched to LANGUAGE SCALA RUNTIME_VERSION = '2.13' with inline
---   handlers. SnowflakeHandler wrapper from DE is no longer required.
+--   handlers. SnowflakeHandler wrapper from LocID is no longer required.
 
 -- ===========================================================================
 -- TEST 3: LOCID_TXCLOC_DECRYPT — round-trip assertion
@@ -206,3 +206,5 @@ SELECT
     $stable_cloc AS stable_cloc;
 -- tx_cloc: YjRFjkdgbrRlZB0F3D5078a8dfjeVFCLa-a0ACVcW4hJn3GusjsfLmgISrfYNo2a2x0438-3GidvO4wh7t7UoOZ7srQ~.0
 -- stable_cloc: T0-81751ea7-fe52-5663-b339-18f2ace84623
+
+

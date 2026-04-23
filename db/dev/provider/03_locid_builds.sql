@@ -2,7 +2,7 @@
 -- Table: LOCID_BUILDS
 -- Description: Core LocID data lake. Contains IP-to-LocID mappings for both
 --              IPv4 (ranges) and IPv6 (ranges + hex representations).
---              Updated weekly via Airflow DAG on DE side.
+--              Updated weekly via Airflow DAG on LocID side.
 --
 -- IPv4 matching: joined via LOCID_BUILDS_IPV4_EXPLODED (equi-join), then back
 --                to this table on (build_dt, start_ip, end_ip).
@@ -35,3 +35,5 @@ CREATE OR REPLACE TABLE LOCID_DEV.STAGING.LOCID_BUILDS (
     locid_horizontal_accuracy NUMBER              -- accuracy radius in meters
 )
 CLUSTER BY (build_dt);
+
+

@@ -1,5 +1,5 @@
 -- =============================================================================
--- Provider: Digital Envoy / Matchbook Data
+-- Provider: LocID
 -- Environment: DEV
 -- Description: Database and schema setup for LocID data lake
 -- =============================================================================
@@ -18,3 +18,5 @@ GRANT USAGE ON SCHEMA   LOCID_DEV.STAGING TO ROLE LOCID_APP_ADMIN;
 GRANT CREATE TABLE  ON SCHEMA LOCID_DEV.STAGING TO ROLE LOCID_APP_ADMIN;
 GRANT CREATE STAGE  ON SCHEMA LOCID_DEV.STAGING TO ROLE LOCID_APP_ADMIN;
 GRANT CREATE FUNCTION ON SCHEMA LOCID_DEV.STAGING TO ROLE LOCID_APP_ADMIN;
+
+

@@ -17,7 +17,7 @@
 --   9. POST usage statistics to LocID Central
 --
 -- Provider data reference:
---   _PROVIDER_SCHEMA constant (below) must match the schema where DE's shared
+--   _PROVIDER_SCHEMA constant (below) must match the schema where LocID's shared
 --   LOCID_BUILDS, LOCID_BUILDS_IPV4_EXPLODED, and LOCID_BUILD_DATES tables are
 --   exposed via the app package's included share. Update before app deployment.
 -- =============================================================================
@@ -50,7 +50,7 @@ import snowflake.snowpark as snowpark
 
 # =============================================================================
 # Provider-shared table references.
-# Must match the schema where DE's LOCID data is exposed in the app package.
+# Must match the schema where LocID's LOCID data is exposed in the app package.
 # Update this constant to match the final app package share configuration.
 # =============================================================================
 _PROVIDER_SCHEMA = 'LOCID_DEV.STAGING'
@@ -160,7 +160,7 @@ def _check_entitlement(session, flag: str) -> None:
 
     raise PermissionError(
         f"Your LocID license does not include '{flag}'. "
-        "Contact Digital Envoy to upgrade your access."
+        "Contact LocID to upgrade your access."
     )
 
 
@@ -568,3 +568,5 @@ $$;
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
     VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY, VARCHAR
 ) TO APPLICATION ROLE APP_ADMIN;
+
+

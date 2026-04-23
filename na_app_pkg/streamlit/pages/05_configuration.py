@@ -124,7 +124,7 @@ st.divider()
 # Section 3 — Output Column Registry
 # ---------------------------------------------------------------------------
 st.subheader("Output Column Registry")
-st.caption("Managed by Digital Envoy via app version releases. Read-only.")
+st.caption("Managed by LocID via app version releases. Read-only.")
 
 registry_rows = session.sql(
     "SELECT config_key, config_value, is_active "
@@ -155,3 +155,5 @@ st.divider()
 st.subheader("Advanced")
 if st.button("Re-run Setup Wizard"):
     st.switch_page("pages/01_setup_wizard.py")
+
+

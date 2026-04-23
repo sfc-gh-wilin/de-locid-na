@@ -82,12 +82,12 @@ elif step == "B":
 # Screen C — Contact Sales
 # ---------------------------------------------------------------------------
 elif step == "C":
-    st.header("Contact Digital Envoy")
+    st.header("Contact LocID")
     st.info(
-        "To get a LocID license key, contact Digital Envoy / Matchbook Data. "
+        "To get a LocID license key, contact LocID. "
         "Once you have your license key, re-open this wizard to continue setup."
     )
-    # TODO: add DE contact details (email, URL)
+    # TODO: add LocID contact details (email, URL)
     if st.button("← Back"):
         st.session_state.wizard_step = "B"
         st.rerun()
@@ -217,7 +217,7 @@ elif step == "H":
     if not active_entries:
         st.error(
             "No active API keys found in your license response. "
-            "Go back and re-validate your license key, or contact Digital Envoy."
+            "Go back and re-validate your license key, or contact LocID."
         )
         if st.button("← Back"):
             st.session_state.wizard_step = "G"
@@ -268,3 +268,5 @@ elif step == "I":
     st.write("- View your **Job History** at any time from the sidebar")
     if st.button("Launch App →"):
         st.switch_page("app.py")
+
+

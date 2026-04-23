@@ -1,6 +1,6 @@
 # LocID for Snowflake — Native App
 
-**Provider:** Digital Envoy / Matchbook Data  
+**Provider:** LocID  
 **Version:** 1.0
 
 Enrich your IP + timestamp data with LocID location identifiers — TX_CLOC and STABLE_CLOC — entirely within your Snowflake account. No data leaves your environment.
@@ -14,14 +14,14 @@ Enrich your IP + timestamp data with LocID location identifiers — TX_CLOC and 
 | **Encrypt** | Table of `(unique_id, ip_address, timestamp)` | TX_CLOC, STABLE_CLOC, geo context |
 | **Decrypt** | Table of `(unique_id, tx_cloc)` | STABLE_CLOC, geo context |
 
-Results are written to a table you specify. All processing happens inside your Snowflake account using Digital Envoy's shared LocID data lake.
+Results are written to a table you specify. All processing happens inside your Snowflake account using LocID's shared LocID data lake.
 
 ---
 
 ## Prerequisites
 
 - Snowflake account (Business Critical edition recommended for SECRET object support)
-- A valid LocID license key from Digital Envoy
+- A valid LocID license key from LocID
 - ACCOUNTADMIN role (required to approve permissions during installation)
 - A warehouse the app can use to run enrichment jobs
 
@@ -92,7 +92,7 @@ The following objects are created in your app database:
 ## Data Privacy
 
 - **Your data never leaves your Snowflake account.** Input tables, output tables, and intermediate results are all within your account.
-- Digital Envoy's LocID data lake is shared as **read-only** — no rows from your data are written to Digital Envoy's account.
+- LocID's data lake is shared as **read-only** — no rows from your data are written to LocID's account.
 - Your LocID license key is stored as a Snowflake `SECRET` object — it is never exposed in query results, logs, or the app UI.
 - The only outbound call is to `central.locid.com` for license validation and job-level usage metrics (row counts and runtime — no record-level data).
 
@@ -118,7 +118,7 @@ GRANT USAGE ON WAREHOUSE <your_warehouse>
 
 ## Support
 
-Contact Digital Envoy / Matchbook Data for:
+Contact LocID for:
 - License key issues or entitlement changes
 - Questions about TX_CLOC / STABLE_CLOC output
 - App version upgrades
@@ -151,3 +151,5 @@ na_app_pkg/
         ├── locid_central.py  # LocID Central API client
         └── entitlements.py   # Entitlement helpers
 ```
+
+

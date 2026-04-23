@@ -1,6 +1,6 @@
 # LocID Snowflake Native App — Architecture
 
-**Provider:** Digital Envoy / Matchbook Data  
+**Provider:** LocID  
 **Purpose:** Batch LocID enrichment for Snowflake customers — appends TX_CLOC and STABLE_CLOC identifiers to customer IP + timestamp data, entirely within the customer's Snowflake account.
 
 ---
@@ -10,7 +10,7 @@
 Customers who use LocID today call cloud or on-premise APIs to enrich their data with location identifiers. This Native App extends that capability into Snowflake as a batch workflow:
 
 1. Customer provides a table with `(unique_id, ip_address, timestamp)` rows.
-2. The app matches each IP + timestamp against Digital Envoy's weekly LocID data lake.
+2. The app matches each IP + timestamp against LocID's weekly LocID data lake.
 3. For each matched row, the Scala UDF generates encrypted identifiers (TX_CLOC, STABLE_CLOC) and optional geo context.
 4. Results are written to a customer-specified output table — all within the customer's account.
 5. Usage statistics are reported back to LocID Central over HTTPS.
@@ -99,7 +99,7 @@ locid-native-app/
 
 ### Snowflake Object Layout (Provider Side)
 
-Digital Envoy maintains these tables in their Snowflake account, shared to the Native App:
+LocID maintains these tables in their Snowflake account, shared to the Native App:
 
 ```
 LOCID.STAGING.LOCID_BUILDS                  -- IP ranges, encrypted_locid, geo context
@@ -107,7 +107,7 @@ LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED    -- Exploded IPv4 table (equi-join)
 LOCID.STAGING.LOCID_BUILD_DATES             -- Weekly build date reference
 ```
 
-Updated weekly via an Airflow DAG on DE's side. The Native App accesses these as shared objects — no customer data is written to the provider's account.
+Updated weekly via an Airflow DAG on LocID's side. The Native App accesses these as shared objects — no customer data is written to the provider's account.
 
 ### Snowflake Object Layout (App Side — installed in customer account)
 
@@ -222,7 +222,7 @@ Multi-screen Streamlit wizard, runs once post-install.
 |--------|---------|-------------|
 | **A. Welcome** | Intro | "Get started" CTA |
 | **B. Have a key?** | Gate | Yes/No radio |
-| **C. Contact Sales** | Dead end (no key) | Show DE contact info, close wizard |
+| **C. Contact Sales** | Dead end (no key) | Show LocID contact info, close wizard |
 | **D. Enter License Key** | Capture credential | Masked input, validate format, store as Snowflake SECRET |
 | **E. Review Privileges** | Grant check | Check EAI, DB/schema grants; show SQL for ACCOUNTADMIN |
 | **F. Create App Objects** | Bootstrap | Create APP_SHARED schema, APP_CONFIG, JOB_LOG, HTTP_PING UDF |
@@ -332,7 +332,7 @@ Entitlements are fetched from LocID Central per license key and cached in `APP_C
 | `allow_geo_context` | Geo context fields included in output |
 | *(future — de-scoped from v1)* `allow_homebiz` | HomeBiz_Type included in output |
 
-Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so new entitlements/fields can be added by DE without app code changes — only a config table update and a new app version release if schema changes.
+Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so new entitlements/fields can be added by LocID without app code changes — only a config table update and a new app version release if schema changes.
 
 ### APP_CONFIG Table Design
 
@@ -589,7 +589,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
   | locid_country | Both | allow_geo_context | ✓ |
   | … | … | … | … |
 
-- Read-only for customers; updated by DE via app version releases when new fields are added
+- Read-only for customers; updated by LocID via app version releases when new fields are added
 
 **Advanced**
 - "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting EAI connectivity
@@ -635,13 +635,13 @@ Scalar UDF (current):      Python vectorized UDF (target):
 
 Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes.
 
-### What DE Needs to Provide
+### What LocID Needs to Provide
 
 Python source implementing the same encoding operations currently provided by `encode-lib`. **A pip package is not required** — plain `.py` files are sufficient. Snowflake Python UDFs support `IMPORTS = ('@stage/locid.py')` to load staged source files directly, the same way the JAR is staged today.
 
 **Delivery options (any of these works):**
 
-| Option | What DE provides | How it's used in the UDF |
+| Option | What LocID provides | How it's used in the UDF |
 |--------|-----------------|--------------------------|
 | **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')` |
 | **Wheel file** | A `.whl` built from the source | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid-x.y.z-py3-none-any.whl')` |
@@ -669,7 +669,7 @@ CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')   -- DE-provided source file
+IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')   -- LocID-provided source file
 HANDLER = 'decrypt_batch'
 AS $$
 import pandas as pd
@@ -697,9 +697,9 @@ No changes are required to the stored procedures (`encrypt.sql`, `decrypt.sql`) 
 | JVM version compatibility | Must compile to match Snowflake's supported JVM target; caused one integration delay | No JVM dependency — runs on CPython 3.11 |
 | Distribution | Bundle `.jar` in app stage; re-bundle on JAR changes | Stage `.py` file(s) alongside other app sources — same process already in place |
 | Testing | Requires Snowflake sandbox to validate | Standard `pytest` on any developer machine |
-| Customer inspection | Opaque binary | Python source — auditable if DE prefers |
+| Customer inspection | Opaque binary | Python source — auditable if LocID prefers |
 
-### Request to DE
+### Request to LocID
 
 1. **Provide Python source** implementing the five encoding operations listed above — plain `.py` file(s) are sufficient. A pip package or `.whl` is welcome but not required.
 2. **Alternatively**, share the relevant Scala/Java encoding source (the crypto and encoding classes from `encode-lib`) and we will handle the Python port on our side.
@@ -709,14 +709,14 @@ No changes are required to the stored procedures (`encrypt.sql`, `decrypt.sql`) 
 
 This is a **v2 roadmap item** — the current JAR-based implementation is fully functional and in use. Added to Open Items for tracking.
 
-> **Note:** If DE shares Scala/Java source for us to port, the Python implementation must be validated to produce byte-identical output to `encode-lib` (same ciphertext, same TX_CLOC encoding, same STABLE_CLOC UUIDs). A cross-compatibility test — running both the Scala UDFs and the Python UDFs against the same input and asserting identical output — is required before the Python path can be used in production.
+> **Note:** If LocID shares Scala/Java source for us to port, the Python implementation must be validated to produce byte-identical output to `encode-lib` (same ciphertext, same TX_CLOC encoding, same STABLE_CLOC UUIDs). A cross-compatibility test — running both the Scala UDFs and the Python UDFs against the same input and asserting identical output — is required before the Python path can be used in production.
 
 ---
 
 ## Security & Data Boundary
 
 - All customer data remains in the customer's Snowflake account at all times.
-- Digital Envoy's LocID data is shared as read-only objects; no customer rows are written to DE's account.
+- LocID's data is shared as read-only objects; no customer rows are written to LocID's account.
 - License key stored as a Snowflake `SECRET`, referenced by EAI — not visible in query results or logs.
 - Crypto keys (AES-128) fetched at runtime from LocID Central, passed as UDF parameters, never persisted in tables.
 - Masking policy on `APP_CONFIG.config_value` for sensitive rows.
@@ -729,7 +729,7 @@ Using `ACCOUNTADMIN` for day-to-day deployment is a common concern in enterprise
 
 ### Provider Account — `LOCID_APP_ADMIN`
 
-Used by Digital Envoy's engineering or ops team to manage the Application Package, stage contents, and Marketplace listing.
+Used by LocID's engineering or ops team to manage the Application Package, stage contents, and Marketplace listing.
 
 ```sql
 -- Run as ACCOUNTADMIN (one-time setup)
@@ -811,7 +811,7 @@ Header: de-access-token: <api_key from entitlements>
 }]
 ```
 
-> **Pending from DE:** The example above shows `encrypt_usage` only. DE needs to confirm the complete telemetry contract before implementation:
+> **Pending from LocID:** The example above shows `encrypt_usage` only. LocID needs to confirm the complete telemetry contract before implementation:
 > - All `metric_key` values they want reported (e.g. `encrypt_usage`, `decrypt_usage`, and any others)
 > - The full `dimensions` schema for each metric key — field names, types, and semantics of `hit` and `tier`
 
@@ -819,7 +819,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 
 ---
 
-## Open Items / Pending from DE
+## Open Items / Pending from LocID
 
 | Item | Status |
 |------|--------|
@@ -827,7 +827,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | AES key derivation (test vs. production) | ✓ Resolved 2026-04-15/16. Production derivation confirmed: `secret.replaceAll("~","=")` → `Base64.getUrlDecoder().decode()` → AES key bytes. All `toKey()` handlers in `06_udfs.sql` and `locid_udf.sql` updated to production mode. Cross-compatibility test: `08_cross_compat_test.sql`. |
 | IPv6 matching SQL | ✓ Implemented (2026-04-20). Optimised 6-pass cascading hex-prefix range join implemented in `na_app_pkg/src/procs/encrypt.sql`. Key optimisations vs. reference POC: ip_hex pre-computed once (not 6×), LOCID_BUILDS scanned once (date-filtered pre-materialisation), prefix filter applied before range join, single accumulator anti-join per pass. |
 | HomeBiz_Type entitlement details | De-scoped from v1 (2026-04-16). No solid spec yet. Retained as a future entitlement flag (`allow_homebiz`); will be scoped and implemented in a subsequent version. |
-| Additional FC50 columns / new entitlements | Pending DE R&D spike outcome |
+| Additional FC50 columns / new entitlements | Pending LocID R&D spike outcome |
 | Telemetry payload examples from existing real-time services | David to provide |
 | Reference Docker container for encrypt/decrypt validation | David to investigate |
 | V6 data confirmation in sandbox account | David to chase down |
@@ -836,4 +836,6 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | UAT test account strategy | Separate Snowflake accounts required for UAT to surface multi-account permission issues. Coordinate with Alyssa for throwaway account creation and Snowflake credits. William's sandbox available as fallback. |
 | Key status / expiry handling | License keys in LocID Central have status and expiry date fields. Implement configurable handling — surface warnings when key is nearing expiry or inactive; optionally gate job execution if key is expired. |
 | Step-by-step deployment guides | Provide guides for deploying the native app to multiple environments (dev, UAT, prod), including config changes required per environment. |
-| Python package for vectorized UDFs | **v2 roadmap item.** Request DE to publish `locid-python` (pip-installable) implementing the five encoding operations in `encode-lib`. Enables `LANGUAGE PYTHON @vectorized` UDFs — 5–10× throughput improvement for large batches; also eliminates JVM version compatibility concerns. Distribution can be private (`.whl`, private PyPI, or Snowflake Anaconda channel). No stored procedure changes required. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
+| Python package for vectorized UDFs | **v2 roadmap item.** Request LocID to publish `locid-python` (pip-installable) implementing the five encoding operations in `encode-lib`. Enables `LANGUAGE PYTHON @vectorized` UDFs — 5–10× throughput improvement for large batches; also eliminates JVM version compatibility concerns. Distribution can be private (`.whl`, private PyPI, or Snowflake Anaconda channel). No stored procedure changes required. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
+
+

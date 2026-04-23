@@ -463,7 +463,7 @@ LIMIT 20;
 
 ## Phase 8 — Cross-Compatibility Test
 
-This test verifies UDF output is cross-compatible with the LocID production API using known values from DE.
+This test verifies UDF output is cross-compatible with the LocID production API using known values from LocID.
 
 Before running, confirm:
 1. UDFs are recreated with **production key derivation** (see header of `04_cross_compat_test.sql`)
@@ -535,3 +535,5 @@ SELECT *
 FROM LOCID_DEV_APP.APP_SCHEMA.JOB_LOG
 ORDER BY started_at DESC;
 ```
+
+

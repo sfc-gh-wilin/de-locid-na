@@ -1,6 +1,6 @@
 # LocID Native App — Work Update
 **Date:** 2026-04-20  
-**Project:** Digital Envoy / Matchbook Data — Snowflake Native App
+**Project:** LocID — Snowflake Native App
 
 ## 7 Sections
 
@@ -10,7 +10,7 @@
 4. Deployment Roles — the two custom roles (safe to share — shows good security posture)
 5. Sandbox Testing Framework — test data and test suites
 6. Sandbox Deployment Guide — the step-by-step doc
-7. Open Items — things still pending, including the 8.8.8.8 data item that's on DE to confirm
+7. Open Items — things still pending, including the 8.8.8.8 data item that's on LocID to confirm
 
 ### Sending Over
 
@@ -27,7 +27,7 @@ Hi Alyssa, here are the items I am currently on:
 
 - Drafted full Native App architecture covering app structure, IP matching strategy (IPv4 equi-join, IPv6 cascading range join), Streamlit views, customer onboarding workflow, entitlement model, and usage telemetry.
 - Published two architecture documents: `README.md` (high-level overview) and `docs/20260413_Architecture_v1.md` (detailed technical spec).
-- Addressed DE feedback on IP matching strategy, data visibility, and input validation (IP format + timestamp age checks).
+- Addressed LocID feedback on IP matching strategy, data visibility, and input validation (IP format + timestamp age checks).
 
 ---
 
@@ -38,7 +38,7 @@ Hi Alyssa, here are the items I am currently on:
   - `LOCID_BASE_ENCRYPT` / `LOCID_BASE_DECRYPT`
   - `LOCID_TXCLOC_ENCRYPT` / `LOCID_TXCLOC_DECRYPT`
   - `LOCID_STABLE_CLOC`
-- Resolved JAR compatibility issue (Java 11 → Scala 2.13 inline handlers; no new wrapper class required from DE).
+- Resolved JAR compatibility issue (Java 11 → Scala 2.13 inline handlers; no new wrapper class required from LocID).
 
 ---
 
@@ -68,7 +68,7 @@ Hi Alyssa, here are the items I am currently on:
 - Created synthetic data generator (`00_generate_test_data.sql`) — no real client CSV files needed for sandbox testing; generates 100-row deterministic IP dataset using Snowflake `GENERATOR()`.
 - Created consumer simulation table (`02_customer_input_sample.sql`): `LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT` with non-standard column names to exercise the app's column mapping UI.
 - Created UDF round-trip test suite (`03_udf_test.sql`): BASE_ENCRYPT/DECRYPT, TXCLOC_ENCRYPT/DECRYPT, STABLE_CLOC.
-- Created cross-compatibility test (`04_cross_compat_test.sql`): verifies UDF output matches DE production API using known values.
+- Created cross-compatibility test (`04_cross_compat_test.sql`): verifies UDF output matches LocID production API using known values.
 
 ---
 
@@ -87,6 +87,8 @@ Hi Alyssa, here are the items I am currently on:
 
 ## Open Items
 
-- `8.8.8.8` in sandbox `LOCID_BUILDS` — required for cross-compat Test 1 (DE to confirm V6 data availability).
+- `8.8.8.8` in sandbox `LOCID_BUILDS` — required for cross-compat Test 1 (LocID to confirm V6 data availability).
 - Stored procedure procs (`LOCID_ENCRYPT`, `LOCID_DECRYPT`) — implementation complete; end-to-end test pending JAR staged and app installed.
 - Production key derivation — `06_udfs.sql` uses production-mode Base64 key derivation; cross-compat test requires production keys from LocID Central (`central.locid.com`).
+
+

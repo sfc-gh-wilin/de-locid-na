@@ -2,7 +2,7 @@ manifest_version: 1
 
 # =============================================================================
 # LocID Native App — manifest.yml
-# Provider: Digital Envoy / Matchbook Data
+# Provider: LocID
 # =============================================================================
 
 version:
@@ -48,3 +48,5 @@ external_access_integrations:
 configuration:
   log_level:   INFO
   trace_level: ALWAYS
+
+
