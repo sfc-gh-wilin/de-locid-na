@@ -491,8 +491,10 @@ GRANT CREATE APPLICATION PACKAGE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 -- Create the data share that backs the app's shared read-only objects
 GRANT CREATE SHARE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
--- Publish and manage the Snowflake Marketplace listing
-GRANT MANAGE LISTING ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
+-- Create and manage listings (Specified Consumers + Marketplace)
+-- NOTE: Requires Marketplace access for public listings; Specified Consumers works on all accounts.
+-- The publishing role must own the Application Package (or have MODIFY on the listing).
+GRANT CREATE LISTING ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 -- Warehouse for builds and testing
 GRANT USAGE ON WAREHOUSE <provider_warehouse> TO ROLE LOCID_APP_ADMIN;
 
