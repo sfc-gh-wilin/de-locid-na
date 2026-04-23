@@ -22,8 +22,8 @@
 -- =============================================================================
 -- CONFIGURATION — set these values before running
 -- =============================================================================
-SET my_warehouse = 'DEV_WH';         -- warehouse name for both roles
-SET my_username  = 'YOUR_USERNAME';  -- Snowflake username to receive both roles
+SET my_warehouse = 'WLIN_WH_XS';  -- warehouse name for both roles
+SET my_username  = 'WILIN';  -- Snowflake username to receive both roles
 -- =============================================================================
 
 
@@ -49,7 +49,14 @@ GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 -- Create the data share that backs the app's shared read-only objects
 GRANT CREATE SHARE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 
--- Publish and manage the Snowflake Marketplace listing
+-- Publish and manage the Snowflake Marketplace listing.
+-- REQUIRES: The account must have Snowflake Marketplace access enabled.
+--   - Sandbox accounts without Marketplace access will error here.
+--     If so, skip this line for now; run it manually as ACCOUNTADMIN on the
+--     provider account once Marketplace access is confirmed.
+--   - If MANAGE LISTING cannot be delegated to a custom role on your account,
+--     an ACCOUNTADMIN must perform all listing create/publish/update steps
+--     directly in the Snowflake Marketplace UI or via Snowsight.
 GRANT MANAGE LISTING ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 
 -- Warehouse access for builds and testing

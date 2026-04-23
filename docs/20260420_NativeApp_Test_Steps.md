@@ -47,6 +47,8 @@ Two custom roles are used throughout this guide — created once by `ACCOUNTADMI
 All SQL paths below are relative to the repository root. Run Snow CLI from the repository root directory.
 
 ```bash
+brew update && brew upgrade snowflake-cli
+
 cd /Users/wilin/Docs/LocalProjects/GitHub/de-locid-na
 
 # Verify connection
@@ -60,7 +62,7 @@ snow connection test -c wl_sandbox
 Create the two custom deployment roles. This only needs to run once per Snowflake account.
 
 ```bash
-snow -c wl_sandbox sql -f "db/dev/provider/00_roles.sql"
+snow sql --connection wl_sandbox -f "db/dev/provider/00_roles.sql"
 ```
 
 Before running, open `db/dev/provider/00_roles.sql` and replace the two placeholders:
@@ -535,5 +537,3 @@ SELECT *
 FROM LOCID_DEV_APP.APP_SCHEMA.JOB_LOG
 ORDER BY started_at DESC;
 ```
-
-
