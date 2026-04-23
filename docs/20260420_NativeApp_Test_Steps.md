@@ -52,7 +52,7 @@ brew update && brew upgrade snowflake-cli
 cd /Users/wilin/Docs/LocalProjects/GitHub/de-locid-na
 
 # Verify connection
-snow connection test -c wl_sandbox
+snow connection test -c wl_sandbox_dcr
 ```
 
 ---
@@ -148,16 +148,16 @@ When running the Encrypt job in the app (Phase 6), select timestamp format **dat
 
 ```bash
 snow object stage copy Coco/db/LOCID_BUILDS.csv \
-    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox
+    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 
 snow object stage copy Coco/db/LOCID_BUILDS_IPV4_EXPLODED.csv \
-    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox
+    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 
 snow object stage copy Coco/db/LOCID_BUILD_DATES.csv \
-    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox
+    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 
 snow object stage copy Coco/db/CUSTOMER_TEST_INPUT_2K.csv \
-    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox
+    @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 ```
 
 > The stage is created by `01_load_test_data.sql`. If it does not yet exist, run that file first up to the `LIST` command, then return here to upload.
@@ -208,35 +208,35 @@ Run from the repository root. Upload manifest and setup script first, then all o
 
 ```bash
 # Root files
-snow object stage copy na_app_pkg/manifest.yml @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/setup.sql    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/README.md    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox
+snow object stage copy na_app_pkg/manifest.yml @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/setup.sql    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/README.md    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox_dcr
 
 # encode-lib JAR
 snow object stage copy \
     "Coco/tmp/20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar" \
-    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/lib/ --overwrite --connection wl_sandbox
+    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/lib/ --overwrite --connection wl_sandbox_dcr
 
 # UDF and proc SQL scripts
-snow object stage copy na_app_pkg/src/udfs/locid_udf.sql    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/udfs/  --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/src/procs/encrypt.sql      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/procs/ --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/src/procs/decrypt.sql      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/procs/ --overwrite --connection wl_sandbox
+snow object stage copy na_app_pkg/src/udfs/locid_udf.sql    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/udfs/  --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/src/procs/encrypt.sql      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/procs/ --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/src/procs/decrypt.sql      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/procs/ --overwrite --connection wl_sandbox_dcr
 
 # Streamlit app
-snow object stage copy na_app_pkg/streamlit/app.py                        @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/        --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/streamlit/pages/01_setup_wizard.py      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/streamlit/pages/02_run_encrypt.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/streamlit/pages/03_run_decrypt.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/streamlit/pages/04_job_history.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/streamlit/pages/05_configuration.py     @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/streamlit/utils/locid_central.py        @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/utils/  --overwrite --connection wl_sandbox
-snow object stage copy na_app_pkg/streamlit/utils/entitlements.py         @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/utils/  --overwrite --connection wl_sandbox
+snow object stage copy na_app_pkg/streamlit/app.py                        @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/        --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/streamlit/pages/01_setup_wizard.py      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/streamlit/pages/02_run_encrypt.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/streamlit/pages/03_run_decrypt.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/streamlit/pages/04_job_history.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/streamlit/pages/05_configuration.py     @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/streamlit/utils/locid_central.py        @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/utils/  --overwrite --connection wl_sandbox_dcr
+snow object stage copy na_app_pkg/streamlit/utils/entitlements.py         @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/utils/  --overwrite --connection wl_sandbox_dcr
 ```
 
 Verify all files uploaded:
 
 ```bash
-snow object stage list @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandbox
+snow object stage list @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandbox_dcr
 # Expected: 15+ rows covering manifest.yml, setup.sql, JAR, SQL scripts, Streamlit pages
 ```
 
@@ -314,9 +314,9 @@ These tests validate the UDFs in `LOCID_DEV.STAGING` independently of the app.
 ```bash
 snow object stage copy \
     "Coco/tmp/20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar" \
-    @LOCID_DEV.STAGING.LOCID_STAGE --overwrite --connection wl_sandbox
+    @LOCID_DEV.STAGING.LOCID_STAGE --overwrite --connection wl_sandbox_dcr
 
-snow object stage list @LOCID_DEV.STAGING.LOCID_STAGE --connection wl_sandbox
+snow object stage list @LOCID_DEV.STAGING.LOCID_STAGE --connection wl_sandbox_dcr
 ```
 
 ### 4.2 Run UDF round-trip tests
