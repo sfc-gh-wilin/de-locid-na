@@ -62,7 +62,7 @@ snow connection test -c wl_sandbox
 Create the two custom deployment roles. This only needs to run once per Snowflake account.
 
 ```bash
-snow sql --connection wl_sandbox -f "db/dev/provider/00_roles.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/00_roles.sql"
 ```
 
 Before running, open `db/dev/provider/00_roles.sql` and replace the two placeholders:
@@ -75,7 +75,7 @@ Before running, open `db/dev/provider/00_roles.sql` and replace the two placehol
 After running, verify both roles exist:
 
 ```bash
-snow -c wl_sandbox sql -q "SHOW ROLES LIKE 'LOCID_APP_%'"
+snow sql --connection wl_sandbox_dcr -q "SHOW ROLES LIKE 'LOCID_APP_%'"
 ```
 
 Expected output: two rows — `LOCID_APP_ADMIN` and `LOCID_APP_INSTALLER`.
@@ -87,12 +87,12 @@ Expected output: two rows — `LOCID_APP_ADMIN` and `LOCID_APP_INSTALLER`.
 Run the following scripts in order using Snow CLI. Each is idempotent (`CREATE IF NOT EXISTS` / `CREATE OR REPLACE`).
 
 ```bash
-snow -c wl_sandbox sql -f "db/dev/provider/01_setup.sql"
-snow -c wl_sandbox sql -f "db/dev/provider/02_build_dates.sql"
-snow -c wl_sandbox sql -f "db/dev/provider/03_locid_builds.sql"
-snow -c wl_sandbox sql -f "db/dev/provider/04_locid_builds_ipv4_exploded.sql"
-snow -c wl_sandbox sql -f "db/dev/provider/05_stage_setup.sql"
-snow -c wl_sandbox sql -f "db/dev/provider/06_udfs.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/01_setup.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/02_build_dates.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/03_locid_builds.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/04_locid_builds_ipv4_exploded.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/05_stage_setup.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/06_udfs.sql"
 ```
 
 > **Note:** Step 1.6 requires the JAR to be on `LOCID_STAGE` first. The JAR is uploaded in Phase 3 (app deployment). Skip 1.6 for now if deploying the app before testing UDFs directly; come back after Phase 3.
@@ -116,11 +116,11 @@ Requires Phase 1 Steps 1.1–1.6 (UDFs must exist) and your dev license key.
 
 1. Run `02_customer_input_sample.sql` to create `LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT`:
    ```bash
-   snow -c wl_sandbox sql -f "db/dev/provider_tests/02_customer_input_sample.sql"
+   snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/02_customer_input_sample.sql"
    ```
 2. Open `db/dev/provider_tests/00_generate_test_data.sql`, set `$dev_key` at the top, then run:
    ```bash
-   snow -c wl_sandbox sql -f "db/dev/provider_tests/00_generate_test_data.sql"
+   snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/00_generate_test_data.sql"
    ```
 
 Expected row counts:
@@ -165,7 +165,7 @@ snow object stage copy Coco/db/CUSTOMER_TEST_INPUT_2K.csv \
 #### B.2 Load provider tables
 
 ```bash
-snow -c wl_sandbox sql -f "db/dev/provider_tests/01_load_test_data.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/01_load_test_data.sql"
 ```
 
 Expected row counts:
@@ -180,7 +180,7 @@ Expected row counts:
 #### B.3 Create consumer test input
 
 ```bash
-snow -c wl_sandbox sql -f "db/dev/provider_tests/02_customer_input_sample.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/02_customer_input_sample.sql"
 ```
 
 This creates `LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT` (100 rows) — the simulated consumer input table used when testing the app's Encrypt workflow.
@@ -196,10 +196,10 @@ This phase creates the application package, uploads all app files, and installs 
 Run as `LOCID_APP_ADMIN` (has `CREATE APPLICATION PACKAGE` privilege):
 
 ```bash
-snow -c wl_sandbox sql -q "USE ROLE LOCID_APP_ADMIN"
-snow -c wl_sandbox sql -q "CREATE APPLICATION PACKAGE IF NOT EXISTS LOCID_DEV_PKG COMMENT = 'LocID Native App — sandbox development package'"
-snow -c wl_sandbox sql -q "CREATE SCHEMA IF NOT EXISTS LOCID_DEV_PKG.APP_SCHEMA"
-snow -c wl_sandbox sql -q "CREATE STAGE  IF NOT EXISTS LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE DIRECTORY = (ENABLE = TRUE)"
+snow sql --connection wl_sandbox_dcr -q "USE ROLE LOCID_APP_ADMIN"
+snow sql --connection wl_sandbox_dcr -q "CREATE APPLICATION PACKAGE IF NOT EXISTS LOCID_DEV_PKG COMMENT = 'LocID Native App — sandbox development package'"
+snow sql --connection wl_sandbox_dcr -q "CREATE SCHEMA IF NOT EXISTS LOCID_DEV_PKG.APP_SCHEMA"
+snow sql --connection wl_sandbox_dcr -q "CREATE STAGE  IF NOT EXISTS LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE DIRECTORY = (ENABLE = TRUE)"
 ```
 
 ### 3.2 Upload app files (Snow CLI)
