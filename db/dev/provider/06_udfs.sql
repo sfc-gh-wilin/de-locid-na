@@ -23,6 +23,7 @@
 --   Snowflake maps SQL INT → Scala Int, BIGINT → Scala Long for LANGUAGE SCALA UDFs.
 -- =============================================================================
 
+USE ROLE LOCID_APP_ADMIN;
 USE DATABASE LOCID_DEV;
 USE SCHEMA   LOCID_DEV.STAGING;
 

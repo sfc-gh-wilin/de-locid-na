@@ -17,6 +17,8 @@
 --                and end_ip_int_hex after data load for IPv6 range joins.
 -- =============================================================================
 
+USE ROLE LOCID_APP_ADMIN;
+
 CREATE OR REPLACE TABLE LOCID_DEV.STAGING.LOCID_BUILDS (
     build_dt                  DATE     NOT NULL,  -- weekly build identifier
     start_ip                  VARCHAR  NOT NULL,  -- IP range start (IPv4 or IPv6)

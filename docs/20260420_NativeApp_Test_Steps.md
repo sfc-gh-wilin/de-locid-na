@@ -88,7 +88,7 @@ Run the following scripts in order using Snow CLI. Each is idempotent (`CREATE I
 
 ```bash
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/01_setup.sql"
-snow sql --connection wl_sandbox_dcr -f "db/dev/provider/02_build_dates.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/02_locid_build_dates.sql"
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/03_locid_builds.sql"
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/04_locid_builds_ipv4_exploded.sql"
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/05_stage_setup.sql"

@@ -6,6 +6,8 @@
 -- Rows: ~52 per year (one per weekly build). No clustering needed.
 -- =============================================================================
 
+USE ROLE LOCID_APP_ADMIN;
+
 CREATE OR REPLACE TABLE LOCID_DEV.STAGING.LOCID_BUILD_DATES (
     build_dt  DATE  NOT NULL,  -- weekly build identifier
     start_dt  DATE  NOT NULL,  -- date range start (inclusive)

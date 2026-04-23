@@ -20,6 +20,8 @@
 SET app_pkg_name = 'LOCID_DEV_PKG';  -- application package name
 -- =============================================================================
 
+USE ROLE LOCID_APP_ADMIN;
+
 
 -- ---------------------------------------------------------------------------
 -- STEP 1: Upload JAR to stage /lib/ directory

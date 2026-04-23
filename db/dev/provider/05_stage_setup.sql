@@ -5,6 +5,7 @@
 -- Run order: after 01_setup.sql (LOCID_DEV database + STAGING schema must exist)
 -- =============================================================================
 
+USE ROLE LOCID_APP_ADMIN;
 USE DATABASE LOCID_DEV;
 USE SCHEMA   LOCID_DEV.STAGING;
 
