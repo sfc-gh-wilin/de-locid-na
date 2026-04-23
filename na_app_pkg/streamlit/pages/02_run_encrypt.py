@@ -16,11 +16,29 @@ from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
-from utils.entitlements import get_active_output_cols, check_entitlement
+from utils.entitlements import get_active_output_cols
+from utils import logger
+
+st.logo("logo.svg")
 
 session = get_active_session()
 
-st.title("Run Encrypt")
+
+# ---------------------------------------------------------------------------
+# Session-scoped cache key
+# ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def _session_id() -> int:
+    from snowflake.snowpark.context import get_active_session as _gas
+    try:
+        return int(_gas().sql("SELECT CURRENT_SESSION()").collect()[0][0])
+    except Exception:
+        return 0
+
+
+sid = _session_id()
+
+st.markdown("## :material/lock: Run Encrypt")
 st.caption("Match IP + timestamp data against the LocID data lake.")
 st.divider()
 
@@ -29,7 +47,7 @@ st.divider()
 # Helpers
 # ---------------------------------------------------------------------------
 def _load_columns(table_fqn: str) -> list[str]:
-    """Return ordered column names for a fully qualified table via INFORMATION_SCHEMA."""
+    """Return ordered column names for a fully qualified table."""
     parts = [p.strip().strip('"') for p in table_fqn.strip().split(".")]
     if len(parts) != 3:
         return []
@@ -43,44 +61,43 @@ def _load_columns(table_fqn: str) -> list[str]:
             params=[schema_name.upper(), table_name.upper()]
         ).collect()
         return [r[0] for r in rows]
-    except Exception:
+    except Exception as e:
+        logger.warning(session, "02_run_encrypt._load_columns",
+                       f"Failed to load columns for {table_fqn}: {e}")
         return []
 
 
-def _validate_inputs(table: str, ip_col: str, ts_col: str,
-                     ts_fmt: str) -> dict:
+def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
     """
-    Run advisory pre-flight checks on the mapped columns.
-    Returns a dict with keys: ip_types, null_ip, null_ts, bad_ip,
-                               ts_min_epoch, ts_max_epoch, stale_count.
-    All errors are caught — validation never blocks the job.
+    Advisory pre-flight checks on the mapped columns.
+    All cutoff math uses UTC. Never blocks the job.
     """
-    result = {}
+    result: dict = {}
     try:
-        # IP format distribution (sample 1 000 rows for speed)
         ip_rows = session.sql(f"""
             SELECT
-                SUM(IFF({ip_col} IS NULL, 1, 0))                       AS null_ip,
+                SUM(IFF({ip_col} IS NULL, 1, 0))                        AS null_ip,
                 SUM(IFF({ip_col} IS NOT NULL
                         AND {ip_col} NOT LIKE '%:%'
                         AND TRY_CAST(SPLIT_PART({ip_col}, '.', 1) AS INT) IS NOT NULL
                         AND ARRAY_SIZE(SPLIT({ip_col}, '.')) = 4, 1, 0)) AS cnt_v4,
-                SUM(IFF({ip_col} LIKE '%:%', 1, 0))                     AS cnt_v6,
+                SUM(IFF({ip_col} LIKE '%:%', 1, 0))                      AS cnt_v6,
                 SUM(IFF({ip_col} IS NOT NULL
                         AND {ip_col} NOT LIKE '%:%'
                         AND NOT (TRY_CAST(SPLIT_PART({ip_col}, '.', 1) AS INT) IS NOT NULL
                                  AND ARRAY_SIZE(SPLIT({ip_col}, '.')) = 4), 1, 0)) AS cnt_bad
             FROM (SELECT {ip_col} FROM {table} LIMIT 1000)
         """).collect()[0]
-        result["null_ip"]  = int(ip_rows[0] or 0)
-        result["cnt_v4"]   = int(ip_rows[1] or 0)
-        result["cnt_v6"]   = int(ip_rows[2] or 0)
-        result["bad_ip"]   = int(ip_rows[3] or 0)
-    except Exception:
+        result["null_ip"] = int(ip_rows[0] or 0)
+        result["cnt_v4"]  = int(ip_rows[1] or 0)
+        result["cnt_v6"]  = int(ip_rows[2] or 0)
+        result["bad_ip"]  = int(ip_rows[3] or 0)
+    except Exception as e:
+        logger.warning(session, "02_run_encrypt._validate_inputs",
+                       f"IP validation failed: {e}")
         result["null_ip"] = result["cnt_v4"] = result["cnt_v6"] = result["bad_ip"] = None
 
     try:
-        # Timestamp range — convert to epoch seconds for comparison
         if ts_fmt == "epoch_ms":
             ts_expr = f"FLOOR({ts_col}::DOUBLE / 1000.0)::BIGINT"
         elif ts_fmt == "timestamp_string":
@@ -88,53 +105,59 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str,
         else:
             ts_expr = f"{ts_col}::BIGINT"
 
+        # UTC cutoff — 52 weeks back from now
         cutoff_epoch = int(
             (datetime.now(timezone.utc) - timedelta(weeks=52)).timestamp()
         )
         ts_rows = session.sql(f"""
             SELECT
-                MIN({ts_expr})                                            AS ts_min,
-                MAX({ts_expr})                                            AS ts_max,
-                SUM(IFF({ts_col} IS NULL, 1, 0))                        AS null_ts,
-                SUM(IFF({ts_expr} < {cutoff_epoch}, 1, 0))              AS stale_cnt
+                MIN({ts_expr})                           AS ts_min,
+                MAX({ts_expr})                           AS ts_max,
+                SUM(IFF({ts_col} IS NULL, 1, 0))        AS null_ts,
+                SUM(IFF({ts_expr} < {cutoff_epoch}, 1, 0)) AS stale_cnt
             FROM {table}
         """).collect()[0]
         result["ts_min"]     = ts_rows[0]
         result["ts_max"]     = ts_rows[1]
         result["null_ts"]    = int(ts_rows[2] or 0)
         result["stale_count"] = int(ts_rows[3] or 0)
-    except Exception:
+    except Exception as e:
+        logger.warning(session, "02_run_encrypt._validate_inputs",
+                       f"Timestamp validation failed: {e}")
         result["ts_min"] = result["ts_max"] = result["null_ts"] = result["stale_count"] = None
 
     return result
 
 
-def _show_validation(v: dict, total_sample: int = 1000) -> None:
+def _show_validation(v: dict) -> None:
     """Render advisory validation results."""
-    # IP summary
     if v.get("cnt_v4") is not None:
         v4, v6, bad, nul = v["cnt_v4"], v["cnt_v6"], v["bad_ip"], v["null_ip"]
-        ip_label = []
-        if v4:  ip_label.append(f"IPv4: {v4:,}")
-        if v6:  ip_label.append(f"IPv6: {v6:,}")
-        st.info(f"IP types (sample {total_sample:,}): " + " · ".join(ip_label) if ip_label
+        ip_parts = []
+        if v4: ip_parts.append(f"IPv4: {v4:,}")
+        if v6: ip_parts.append(f"IPv6: {v6:,}")
+        st.info("IP types (sample 1,000): " + " · ".join(ip_parts) if ip_parts
                 else "No parseable IPs found in sample")
         if bad:
-            st.warning(f"{bad:,} unparseable IP value(s) in sample — will be skipped during matching.")
+            st.warning(f"{bad:,} unparseable IP value(s) — will be skipped during matching.",
+                       icon=":material/warning:")
         if nul:
-            st.warning(f"{nul:,} NULL IP value(s) in sample — will be skipped.")
+            st.warning(f"{nul:,} NULL IP value(s) — will be skipped.",
+                       icon=":material/warning:")
 
-    # Timestamp range
     if v.get("stale_count") is not None:
         if v["stale_count"]:
             st.warning(
                 f"{v['stale_count']:,} row(s) have timestamps older than 52 weeks. "
-                "These will not match any LocID build and will be returned as unmatched."
+                "These will not match any LocID build and will be returned as unmatched.",
+                icon=":material/warning:"
             )
         if v.get("null_ts"):
-            st.warning(f"{v['null_ts']:,} NULL timestamp value(s) — will be skipped.")
+            st.warning(f"{v['null_ts']:,} NULL timestamp value(s) — will be skipped.",
+                       icon=":material/warning:")
         if v["ts_min"] and v["stale_count"] == 0:
-            st.success("Timestamp range looks good — all values within the 52-week window.")
+            st.success("Timestamp range looks good — all values within the 52-week window.",
+                       icon=":material/check_circle:")
 
 
 # ---------------------------------------------------------------------------
@@ -143,31 +166,34 @@ def _show_validation(v: dict, total_sample: int = 1000) -> None:
 if "enc_step" not in st.session_state:
     st.session_state.enc_step = 1
 
-step = st.session_state.enc_step
+step  = st.session_state.enc_step
 steps = ["Input", "Map Columns", "Output", "Options", "Review & Run"]
 
-# Progress bar
-st.progress((step - 1) / (len(steps) - 1), text=f"Step {step} of {len(steps)}: {steps[step-1]}")
+st.progress((step - 1) / (len(steps) - 1),
+            text=f"Step {step} of {len(steps)}: {steps[step-1]}")
 st.divider()
 
 # ---------------------------------------------------------------------------
 # Step 1 — Select Input Table
 # ---------------------------------------------------------------------------
 if step == 1:
-    st.subheader("Step 1 — Select Input Table")
+    st.subheader(":material/table: Step 1 — Select Input Table")
     input_table = st.text_input("Input table (fully qualified)",
-                                placeholder="MY_DB.MY_SCHEMA.MY_TABLE")
+                                placeholder="MY_DB.MY_SCHEMA.MY_TABLE",
+                                key="enc_input_table_input")
     if input_table:
         st.caption("Preview (first 5 rows):")
         try:
             preview = session.sql(f"SELECT * FROM {input_table} LIMIT 5").to_pandas()
             st.dataframe(preview, use_container_width=True)
+            del preview  # free memory — don't persist large DataFrame
         except Exception as e:
+            logger.warning(session, "02_run_encrypt.step1", f"Preview failed: {e}")
             st.warning(f"Could not load preview: {e}")
     if st.button("Next →", disabled=not input_table):
         cols = _load_columns(input_table)
         if not cols:
-            st.error("Could not read columns from that table. Check the name and your SELECT privilege.")
+            st.error("Could not read columns. Check the table name and your SELECT privilege.")
         else:
             st.session_state.enc_input_table   = input_table
             st.session_state.enc_input_columns = cols
@@ -178,26 +204,25 @@ if step == 1:
 # Step 2 — Map Columns
 # ---------------------------------------------------------------------------
 elif step == 2:
-    st.subheader("Step 2 — Map Columns")
+    st.subheader(":material/table_rows: Step 2 — Map Columns")
     columns = st.session_state.get("enc_input_columns", [])
     if not columns:
-        st.error("Column list is empty — please go back and re-enter the table name.")
+        st.error("Column list is empty — go back and re-enter the table name.")
     else:
         col_id = st.selectbox("Unique Row ID", columns)
         col_ip = st.selectbox("IP Address",    columns)
         col_ts = st.selectbox("Timestamp",     columns)
         ts_fmt = st.selectbox("Timestamp Format",
                               ["epoch_sec", "epoch_ms", "timestamp_string"])
-
         st.divider()
 
-        # Advisory validation — runs on demand, never blocks the job
-        if st.button("Run Input Validation"):
+        if st.button(":material/fact_check: Run Input Validation"):
             with st.spinner("Checking IP format and timestamp range…"):
                 v = _validate_inputs(
                     st.session_state.enc_input_table, col_ip, col_ts, ts_fmt
                 )
-                st.session_state.enc_validation = v
+                # Store only the lightweight result dict, not any DataFrame
+                st.session_state.enc_validation      = v
                 st.session_state.enc_validation_cols = (col_ip, col_ts, ts_fmt)
 
         if "enc_validation" in st.session_state:
@@ -207,67 +232,76 @@ elif step == 2:
     with col1:
         if st.button("← Back"):
             st.session_state.pop("enc_validation", None)
-            st.session_state.enc_step = 1; st.rerun()
+            st.session_state.enc_step = 1
+            st.rerun()
     with col2:
         if st.button("Next →", disabled=not columns):
             st.session_state.enc_col_id = col_id
             st.session_state.enc_col_ip = col_ip
             st.session_state.enc_col_ts = col_ts
             st.session_state.enc_ts_fmt = ts_fmt
-            st.session_state.enc_step   = 3; st.rerun()
+            st.session_state.enc_step   = 3
+            st.rerun()
 
 # ---------------------------------------------------------------------------
 # Step 3 — Configure Output
 # ---------------------------------------------------------------------------
 elif step == 3:
-    st.subheader("Step 3 — Configure Output")
+    st.subheader(":material/output: Step 3 — Configure Output")
     output_mode  = st.radio("", ["Create new table", "Overwrite existing table"])
     output_table = st.text_input("Output table (fully qualified)",
                                  placeholder="MY_DB.MY_SCHEMA.LOCID_RESULTS")
     if output_mode == "Overwrite existing table" and output_table:
-        st.warning(f"This will overwrite **{output_table}**. Existing data will be lost.")
+        st.warning(f"This will overwrite **{output_table}**. Existing data will be lost.",
+                   icon=":material/warning:")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
-            st.session_state.enc_step = 2; st.rerun()
+            st.session_state.enc_step = 2
+            st.rerun()
     with col2:
         if st.button("Next →", disabled=not output_table):
             st.session_state.enc_output_table = output_table
-            st.session_state.enc_step = 4; st.rerun()
+            st.session_state.enc_step = 4
+            st.rerun()
 
 # ---------------------------------------------------------------------------
 # Step 4 — Select Output Columns
 # ---------------------------------------------------------------------------
 elif step == 4:
-    st.subheader("Step 4 — Select Output Columns")
-    available_cols = get_active_output_cols(session, "encrypt")
+    st.subheader(":material/view_column: Step 4 — Select Output Columns")
+    available_cols = get_active_output_cols(sid, "encrypt")
     selected = []
     for col in available_cols:
         disabled = not col["enabled"]
-        label    = col["col_name"]
         tooltip  = f"Requires entitlement: {col['requires_entitlement']}" if disabled else ""
-        checked  = st.checkbox(label, value=col["enabled"],
+        checked  = st.checkbox(col["col_name"], value=col["enabled"],
                                disabled=disabled, help=tooltip or None)
         if checked:
             selected.append(col["col_name"])
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
-            st.session_state.enc_step = 3; st.rerun()
+            st.session_state.enc_step = 3
+            st.rerun()
     with col2:
         if st.button("Next →", disabled=not selected):
             st.session_state.enc_output_cols = selected
-            st.session_state.enc_step = 5; st.rerun()
+            st.session_state.enc_step = 5
+            st.rerun()
 
 # ---------------------------------------------------------------------------
 # Step 5 — Review & Run
 # ---------------------------------------------------------------------------
 elif step == 5:
-    st.subheader("Step 5 — Review & Run")
+    st.subheader(":material/play_circle: Step 5 — Review & Run")
     st.write(f"**Input table:** `{st.session_state.get('enc_input_table')}`")
     st.write(f"**Output table:** `{st.session_state.get('enc_output_table')}`")
-    st.write(f"**Columns mapped:** ID={st.session_state.get('enc_col_id')}, "
-             f"IP={st.session_state.get('enc_col_ip')}, TS={st.session_state.get('enc_col_ts')}")
+    st.write(
+        f"**Columns mapped:** ID={st.session_state.get('enc_col_id')}, "
+        f"IP={st.session_state.get('enc_col_ip')}, "
+        f"TS={st.session_state.get('enc_col_ts')}"
+    )
     st.write(f"**Output columns:** {', '.join(st.session_state.get('enc_output_cols', []))}")
 
     warehouse = st.text_input("Warehouse", placeholder="MY_WAREHOUSE")
@@ -275,11 +309,15 @@ elif step == 5:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
-            st.session_state.enc_step = 4; st.rerun()
+            st.session_state.enc_step = 4
+            st.rerun()
     with col2:
-        if st.button("Run Job", disabled=not warehouse, type="primary"):
+        if st.button(":material/play_arrow: Run Job", disabled=not warehouse, type="primary"):
             with st.spinner("Running LocID Encrypt job…"):
                 try:
+                    logger.info(session, "02_run_encrypt.run_job",
+                                f"Job started: {st.session_state.enc_input_table} → "
+                                f"{st.session_state.enc_output_table}")
                     raw = session.call(
                         "APP_SCHEMA.LOCID_ENCRYPT",
                         st.session_state.enc_input_table,
@@ -298,11 +336,24 @@ elif step == 5:
                             f"Job complete — "
                             f"{result.get('rows_matched', 0):,} rows matched "
                             f"out of {result.get('rows_in', 0):,} "
-                            f"in {result.get('runtime_s', 0):.1f}s"
+                            f"in {result.get('runtime_s', 0):.1f}s",
+                            icon=":material/check_circle:"
                         )
                         st.caption(f"Job ID: {result.get('job_id', '—')}")
+                        logger.info(session, "02_run_encrypt.run_job",
+                                    f"Job SUCCESS: id={result.get('job_id')}, "
+                                    f"matched={result.get('rows_matched')}")
                     else:
-                        st.error(f"Job failed — {result.get('error', status)}")
+                        err = result.get("error", status)
+                        st.error(f"Job failed — {err}", icon=":material/error:")
+                        logger.error(session, "02_run_encrypt.run_job",
+                                     f"Job FAILED: {err}")
                 except Exception as e:
-                    st.error(f"Error running encrypt job: {e}")
-            st.session_state.enc_step = 1  # reset for next run
+                    logger.error(session, "02_run_encrypt.run_job",
+                                 "Job threw an exception", exc=e)
+                    st.error(f"Error running encrypt job: {e}", icon=":material/error:")
+
+            # Reset wizard for next run; discard heavy state
+            for key in ("enc_input_columns", "enc_validation", "enc_validation_cols"):
+                st.session_state.pop(key, None)
+            st.session_state.enc_step = 1

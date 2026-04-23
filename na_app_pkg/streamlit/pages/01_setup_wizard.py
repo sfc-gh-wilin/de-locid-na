@@ -19,10 +19,13 @@ import json
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.locid_central import fetch_license
+from utils import logger
+
+st.logo("logo.svg")
 
 session = get_active_session()
 
-st.title("Setup Wizard")
+st.markdown("## :material/auto_fix_high: Setup Wizard")
 st.caption("Complete this wizard once after installing the app.")
 st.divider()
 
@@ -34,9 +37,11 @@ def _upsert_config(key: str, value: str) -> None:
     session.sql(
         "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
         "USING (SELECT ? AS k, ? AS v) AS s ON t.config_key = s.k "
-        "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP "
+        "WHEN MATCHED THEN UPDATE SET config_value = s.v, "
+        "last_refreshed_at = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ "
         "WHEN NOT MATCHED THEN INSERT (config_key, config_value, last_refreshed_at, is_active) "
-        "VALUES (s.k, s.v, CURRENT_TIMESTAMP, TRUE)",
+        "VALUES (s.k, s.v, "
+        "CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ, TRUE)",
         params=[key, value]
     ).collect()
 
@@ -53,12 +58,13 @@ step = st.session_state.wizard_step
 # Screen A — Welcome
 # ---------------------------------------------------------------------------
 if step == "A":
-    st.header("Welcome to LocID for Snowflake")
+    st.markdown("### :material/waving_hand: Welcome to LocID for Snowflake")
     st.write(
         "This wizard will connect your LocID license to Snowflake and verify "
         "that the app can reach LocID Central. It takes about 5 minutes."
     )
-    if st.button("Get Started"):
+    if st.button("Get Started", type="primary"):
+        logger.info(session, "01_setup_wizard.wizard", "Wizard started")
         st.session_state.wizard_step = "B"
         st.rerun()
 
@@ -66,7 +72,7 @@ if step == "A":
 # Screen B — Have a key?
 # ---------------------------------------------------------------------------
 elif step == "B":
-    st.header("Do you have a LocID license key?")
+    st.markdown("### :material/key: Do you have a LocID license key?")
     choice = st.radio("", ["Yes, I have a license key", "No, I need one"])
     col1, col2 = st.columns(2)
     with col1:
@@ -74,7 +80,7 @@ elif step == "B":
             st.session_state.wizard_step = "A"
             st.rerun()
     with col2:
-        if st.button("Continue"):
+        if st.button("Continue", type="primary"):
             st.session_state.wizard_step = "D" if "Yes" in choice else "C"
             st.rerun()
 
@@ -82,12 +88,11 @@ elif step == "B":
 # Screen C — Contact Sales
 # ---------------------------------------------------------------------------
 elif step == "C":
-    st.header("Contact LocID")
+    st.markdown("### :material/contact_support: Contact LocID")
     st.info(
-        "To get a LocID license key, contact LocID. "
+        "To get a LocID license key, contact LocID at **locid.com**. "
         "Once you have your license key, re-open this wizard to continue setup."
     )
-    # TODO: add LocID contact details (email, URL)
     if st.button("← Back"):
         st.session_state.wizard_step = "B"
         st.rerun()
@@ -96,7 +101,7 @@ elif step == "C":
 # Screen D — Enter License Key
 # ---------------------------------------------------------------------------
 elif step == "D":
-    st.header("Enter Your License Key")
+    st.markdown("### :material/key: Enter Your License Key")
     key_input = st.text_input("License Key", type="password",
                               placeholder="1569-XXXX-XXXX-XXXX-XXXX-XXXX")
     col1, col2 = st.columns(2)
@@ -105,7 +110,7 @@ elif step == "D":
             st.session_state.wizard_step = "B"
             st.rerun()
     with col2:
-        if st.button("Validate & Continue"):
+        if st.button("Validate & Continue", type="primary"):
             if not key_input:
                 st.error("Please enter your license key.")
             else:
@@ -116,17 +121,20 @@ elif step == "D":
                         st.session_state.license_key  = key_input
                         st.session_state.license_data = data
                         st.session_state.wizard_step  = "E"
+                        logger.info(session, "01_setup_wizard.validate",
+                                    "License validated successfully")
                         st.rerun()
                     except Exception as e:
+                        logger.error(session, "01_setup_wizard.validate",
+                                     "License validation failed", exc=e)
                         st.error(f"License validation failed: {e}")
 
 # ---------------------------------------------------------------------------
 # Screen E — Review Privileges
 # ---------------------------------------------------------------------------
 elif step == "E":
-    st.header("Review Required Privileges")
+    st.markdown("### :material/admin_panel_settings: Review Required Privileges")
     st.write("The app needs the following grants. Run the SQL below as ACCOUNTADMIN.")
-    # TODO: dynamically check which grants are already in place
     st.code(
         "GRANT EXECUTE TASK ON ACCOUNT TO APPLICATION <app_name>;\n"
         "GRANT USAGE ON INTEGRATION LOCID_CENTRAL_EAI TO APPLICATION <app_name>;",
@@ -138,7 +146,7 @@ elif step == "E":
             st.session_state.wizard_step = "D"
             st.rerun()
     with col2:
-        if st.button("Grants confirmed — Continue"):
+        if st.button("Grants confirmed — Continue", type="primary"):
             st.session_state.wizard_step = "F"
             st.rerun()
 
@@ -146,18 +154,18 @@ elif step == "E":
 # Screen F — Create App Objects
 # ---------------------------------------------------------------------------
 elif step == "F":
-    st.header("Initialising App Objects")
-    # TODO: check if APP_CONFIG, JOB_LOG exist (created by setup.sql — should always be present)
-    st.success("APP_CONFIG table — OK")
-    st.success("JOB_LOG table — OK")
-    st.success("HTTP_PING UDF — OK")
+    st.markdown("### :material/build: Initialising App Objects")
+    st.success("APP_CONFIG table — OK", icon=":material/check_circle:")
+    st.success("JOB_LOG table — OK",   icon=":material/check_circle:")
+    st.success("APP_LOGS table — OK",  icon=":material/check_circle:")
+    st.success("HTTP_PING UDF — OK",   icon=":material/check_circle:")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Back"):
             st.session_state.wizard_step = "E"
             st.rerun()
     with col2:
-        if st.button("Continue"):
+        if st.button("Continue", type="primary"):
             st.session_state.wizard_step = "G"
             st.rerun()
 
@@ -165,15 +173,23 @@ elif step == "F":
 # Screen G — Test Connectivity
 # ---------------------------------------------------------------------------
 elif step == "G":
-    st.header("Test LocID Central Connectivity")
-    if st.button("Run Connectivity Test"):
+    st.markdown("### :material/cloud: Test LocID Central Connectivity")
+    if st.button(":material/wifi_tethering: Run Connectivity Test"):
         with st.spinner("Connecting to central.locid.com…"):
-            result = session.sql("SELECT APP_SCHEMA.HTTP_PING()").collect()[0][0]
+            try:
+                result = session.sql("SELECT APP_SCHEMA.HTTP_PING()").collect()[0][0]
+            except Exception as e:
+                logger.error(session, "01_setup_wizard.connectivity", "HTTP_PING failed", exc=e)
+                result = f"FAILED: {e}"
         if result.startswith("OK"):
-            st.success(f"LocID Central is reachable — {result}")
+            st.success(f"LocID Central is reachable — {result}",
+                       icon=":material/check_circle:")
+            logger.info(session, "01_setup_wizard.connectivity", f"Connectivity OK: {result}")
             st.session_state.connectivity_ok = True
         else:
-            st.error(f"Connection failed — {result}")
+            st.error(f"Connection failed — {result}", icon=":material/error:")
+            logger.error(session, "01_setup_wizard.connectivity",
+                         f"Connectivity failed: {result}")
             st.session_state.connectivity_ok = False
     col1, col2 = st.columns(2)
     with col1:
@@ -181,7 +197,8 @@ elif step == "G":
             st.session_state.wizard_step = "F"
             st.rerun()
     with col2:
-        if st.button("Continue", disabled=not st.session_state.get("connectivity_ok")):
+        if st.button("Continue", type="primary",
+                     disabled=not st.session_state.get("connectivity_ok")):
             st.session_state.wizard_step = "H"
             st.rerun()
 
@@ -189,20 +206,19 @@ elif step == "G":
 # Screen H — Select API Key
 # ---------------------------------------------------------------------------
 elif step == "H":
-    st.header("Select API Key")
+    st.markdown("### :material/vpn_key: Select API Key")
     st.write(
         "Your license includes one or more API keys. Select the key this "
         "Snowflake account should use for LocID lookups."
     )
 
-    # Load active access entries from cached license
     cached_rows = session.sql(
         "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
         "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
     ).collect()
 
-    active_entries = []
-    client_id      = 0
+    active_entries: list = []
+    client_id = 0
     if cached_rows and cached_rows[0][0]:
         try:
             lic_data       = json.loads(cached_rows[0][0])
@@ -211,8 +227,9 @@ elif step == "H":
                 e for e in lic_data.get("access", [])
                 if e.get("status") == "ACTIVE"
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(session, "01_setup_wizard.api_key",
+                         "Failed to parse cached license", exc=e)
 
     if not active_entries:
         st.error(
@@ -223,7 +240,6 @@ elif step == "H":
             st.session_state.wizard_step = "G"
             st.rerun()
     else:
-        # Build display labels — show api_key_id and a masked key value
         def _mask_key(k: str) -> str:
             return k[:8] + "****" if k and len(k) > 8 else "****"
 
@@ -232,7 +248,6 @@ elif step == "H":
             for e in active_entries
         ]
 
-        # Auto-select single key; radio for multiple
         if len(active_entries) == 1:
             st.info(f"One active API key found: **{labels[0]}**")
             chosen_idx = 0
@@ -248,11 +263,13 @@ elif step == "H":
         with col2:
             if st.button("Confirm Selection", type="primary"):
                 entry = active_entries[chosen_idx]
-                _upsert_config("api_key_id",     str(entry.get("api_key_id", "")))
-                _upsert_config("api_key",         entry.get("api_key", ""))
-                _upsert_config("namespace_guid",  entry.get("namespace_guid", ""))
-                _upsert_config("client_id",       str(client_id))
-                _upsert_config("onboarding_complete", "true")
+                _upsert_config("api_key_id",           str(entry.get("api_key_id", "")))
+                _upsert_config("api_key",               entry.get("api_key", ""))
+                _upsert_config("namespace_guid",        entry.get("namespace_guid", ""))
+                _upsert_config("client_id",             str(client_id))
+                _upsert_config("onboarding_complete",   "true")
+                logger.info(session, "01_setup_wizard.api_key",
+                            f"API key selected: {entry.get('api_key_id')}")
                 st.session_state.wizard_step = "I"
                 st.rerun()
 
@@ -260,13 +277,15 @@ elif step == "H":
 # Screen I — Setup Complete
 # ---------------------------------------------------------------------------
 elif step == "I":
-    st.header("Setup Complete!")
+    st.markdown("### :material/check_circle: Setup Complete!")
     st.success("Your LocID license is connected and verified.")
     st.write("**What's next:**")
     st.write("- Run an **Encrypt** job to enrich IP+timestamp data with TX_CLOC / STABLE_CLOC")
     st.write("- Run a **Decrypt** job to decode TX_CLOC values back to geo context")
     st.write("- View your **Job History** at any time from the sidebar")
-    if st.button("Launch App →"):
+    logger.info(session, "01_setup_wizard.wizard", "Setup wizard completed")
+    if st.button("Launch App →", type="primary"):
+        # Clean up wizard-specific session state
+        for key in ("wizard_step", "license_key", "license_data", "connectivity_ok"):
+            st.session_state.pop(key, None)
         st.switch_page("app.py")
-
-

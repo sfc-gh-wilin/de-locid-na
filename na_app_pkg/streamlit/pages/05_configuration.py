@@ -7,84 +7,121 @@ Sections:
   - Current Entitlements (live badge list)
   - Output Column Registry (read-only table from APP_CONFIG)
   - Advanced (re-run setup wizard)
+
+All APP_CONFIG reads are batched into a single query per page load.
 """
 
 import json
+
+import pandas as pd
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.locid_central import get_secrets
+from utils.entitlements import _get_active_entitlements
+from utils import logger
+
+st.logo("logo.svg")
 
 session = get_active_session()
 
-st.title("Configuration")
+
+# ---------------------------------------------------------------------------
+# Session-scoped cache key
+# ---------------------------------------------------------------------------
+@st.cache_resource(show_spinner=False)
+def _session_id() -> int:
+    from snowflake.snowpark.context import get_active_session as _gas
+    try:
+        return int(_gas().sql("SELECT CURRENT_SESSION()").collect()[0][0])
+    except Exception:
+        return 0
+
+
+sid = _session_id()
+
+st.markdown("## :material/settings: Configuration")
 st.divider()
 
-# ---------------------------------------------------------------------------
-# Section 1 — License & Credentials
-# ---------------------------------------------------------------------------
-st.subheader("License & Credentials")
 
-def mask(val: str | None, visible: int = 4) -> str:
+# ---------------------------------------------------------------------------
+# Batched config fetch — all four keys in one round-trip
+# ---------------------------------------------------------------------------
+@st.cache_data(ttl=120, show_spinner=False)
+def _load_config(_session_id: int) -> dict[str, str | None]:
+    from snowflake.snowpark.context import get_active_session as _gas
+    _session = _gas()
+    rows = _session.sql(
+        "SELECT config_key, config_value FROM APP_SCHEMA.APP_CONFIG "
+        "WHERE config_key IN ('license_id_ref', 'api_key', 'cached_license', 'api_key_id') "
+        "AND is_active = TRUE"
+    ).collect()
+    return {r[0]: r[1] for r in rows}
+
+
+config = _load_config(sid)
+
+license_key  = config.get("license_id_ref")
+api_key      = config.get("api_key")
+cached_raw   = config.get("cached_license")
+
+client_name, lic_expiry = "—", "—"
+if cached_raw:
+    try:
+        _ld        = json.loads(cached_raw).get("license", {})
+        client_name = _ld.get("client_name", "—")
+        exp        = _ld.get("expiration_date", "")
+        lic_expiry = exp[:10] if exp else "—"
+    except Exception as e:
+        logger.warning(session, "05_configuration.parse_license",
+                       f"Failed to parse cached_license: {e}")
+
+
+def _mask(val: str | None, visible: int = 4) -> str:
     if not val:
         return "—"
     return val[:visible] + "-****-****-****"
 
-license_key_row = session.sql(
-    "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'license_id_ref' LIMIT 1"
-).collect()
-license_key = license_key_row[0][0] if license_key_row else None
 
-api_key_row = session.sql(
-    "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key' LIMIT 1"
-).collect()
-api_key = api_key_row[0][0] if api_key_row else None
-
-# Read client name and expiry from cached_license
-cached_lic_raw = session.sql(
-    "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'cached_license' LIMIT 1"
-).collect()
-client_name, lic_expiry = "—", "—"
-if cached_lic_raw and cached_lic_raw[0][0]:
-    try:
-        _ld = json.loads(cached_lic_raw[0][0]).get("license", {})
-        client_name = _ld.get("client_name", "—")
-        exp = _ld.get("expiration_date", "")
-        lic_expiry  = exp[:10] if exp else "—"
-    except Exception:
-        pass
+# ---------------------------------------------------------------------------
+# Section 1 — License & Credentials
+# ---------------------------------------------------------------------------
+st.markdown("### :material/key: License & Credentials")
 
 col1, col2 = st.columns(2)
 with col1:
-    st.text_input("License Key", value=mask(license_key), disabled=True)
-    st.text_input("API Key",     value=mask(api_key),     disabled=True)
+    st.text_input("License Key", value=_mask(license_key), disabled=True)
+    st.text_input("API Key",     value=_mask(api_key),     disabled=True)
 with col2:
     st.text_input("Client",  value=client_name, disabled=True)
     st.text_input("Expires", value=lic_expiry,  disabled=True)
 
 colA, colB = st.columns(2)
 with colA:
-    if st.button("Update License Key"):
+    if st.button(":material/edit: Update License Key"):
         st.switch_page("pages/01_setup_wizard.py")
 with colB:
-    if st.button("Refresh from LocID Central"):
+    if st.button(":material/refresh: Refresh from LocID Central"):
         with st.spinner("Fetching latest secrets and entitlements…"):
             try:
                 get_secrets(session)
-                st.success("Secrets and entitlements refreshed.")
+                # Invalidate config cache so the page reflects the new values
+                _load_config.clear()
+                logger.info(session, "05_configuration.refresh",
+                            "Secrets and entitlements refreshed")
+                st.success("Secrets and entitlements refreshed.",
+                           icon=":material/check_circle:")
+                st.rerun()
             except Exception as e:
-                st.error(str(e))
+                logger.error(session, "05_configuration.refresh",
+                             "Refresh failed", exc=e)
+                st.error(str(e), icon=":material/error:")
 
 st.divider()
 
 # ---------------------------------------------------------------------------
 # Section 2 — Current Entitlements
 # ---------------------------------------------------------------------------
-st.subheader("Current Entitlements")
-
-cached_license_row = session.sql(
-    "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
-    "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
-).collect()
+st.markdown("### :material/verified: Current Entitlements")
 
 ALL_FLAGS = [
     "allow_encrypt", "allow_decrypt",
@@ -92,58 +129,52 @@ ALL_FLAGS = [
     "allow_geo_context", "allow_homebiz",
 ]
 
-if cached_license_row and cached_license_row[0][0]:
-    data        = json.loads(cached_license_row[0][0])
-    # Find the selected API key entry and extract True-valued flags
-    _key_row = session.sql(
-        "SELECT config_value FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key_id' LIMIT 1"
-    ).collect()
-    _sel_id = int(_key_row[0][0]) if _key_row and _key_row[0][0] else None
-    _entry = None
-    for _item in data.get("access", []):
-        if _item.get("status") == "ACTIVE":
-            if _sel_id is None or _item.get("api_key_id") == _sel_id:
-                _entry = _item
-                if _sel_id is not None:
-                    break
-    active_flags = {f for f in ALL_FLAGS if _entry and _entry.get(f) is True}
-else:
-    active_flags = set()
+active_flags = _get_active_entitlements(sid)
 
 badge_cols = st.columns(3)
 for i, flag in enumerate(ALL_FLAGS):
     with badge_cols[i % 3]:
         if flag in active_flags:
-            st.success(f"✓ {flag}")
+            st.success(f"✓ {flag}", icon=None)
         else:
-            st.error(f"✗ {flag}")
+            st.error(f"✗ {flag}", icon=None)
 
 st.divider()
 
 # ---------------------------------------------------------------------------
 # Section 3 — Output Column Registry
 # ---------------------------------------------------------------------------
-st.subheader("Output Column Registry")
+st.markdown("### :material/table_chart: Output Column Registry")
 st.caption("Managed by LocID via app version releases. Read-only.")
 
-registry_rows = session.sql(
-    "SELECT config_key, config_value, is_active "
-    "FROM APP_SCHEMA.APP_CONFIG WHERE config_key LIKE 'output_col.%' "
-    "ORDER BY config_key"
-).collect()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _load_registry(_session_id: int) -> list:
+    from snowflake.snowpark.context import get_active_session as _gas
+    _session = _gas()
+    rows = _session.sql(
+        "SELECT config_key, config_value, is_active "
+        "FROM APP_SCHEMA.APP_CONFIG WHERE config_key LIKE 'output_col.%' "
+        "ORDER BY config_key"
+    ).collect()
+    return [tuple(r) for r in rows]
+
+
+registry_rows = _load_registry(sid)
 
 if registry_rows:
-    import pandas as pd
     records = []
     for row in registry_rows:
         meta = json.loads(row[1]) if row[1] else {}
         records.append({
-            "Column":              row[0].replace("output_col.", ""),
-            "Operation":           meta.get("operation", "—"),
+            "Column":               row[0].replace("output_col.", ""),
+            "Operation":            meta.get("operation", "—"),
             "Requires Entitlement": meta.get("requires_entitlement", "—"),
-            "Active":              "✓" if row[2] else "—"
+            "Active":               "✓" if row[2] else "—",
         })
-    st.dataframe(pd.DataFrame(records), use_container_width=True, hide_index=True)
+    df = pd.DataFrame(records)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    del df
 else:
     st.info("No output columns registered.")
 
@@ -152,8 +183,6 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Section 4 — Advanced
 # ---------------------------------------------------------------------------
-st.subheader("Advanced")
-if st.button("Re-run Setup Wizard"):
+st.markdown("### :material/build: Advanced")
+if st.button(":material/auto_fix_high: Re-run Setup Wizard"):
     st.switch_page("pages/01_setup_wizard.py")
-
-

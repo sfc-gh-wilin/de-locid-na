@@ -698,4 +698,3 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | | Streamlit main views (Home, Run Encrypt, Run Decrypt, History, Config) |
 | **5 — Polish** | Performance tuning (clustering keys, Search Optimization Service evaluation) |
 | | End-to-end testing (encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates) |
-

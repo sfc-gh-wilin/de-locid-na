@@ -1,0 +1,9 @@
+[theme]
+# LocID brand theme — dark navy + teal accent
+# Colours sourced from the LocID mockup (Coco/tmp/20260423/LocID_NativeApp_Streamlit.pdf)
+base                     = "dark"
+primaryColor             = "#2CC4B7"
+backgroundColor          = "#0E1E35"
+secondaryBackgroundColor = "#162840"
+textColor                = "#E8F0F7"
+font                     = "sans serif"

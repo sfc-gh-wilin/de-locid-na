@@ -92,6 +92,8 @@ WHERE NOT EXISTS (
 -- =============================================================================
 -- 5. JOB_LOG Table
 --    Full audit trail of all Encrypt and Decrypt jobs.
+--    NOTE: run_dt is TIMESTAMP_NTZ — stored procedures must insert UTC values
+--    explicitly: CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS APP_SCHEMA.JOB_LOG (
     job_id        VARCHAR         NOT NULL,
@@ -112,6 +114,30 @@ CREATE TABLE IF NOT EXISTS APP_SCHEMA.JOB_LOG (
 GRANT SELECT, INSERT ON TABLE APP_SCHEMA.JOB_LOG
     TO APPLICATION ROLE APP_ADMIN;
 GRANT SELECT ON TABLE APP_SCHEMA.JOB_LOG
+    TO APPLICATION ROLE APP_VIEWER;
+
+
+-- =============================================================================
+-- 5b. APP_LOGS Table
+--     Application-level log stream. Written by utils/logger.py.
+--     All timestamps are UTC (TIMESTAMP_NTZ).
+--     level: DEBUG | INFO | WARNING | ERROR | TRACE
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS APP_SCHEMA.APP_LOGS (
+    log_id      VARCHAR        NOT NULL
+                    DEFAULT GEN_RANDOM_UUID(),
+    level       VARCHAR        NOT NULL,         -- DEBUG|INFO|WARNING|ERROR|TRACE
+    source      VARCHAR        NOT NULL,         -- "<file>.<function>"
+    logged_at   TIMESTAMP_NTZ  NOT NULL
+                    DEFAULT CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ,
+    session_id  VARCHAR,                         -- Snowflake session ID (CURRENT_SESSION())
+    message     VARCHAR        NOT NULL,
+    traceback   VARCHAR                          -- full Python traceback on exceptions
+);
+
+GRANT SELECT, INSERT ON TABLE APP_SCHEMA.APP_LOGS
+    TO APPLICATION ROLE APP_ADMIN;
+GRANT SELECT ON TABLE APP_SCHEMA.APP_LOGS
     TO APPLICATION ROLE APP_VIEWER;
 
 
