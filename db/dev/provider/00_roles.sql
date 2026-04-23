@@ -57,10 +57,10 @@ GRANT CREATE SHARE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 GRANT CREATE LISTING ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 
 -- Warehouse access for builds and testing
-EXECUTE IMMEDIATE 'GRANT USAGE ON WAREHOUSE ' || $my_warehouse || ' TO ROLE LOCID_APP_ADMIN';
+GRANT USAGE ON WAREHOUSE IDENTIFIER($my_warehouse) TO ROLE LOCID_APP_ADMIN;
 
 -- Assign to the user who manages the app package
-EXECUTE IMMEDIATE 'GRANT ROLE LOCID_APP_ADMIN TO USER ' || $my_username;
+GRANT ROLE LOCID_APP_ADMIN TO USER IDENTIFIER($my_username);
 
 
 -- =============================================================================
@@ -80,13 +80,13 @@ GRANT CREATE APPLICATION ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
 GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
 
 -- Warehouse access for running Encrypt / Decrypt jobs
-EXECUTE IMMEDIATE 'GRANT USAGE ON WAREHOUSE ' || $my_warehouse || ' TO ROLE LOCID_APP_INSTALLER';
+GRANT USAGE ON WAREHOUSE IDENTIFIER($my_warehouse) TO ROLE LOCID_APP_INSTALLER;
 
 -- Assign to the user who installs and manages the app
-EXECUTE IMMEDIATE 'GRANT ROLE LOCID_APP_INSTALLER TO USER ' || $my_username;
+GRANT ROLE LOCID_APP_INSTALLER TO USER IDENTIFIER($my_username);
 
 -- Optional: integrate into the standard role hierarchy
--- EXECUTE IMMEDIATE 'GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN';
+-- GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
 
 
 -- =============================================================================
