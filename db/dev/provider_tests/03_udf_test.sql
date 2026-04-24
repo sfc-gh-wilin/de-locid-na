@@ -27,9 +27,12 @@ USE SCHEMA   LOCID_DEV.STAGING;
 -- SETUP: Session variables
 -- ---------------------------------------------------------------------------
 
--- ⚠ Replace with your LocID license key before running.
---   Format: '1569-XXXX-XXXX-XXXX-XXXX-XXXX'
-SET license_key = 'REPLACE_WITH_YOUR_LICENSE_KEY';
+-- ⚠ Replace both values with secrets from the LocID Central license response
+--   (secrets.base_locid_secret and secrets.scheme_secret — NOT the License Key).
+--   Format: Base64-URL encoded AES key string with ~ as alternate padding.
+--   In dev environments both secrets may share the same key value.
+SET base_locid_secret = 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET';
+SET scheme_secret     = 'REPLACE_WITH_YOUR_SCHEME_SECRET';
 
 -- Sample LocIDs from test files and integration guide
 SET locid_1 = '31F24ZE1W1YX58K2R1139';         -- EncryptionTest.scala
@@ -59,7 +62,7 @@ LIST @LOCID_DEV.STAGING.LOCID_STAGE;
 
 -- 1a. Encrypt
 SET encrypted_locid_1 = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_1, $license_key)
+    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_1, $base_locid_secret)
 );
 SELECT $encrypted_locid_1 AS encrypted_locid_1;
 -- Input: 31F24ZE1W1YX58K2R1139
@@ -67,7 +70,7 @@ SELECT $encrypted_locid_1 AS encrypted_locid_1;
 
 -- 1b. Decrypt
 SET decrypted_locid_1 = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_DECRYPT($encrypted_locid_1, $license_key)
+    SELECT LOCID_DEV.STAGING.LOCID_BASE_DECRYPT($encrypted_locid_1, $base_locid_secret)
 );
 SELECT $decrypted_locid_1 AS decrypted_locid_1;
 -- Input: VvOPJrPpJm6CwNEXCg_91DmS9ue7TUdPJQ0sbyFvfmlVTMPJliA63ZSnFlWZqhTWrQ==
@@ -94,7 +97,7 @@ SELECT
 
 -- 2a. Simulate LOCID_BUILDS.encrypted_locid for locid_2
 SET encrypted_locid_2 = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_2, $license_key)
+    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_2, $base_locid_secret)
 );
 SELECT $encrypted_locid_2 AS encrypted_locid_2;
 -- Input: 4SV5XGYRWPT8AS6M04A8SMGVBZ
@@ -108,15 +111,14 @@ SELECT $ts_now AS timestamp_sec;
 -- 1776320434
 
 -- 2c. Encrypt → TX_CLOC
---     Using same key for base_locid_key and scheme_key (valid for dev testing)
 --     client_id = 1 (matches integration guide examples)
 SET tx_cloc = (
     SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_ENCRYPT(
-        $encrypted_locid_2,  -- encrypted_locid from DB
-        $license_key,        -- base_locid_key
-        $license_key,        -- scheme_key
-        $ts_now,             -- timestamp_sec
-        1                    -- client_id
+        $encrypted_locid_2,    -- encrypted_locid from DB
+        $base_locid_secret,    -- base_locid_key
+        $scheme_secret,        -- scheme_key
+        $ts_now,               -- timestamp_sec
+        1                      -- client_id
     )
 );
 SELECT $tx_cloc AS tx_cloc;
@@ -137,7 +139,7 @@ SELECT $tx_cloc AS tx_cloc;
 
 -- 3a. Decrypt TX_CLOC
 SET decoded_json = (
-    SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_DECRYPT($tx_cloc, $license_key)
+    SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_DECRYPT($tx_cloc, $scheme_secret)
 );
 SELECT $decoded_json AS decoded_json;
 -- {"location_id":"4SV5XGYRWPT8AS6M04A8SMGVBZ","timestamp":1776320434,"enc_client_id":1}
@@ -166,12 +168,12 @@ SELECT
 
 SET stable_cloc = (
     SELECT LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
-        $encrypted_locid_2,  -- encrypted_locid from DB
-        $license_key,        -- base_locid_key
-        $namespace_guid,     -- namespace GUID (hex, no dashes)
-        1,                   -- client_id (consumer)
-        1,                   -- enc_client_id (publisher)
-        'T0'                 -- tier: 'T0' = rooftop, 'T1' = low accuracy
+        $encrypted_locid_2,    -- encrypted_locid from DB
+        $base_locid_secret,    -- base_locid_key
+        $namespace_guid,       -- namespace GUID (hex, no dashes)
+        1,                     -- client_id (consumer)
+        1,                     -- enc_client_id (publisher)
+        'T0'                   -- tier: 'T0' = rooftop, 'T1' = low accuracy
     )
 );
 SELECT $stable_cloc AS stable_cloc;

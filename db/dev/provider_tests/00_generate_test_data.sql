@@ -21,21 +21,23 @@
 --   Build date:         2025-01-08
 --   Customer event ts:  2025-01-10 (falls within the 2025-01-08 build range)
 --   All rows produce valid LOCID_TXCLOC_ENCRYPT / LOCID_STABLE_CLOC output
---   when $license_key matches the key registered with LocID Central.
+--   when $base_locid_secret matches the secret registered with LocID Central.
 --
--- IMPORTANT — $license_key:
---   Set $license_key to your actual LocID license key BEFORE running this file.
---   Format: '1569-XXXX-XXXX-XXXX-XXXX-XXXX'
---   The same key must be used in APP_CONFIG for the Native App proc calls
---   to succeed. Replace the placeholder below with your actual key.
+-- IMPORTANT — $base_locid_secret:
+--   Set $base_locid_secret to the base_locid_secret value from the LocID Central
+--   license endpoint (secrets.base_locid_secret — NOT the License Key itself).
+--   Format: Base64-URL encoded AES key string with ~ as alternate padding.
+--   The same secret must be stored in APP_CONFIG for the Native App proc calls
+--   to succeed. Replace the placeholder below with your actual secret.
 -- =============================================================================
 
 USE DATABASE LOCID_DEV;
 USE SCHEMA   LOCID_DEV.STAGING;
 
--- ⚠ Replace with your LocID license key (same key used in 03_udf_test.sql)
---   Format: '1569-XXXX-XXXX-XXXX-XXXX-XXXX'
-SET license_key = 'REPLACE_WITH_YOUR_LICENSE_KEY';
+-- ⚠ Replace with base_locid_secret from the LocID Central license response
+--   (secrets.base_locid_secret — NOT the License Key).
+--   Format: Base64-URL encoded AES key string with ~ as alternate padding.
+SET base_locid_secret = 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET';
 
 
 -- ---------------------------------------------------------------------------
@@ -45,10 +47,10 @@ SET license_key = 'REPLACE_WITH_YOUR_LICENSE_KEY';
 --         LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT must exist (run 06_udfs.sql first).
 -- ---------------------------------------------------------------------------
 SET test_encrypted_locid = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT('31F24ZE1W1YX58K2R1139', $license_key)
+    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT('31F24ZE1W1YX58K2R1139', $base_locid_secret)
 );
 SELECT $test_encrypted_locid AS test_encrypted_locid;
--- Expected: non-null base64-URL string (exact value depends on $license_key)
+-- Expected: non-null base64-URL string (exact value depends on $base_locid_secret)
 
 
 -- ---------------------------------------------------------------------------

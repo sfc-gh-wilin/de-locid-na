@@ -112,9 +112,9 @@ Choose **one** option. Both produce the same table structure; the difference is 
 
 ### Option A — Synthetic generated data (no CSV files)
 
-Requires Phase 1 Steps 1.1–1.6 (UDFs must exist) and your LocID license key.
+Requires Phase 1 Steps 1.1–1.6 (UDFs must exist) and your `base_locid_secret` from the LocID Central license response.
 
-1. Open `db/dev/provider_tests/00_generate_test_data.sql`, set `$license_key` at the top, then run:
+1. Open `db/dev/provider_tests/00_generate_test_data.sql`, set `$base_locid_secret` at the top, then run:
    ```bash
    snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/00_generate_test_data.sql"
    ```
@@ -321,10 +321,11 @@ snow object stage list @LOCID_DEV.STAGING.LOCID_STAGE --connection wl_sandbox_dc
 
 Run `db/dev/provider_tests/03_udf_test.sql` step by step.
 
-Before running, set the license key:
+Before running, set the secrets (from the LocID Central license response — not the License Key):
 
 ```sql
-SET license_key = 'YOUR_ACTUAL_LICENSE_KEY';
+SET base_locid_secret = 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET';
+SET scheme_secret     = 'REPLACE_WITH_YOUR_SCHEME_SECRET';
 ```
 
 Expected results:
