@@ -264,26 +264,26 @@ snow app run --version v1_0 --connection wl_sandbox_dcr
 
 ---
 
-### 3.6 Bind references — grant the app access to consumer data and warehouse
+### 3.6 Bind references
 
-The app uses `references` (declared in `manifest.yml`) instead of direct `GRANT … TO APPLICATION`
-statements. Snowflake manages the underlying privilege grants automatically when a reference is bound.
+The app uses `references` for consumer objects declared in `manifest.yml`.
+Output tables are created by the app in its own `APP_SCHEMA` — no consumer GRANT is needed
+for output.
 
-Three references must be bound before running any job:
+| Access | Method |
+|---|---|
+| Input table (SELECT) | Reference — bound via Streamlit wizard or SQL |
+| Output tables | Auto-created in `APP_SCHEMA` (`LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS` / `LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS`) |
+| Warehouse (USAGE) | Reference — bound via Streamlit wizard or SQL |
 
-| Reference | Object type | Privilege(s) |
-|---|---|---|
-| `INPUT_TABLE` | TABLE | SELECT |
-| `OUTPUT_SCHEMA` | SCHEMA | CREATE TABLE, USAGE |
-| `APP_WAREHOUSE` | WAREHOUSE | USAGE |
+**Bind INPUT_TABLE and APP_WAREHOUSE references**
 
-**Option A — Streamlit setup wizard (recommended)**
-
+*Option A — Streamlit setup wizard (recommended):*
 Open the app in Snowsight and follow the setup wizard. Each reference has a picker that lets the
 consumer select the target object. Snowflake calls `APP_SCHEMA.register_single_callback`
 automatically on each selection.
 
-**Option B — SQL (dev / automation)**
+*Option B — SQL (dev / automation):*
 
 Replace `<YOUR_WAREHOUSE>` with the warehouse the app should use for jobs:
 
@@ -294,10 +294,6 @@ USE ROLE LOCID_APP_INSTALLER;
 CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback(
     'INPUT_TABLE', 'ADD', 'LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT');
 
--- Bind the output schema (grants CREATE TABLE + USAGE automatically via reference)
-CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback(
-    'OUTPUT_SCHEMA', 'ADD', 'LOCID_DEV.CONSUMER_TEST');
-
 -- Bind the job warehouse (grants USAGE automatically via reference)
 CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback(
     'APP_WAREHOUSE', 'ADD', '<YOUR_WAREHOUSE>');
@@ -307,7 +303,6 @@ To remove a binding (e.g. to switch to a different table or warehouse):
 
 ```sql
 CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback('INPUT_TABLE',   'REMOVE', '');
-CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback('OUTPUT_SCHEMA', 'REMOVE', '');
 CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback('APP_WAREHOUSE', 'REMOVE', '');
 ```
 
@@ -412,8 +407,10 @@ Open **Run Encrypt** from the sidebar.
 | IP column | `IP_ADDR` |
 | Timestamp column | `EVENT_TS` |
 | Timestamp format | `epoch_ms` or `datetime` (match actual format in test data) |
-| Output table | `LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_ENC` |
 | Warehouse | `<YOUR_WAREHOUSE>` |
+
+> Output table is auto-generated in `LOCID_DEV_APP.APP_SCHEMA` as
+> `LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS`. The name is returned in the job result.
 
 ### 6.2 Run input validation (Step 2)
 
@@ -431,13 +428,16 @@ Click **Run Input Validation**. Review the advisory results:
 Click **Run Job**. The proc call: `APP_SCHEMA.LOCID_ENCRYPT(...)`.
 
 Expected output:
-- Result panel shows rows matched, rows in, and runtime
-- Output table created at `LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_ENC`
+- Result panel shows `output_table`, rows matched, rows in, and runtime
+- Output table created at `LOCID_DEV_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS`
 
 ### 6.4 Inspect output
 
+Substitute the actual table name returned by the job:
+
 ```sql
-SELECT * FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_ENC LIMIT 10;
+-- Replace <YYYYMMDD_HHMMSS> with the timestamp from the job result
+SELECT * FROM LOCID_DEV_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> LIMIT 10;
 
 -- Compare against expected output (CUSTOMER_TEST_OUTPUT_2K)
 SELECT
@@ -446,8 +446,8 @@ SELECT
     a.encrypted_locid = b.encrypted_locid       AS encrypted_locid_match,
     a.locid_country    = b.locid_country        AS country_match,
     a.locid_city       = b.locid_city           AS city_match
-FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_ENC a
-JOIN LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT_2K  b ON a.row_id = b.id
+FROM LOCID_DEV_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> a
+JOIN LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT_2K                        b ON a.row_id = b.id
 ORDER BY a.row_id
 LIMIT 20;
 ```
@@ -462,11 +462,13 @@ Open **Run Decrypt** from the sidebar.
 
 | Field | Value |
 |-------|-------|
-| Input table | `LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_ENC` |
 | ID column | `ROW_ID` |
 | TX_CLOC column | `TX_CLOC` |
-| Output table | `LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_DEC` |
 | Warehouse | `<YOUR_WAREHOUSE>` |
+
+> Input for decrypt is the Encrypt output table from the previous step
+> (`LOCID_DEV_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS>`).
+> Decrypt output is auto-generated as `LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS` in the same schema.
 
 ### 7.2 Run the job
 
@@ -474,16 +476,18 @@ Click **Run Job**. The proc call: `APP_SCHEMA.LOCID_DECRYPT(...)`.
 
 ### 7.3 Verify STABLE_CLOC consistency
 
-The STABLE_CLOC from Decrypt should match the STABLE_CLOC from Encrypt for the same row:
+The STABLE_CLOC from Decrypt should match the STABLE_CLOC from Encrypt for the same row.
+Substitute the actual table names returned by each job:
 
 ```sql
+-- Replace both <YYYYMMDD_HHMMSS> placeholders with the timestamps from each job result
 SELECT
     e.row_id,
     e.stable_cloc  AS stable_from_encrypt,
     d.stable_cloc  AS stable_from_decrypt,
     IFF(e.stable_cloc = d.stable_cloc, 'PASS', 'FAIL') AS stable_cloc_consistent
-FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_ENC e
-JOIN LOCID_DEV.CONSUMER_TEST.NA_TEST_OUTPUT_DEC d ON e.row_id = d.row_id
+FROM LOCID_DEV_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> e
+JOIN LOCID_DEV_APP.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS> d ON e.row_id = d.row_id
 WHERE e.stable_cloc IS NOT NULL
 LIMIT 20;
 -- All rows should show PASS

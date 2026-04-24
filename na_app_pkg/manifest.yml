@@ -40,19 +40,6 @@ references:
       multi_valued: false
       register_callback: APP_SCHEMA.register_single_callback
 
-  # OUTPUT_SCHEMA — consumer schema where the app writes enriched output tables
-  - OUTPUT_SCHEMA:
-      label: "Output Schema"
-      description: >
-        Consumer schema where the app creates enriched output tables.
-        The app creates one output table per job run (e.g. NA_TEST_OUTPUT_<job_id>).
-      privileges:
-        - CREATE TABLE
-        - USAGE
-      object_type: SCHEMA
-      multi_valued: false
-      register_callback: APP_SCHEMA.register_single_callback
-
   # APP_WAREHOUSE — warehouse used to execute Encrypt and Decrypt jobs
   - APP_WAREHOUSE:
       label: "Job Warehouse"

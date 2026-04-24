@@ -24,14 +24,13 @@
 
 -- Consumer references used by this procedure (declared in manifest.yml):
 --   INPUT_TABLE   — consumer input table; read via reference('INPUT_TABLE')
---                   Privilege granted by Snowflake automatically when the
---                   consumer binds the reference.
---   OUTPUT_SCHEMA — consumer output schema; output table is created here via
---                   reference('OUTPUT_SCHEMA').<table_name>
 --   APP_WAREHOUSE — warehouse for job execution; set via
 --                   USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
+--
+-- Output table: auto-generated in APP_SCHEMA as LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS.
+-- The app owns APP_SCHEMA — no consumer GRANT needed.
+-- SELECT is granted to APP_ADMIN and APP_VIEWER after creation.
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
-    OUTPUT_TABLE  VARCHAR,    -- table name only (schema provided by OUTPUT_SCHEMA reference)
     ID_COL        VARCHAR,    -- column name for unique row identifier
     IP_COL        VARCHAR,    -- column name for IP address
     TS_COL        VARCHAR,    -- column name for timestamp
@@ -261,7 +260,6 @@ def _log_job(session, job_id, operation, rows_in, rows_matched, rows_out,
 
 def encrypt_handler(
     session: snowpark.Session,
-    output_table: str,
     id_col: str, ip_col: str, ts_col: str,
     ts_format: str, output_cols: list,
 ) -> dict:
@@ -270,8 +268,11 @@ def encrypt_handler(
     start_ts = time.time()
     rows_in = rows_matched = rows_out = 0
 
+    # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
+    output_table = f"LOCID_ENCRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}"
+
     # Validate caller-supplied identifiers before embedding in SQL
-    for name in (output_table, id_col, ip_col, ts_col):
+    for name in (id_col, ip_col, ts_col):
         _validate_id(name)
 
     cur_wh = None  # resolved after APP_WAREHOUSE reference is set (Step 0)
@@ -535,15 +536,22 @@ def encrypt_handler(
         ]
 
         # ------------------------------------------------------------------
-        # Step 7: Write output table
+        # Step 7: Write output table into APP_SCHEMA and grant read access
         # ------------------------------------------------------------------
         session.sql(f"""
-            CREATE OR REPLACE TABLE reference('OUTPUT_SCHEMA').{output_table} AS
+            CREATE OR REPLACE TABLE APP_SCHEMA.{output_table} AS
             SELECT {', '.join(select_exprs)}
             FROM _locid_matched
         """).collect()
 
-        rows_out  = session.sql(f"SELECT COUNT(*) FROM reference('OUTPUT_SCHEMA').{output_table}").collect()[0][0]
+        session.sql(
+            f"GRANT SELECT ON TABLE APP_SCHEMA.{output_table} TO APPLICATION ROLE APP_ADMIN"
+        ).collect()
+        session.sql(
+            f"GRANT SELECT ON TABLE APP_SCHEMA.{output_table} TO APPLICATION ROLE APP_VIEWER"
+        ).collect()
+
+        rows_out  = session.sql(f"SELECT COUNT(*) FROM APP_SCHEMA.{output_table}").collect()[0][0]
         runtime_s = round(time.time() - start_ts, 2)
 
         # ------------------------------------------------------------------
@@ -552,7 +560,7 @@ def encrypt_handler(
         _log_job(
             session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
             runtime_s, 'SUCCESS', None, 'reference(INPUT_TABLE)',
-            f"reference(OUTPUT_SCHEMA).{output_table}",
+            f"APP_SCHEMA.{output_table}",
             cur_wh, active_cols,
         )
 
@@ -562,12 +570,13 @@ def encrypt_handler(
         _post_stats(session, rows_matched, runtime_s, 'encrypt_usage')
 
         return {
-            'job_id':       job_id,
-            'status':       'SUCCESS',
-            'rows_in':      rows_in,
-            'rows_matched': rows_matched,
-            'rows_out':     rows_out,
-            'runtime_s':    runtime_s,
+            'job_id':        job_id,
+            'status':        'SUCCESS',
+            'output_table':  f"APP_SCHEMA.{output_table}",
+            'rows_in':       rows_in,
+            'rows_matched':  rows_matched,
+            'rows_out':      rows_out,
+            'runtime_s':     runtime_s,
         }
 
     except Exception as exc:
@@ -575,14 +584,14 @@ def encrypt_handler(
         _log_job(
             session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
             runtime_s, 'FAILED', str(exc), 'reference(INPUT_TABLE)',
-            f"reference(OUTPUT_SCHEMA).{output_table}",
+            f"APP_SCHEMA.{output_table}",
             cur_wh, [],
         )
         raise RuntimeError(f'LOCID_ENCRYPT failed: {exc}') from exc
 $$;
 
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
-    VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY
+    VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY
 ) TO APPLICATION ROLE APP_ADMIN;
 
 
