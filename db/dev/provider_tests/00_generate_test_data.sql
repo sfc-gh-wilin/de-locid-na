@@ -13,11 +13,7 @@
 --   4. db/dev/provider/04_locid_builds_ipv4_exploded.sql
 --   5. db/dev/provider/05_stage_setup.sql
 --   6. db/dev/provider/06_udfs.sql       (required for LOCID_BASE_ENCRYPT below)
---   7. db/dev/provider_tests/01_load_test_data.sql  (STEP 3 only: CREATE TABLE)
---      OR run the CREATE TABLE statements in this file's STEP 2.
---   8. db/dev/provider_tests/02_customer_input_sample.sql
---      (creates LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT — needed for STEP 7)
---   9. THIS FILE
+--   7. THIS FILE  (self-contained — no other provider_tests file needed first)
 --
 -- GENERATED DATA SCHEMA:
 --   IPv4 address space: 10.0.0.0 – 10.9.9.0 (/24 subnets, 100 blocks)
@@ -220,12 +216,20 @@ FROM gen;
 -- ---------------------------------------------------------------------------
 -- STEP 8: CONSUMER_TEST.NA_TEST_INPUT (100 rows)
 --
--- Mirrors CUSTOMER_TEST_INPUT_2K in the simulated consumer schema.
--- Requires 02_customer_input_sample.sql to have been run first
--- (LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT must exist).
--- Column names differ: row_id, ip_addr, event_ts  (see 02_customer_input_sample.sql)
+-- Simulates the consumer-owned input table.
+-- Creates the schema and table inline — no need to run
+-- 02_customer_input_sample.sql first.
+-- Column names differ from CUSTOMER_TEST_INPUT_2K: row_id, ip_addr, event_ts
 -- ---------------------------------------------------------------------------
-TRUNCATE TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT;
+CREATE SCHEMA IF NOT EXISTS LOCID_DEV.CONSUMER_TEST
+    COMMENT = 'Sandbox consumer simulation — mirrors a customer-owned schema for Native App testing';
+
+CREATE OR REPLACE TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (
+    row_id      VARCHAR          NOT NULL,
+    ip_addr     VARCHAR          NOT NULL,
+    event_ts    TIMESTAMP_NTZ(9) NOT NULL
+)
+COMMENT = 'Sandbox consumer input: 100-row sample for Native App Encrypt testing';
 
 INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 WITH gen AS (

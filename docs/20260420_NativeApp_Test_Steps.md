@@ -114,14 +114,12 @@ Choose **one** option. Both produce the same table structure; the difference is 
 
 Requires Phase 1 Steps 1.1–1.6 (UDFs must exist) and your dev license key.
 
-1. Run `02_customer_input_sample.sql` to create `LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT`:
-   ```bash
-   snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/02_customer_input_sample.sql"
-   ```
-2. Open `db/dev/provider_tests/00_generate_test_data.sql`, set `$dev_key` at the top, then run:
+1. Open `db/dev/provider_tests/00_generate_test_data.sql`, set `$dev_key` at the top, then run:
    ```bash
    snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/00_generate_test_data.sql"
    ```
+
+This file is self-contained — it creates `LOCID_DEV.CONSUMER_TEST` schema and `NA_TEST_INPUT` table automatically.
 
 Expected row counts:
 
@@ -517,14 +515,20 @@ TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K;
 
 ## Appendix B — Re-running Test Data
 
-To reload test data without dropping tables, re-run:
+**Option A (synthetic data):** Re-run the single self-contained file:
+
+```
+db/dev/provider_tests/00_generate_test_data.sql
+```
+
+**Option B (CSV load):** Re-run in order:
 
 ```
 db/dev/provider_tests/01_load_test_data.sql
 db/dev/provider_tests/02_customer_input_sample.sql
 ```
 
-Both scripts truncate before loading and are idempotent.
+All scripts truncate before loading and are idempotent.
 
 ---
 
