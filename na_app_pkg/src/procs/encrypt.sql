@@ -58,7 +58,7 @@ import snowflake.snowpark as snowpark
 # Must match the schema where LocID's LOCID data is exposed in the app package.
 # Update this constant to match the final app package share configuration.
 # =============================================================================
-_PROVIDER_SCHEMA = 'LOCID_DEV.STAGING'
+_PROVIDER_SCHEMA = 'LOCID_SHARE'
 
 # =============================================================================
 # Helpers (self-contained — no imports from utils/)

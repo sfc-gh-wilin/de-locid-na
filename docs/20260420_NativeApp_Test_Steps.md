@@ -16,6 +16,7 @@ This guide walks through deploying the LocID Native App from scratch in a sandbo
 | Role setup | `db/dev/provider/00_roles.sql` |
 | Provider setup | `db/dev/provider/01_setup.sql` → `06_udfs.sql` |
 | EAI setup | `db/dev/provider/07_eai_setup.sql` |
+| Provider data sharing | `db/dev/provider/08_share_to_pkg.sql` |
 | Test data | `db/dev/provider_tests/01_load_test_data.sql`, `02_customer_input_sample.sql` |
 | UDF tests | `db/dev/provider_tests/03_udf_test.sql` |
 | Cross-compat | `db/dev/provider_tests/04_cross_compat_test.sql` |
@@ -225,7 +226,31 @@ snow stage list-files @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandbo
 
 ---
 
-### 3.3 Approve external access at install time
+### 3.3 Share provider data into app package
+
+Once `LOCID_DEV_PKG` exists (created by `snow app deploy` in 3.2), run the provider
+data sharing script. This creates `LOCID_SHARE` inside the app package and exposes
+`LOCID_BUILDS`, `LOCID_BUILDS_IPV4_EXPLODED`, and `LOCID_BUILD_DATES` as Secure Views
+to all installed app instances.
+
+```bash
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/08_share_to_pkg.sql"
+```
+
+Verify:
+
+```bash
+snow sql --connection wl_sandbox_dcr \
+    -q "SHOW VIEWS IN SCHEMA LOCID_DEV_PKG.LOCID_SHARE"
+# Expected: 3 views — LOCID_BUILDS, LOCID_BUILDS_IPV4_EXPLODED, LOCID_BUILD_DATES
+```
+
+> **Re-run when needed:** If the provider source tables are recreated (e.g. after a
+> fresh data load), re-run this file so the Secure Views and grants stay in sync.
+
+---
+
+### 3.4 Approve external access at install time
 
 `setup.sql` creates `LOCID_CENTRAL_EAI` in the consumer account during installation
 (using the `CREATE EXTERNAL ACCESS INTEGRATION` privilege declared in `manifest.yml`).
@@ -242,7 +267,7 @@ permission dialog during app configuration. Approve it to enable outbound HTTPS 
 
 ---
 
-### 3.4 Create app version
+### 3.5 Create app version
 
 ```bash
 cd na_app_pkg
@@ -253,7 +278,7 @@ snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dc
 
 ---
 
-### 3.5 Install the application
+### 3.6 Install the application
 
 ```bash
 cd na_app_pkg
@@ -264,7 +289,7 @@ snow app run --version v1_0 --connection wl_sandbox_dcr
 
 ---
 
-### 3.6 Bind references
+### 3.7 Bind references
 
 The app uses `references` for consumer objects declared in `manifest.yml`.
 Output tables are created by the app in its own `APP_SCHEMA` — no consumer GRANT is needed

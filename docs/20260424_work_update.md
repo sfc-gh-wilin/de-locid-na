@@ -72,7 +72,21 @@
 
 ---
 
-### 7. Deployment Roles
+### 7. Provider Data Sharing — Secure Views into App Package *(2026-04-24)*
+
+- Identified missing piece: `encrypt.sql` was hardcoded to reference `LOCID_DEV.STAGING` directly — a path that does not exist on any consumer account.
+- Created `db/dev/provider/08_share_to_pkg.sql`: provider-side script that shares the three LocID data tables into the Application Package via Secure Views:
+  - Creates `LOCID_SHARE` schema inside `LOCID_DEV_PKG`
+  - Creates Secure Views: `LOCID_BUILDS`, `LOCID_BUILDS_IPV4_EXPLODED`, `LOCID_BUILD_DATES`
+  - Grants `REFERENCE_USAGE ON DATABASE LOCID_DEV` to the package share
+  - Grants `SELECT` on each view to the package share (visible to all installed app instances)
+- Consumer accounts cannot query the Secure Views directly — the Native App Framework enforces access to app procedures only.
+- Updated `encrypt.sql`: changed `_PROVIDER_SCHEMA` from `'LOCID_DEV.STAGING'` to `'LOCID_SHARE'` (one-line fix) so the procedure reads through the shared schema at runtime.
+- Updated sandbox deployment guide: added Phase 3.3 (run `08_share_to_pkg.sql` after `snow app deploy`); renumbered old 3.3–3.6 to 3.4–3.7.
+
+---
+
+### 8. Deployment Roles
 
 - Defined two least-privilege custom roles as an alternative to ACCOUNTADMIN:
   - `LOCID_APP_ADMIN` — provider side: manages Application Package, stage, versions, Marketplace listing.
@@ -81,7 +95,7 @@
 
 ---
 
-### 8. Sandbox Testing Framework
+### 9. Sandbox Testing Framework
 
 - Created test data loader (`01_load_test_data.sql`) from real client CSVs with explicit column remapping for `LOCID_BUILDS`.
 - Created synthetic data generator (`00_generate_test_data.sql`) — generates 100-row deterministic IP dataset using Snowflake `GENERATOR()`; no real CSV files needed.
@@ -91,7 +105,7 @@
 
 ---
 
-### 9. Sandbox Deployment Guide (`docs/20260420_NativeApp_Test_Steps.md`)
+### 10. Sandbox Deployment Guide (`docs/20260420_NativeApp_Test_Steps.md`)
 
 - Published step-by-step sandbox guide covering:
   - Phase 0: Role setup
@@ -100,7 +114,7 @@
   - Phase 3: App package creation, file upload, version, install
   - Phases 4–8: UDF tests, Setup Wizard walkthrough, Encrypt/Decrypt job testing, cross-compat
   - Appendix: cleanup and re-run procedures
-- Updated Phase 3 *(2026-04-24)*: now uses `snow app deploy` / `snow app run` workflow; added JAR pre-copy step and EAI approval notes.
+- Updated Phase 3 *(2026-04-24)*: now uses `snow app deploy` / `snow app run` workflow; added Phase 3.3 (provider data sharing via `08_share_to_pkg.sql`), JAR pre-copy step, and EAI approval notes.
 - All commands use Snow CLI (`snow -c wl_sandbox_dcr`); no SnowSQL dependency.
 
 ---
