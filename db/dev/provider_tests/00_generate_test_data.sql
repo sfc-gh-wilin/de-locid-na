@@ -16,7 +16,8 @@
 --   7. THIS FILE  (self-contained — no other provider_tests file needed first)
 --
 -- GENERATED DATA SCHEMA:
---   IPv4 address space: 10.0.0.0 – 10.9.9.0 (/24 subnets, 100 blocks)
+--   IPv4: 10.0.0.0 – 10.9.9.0 (/24 subnets, 100 blocks)
+--   IPv6: 2001:DB8:1:1:: – 2001:DB8:1:10:: (/64 subnets, 10 blocks, RFC 3849 documentation prefix)
 --   Build date:         2025-01-08
 --   Customer event ts:  2025-01-10 (falls within the 2025-01-08 build range)
 --   All rows produce valid LOCID_TXCLOC_ENCRYPT / LOCID_STABLE_CLOC output
@@ -38,7 +39,7 @@ SET dev_key = 'REPLACE_WITH_YOUR_DEV_LICENSE_KEY';
 -- ---------------------------------------------------------------------------
 -- STEP 1: Pre-compute the test encrypted_locid value
 --         Uses sample LocID from 03_udf_test.sql (EncryptionTest.scala).
---         All 100 generated LOCID_BUILDS rows share this encrypted value.
+--         All LOCID_BUILDS rows (IPv4 and IPv6) share this encrypted value.
 --         LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT must exist (run 06_udfs.sql first).
 -- ---------------------------------------------------------------------------
 SET test_encrypted_locid = (
@@ -102,7 +103,7 @@ VALUES
 
 
 -- ---------------------------------------------------------------------------
--- STEP 5: LOCID_BUILDS (100 rows)
+-- STEP 5: LOCID_BUILDS — IPv4 rows (100 rows)
 --
 -- Generated IPv4 ranges: /24 subnets in 10.0.0.0/8
 --   rn 0-9:   10.0.0.0/24  →  10.9.0.0/24
@@ -168,6 +169,66 @@ FROM gen;
 
 
 -- ---------------------------------------------------------------------------
+-- STEP 5b: LOCID_BUILDS — IPv6 rows (10 rows)
+--
+-- 10 synthetic /64 subnets using the 2001:DB8::/32 documentation prefix (RFC 3849).
+-- start_ip_int_hex / end_ip_int_hex are computed via PARSE_IP so that the
+-- range-join matching in the encrypt proc works correctly.
+-- Customer test IPs (STEP 7b) use the ::1 host of each subnet to guarantee a match.
+-- ---------------------------------------------------------------------------
+INSERT INTO LOCID_DEV.STAGING.LOCID_BUILDS (
+    build_dt, start_ip, end_ip, start_ip_int_hex, end_ip_int_hex,
+    tier, locid_country, locid_country_code,
+    locid_region, locid_region_code,
+    locid_city, locid_city_code, locid_postal_code,
+    encrypted_locid, locid_horizontal_accuracy
+)
+WITH gen AS (
+    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
+    FROM TABLE(GENERATOR(rowcount => 10))
+)
+SELECT
+    '2025-01-08'::DATE                                                                AS build_dt,
+    '2001:DB8:1:' || rn::VARCHAR || '::'                                              AS start_ip,
+    '2001:DB8:1:' || rn::VARCHAR || ':FFFF:FFFF:FFFF:FFFF'                            AS end_ip,
+    GET_PATH(PARSE_IP('2001:DB8:1:' || rn::VARCHAR || '::', 'INET'), 'hex_ipv6')
+                                                                                      AS start_ip_int_hex,
+    GET_PATH(PARSE_IP('2001:DB8:1:' || rn::VARCHAR || ':FFFF:FFFF:FFFF:FFFF', 'INET'), 'hex_ipv6')
+                                                                                      AS end_ip_int_hex,
+    CASE (rn % 4) WHEN 1 THEN 'T0' WHEN 2 THEN 'T1' WHEN 3 THEN 'T2' ELSE 'T3' END  AS tier,
+    'United States'                                                                    AS locid_country,
+    'US'                                                                               AS locid_country_code,
+    CASE (rn % 4)
+        WHEN 1 THEN 'California'
+        WHEN 2 THEN 'New York'
+        WHEN 3 THEN 'Texas'
+        ELSE        'Florida'
+    END                                                                                AS locid_region,
+    CASE (rn % 4) WHEN 1 THEN 'CA' WHEN 2 THEN 'NY' WHEN 3 THEN 'TX' ELSE 'FL' END   AS locid_region_code,
+    CASE (rn % 4)
+        WHEN 1 THEN 'San Francisco'
+        WHEN 2 THEN 'New York City'
+        WHEN 3 THEN 'Houston'
+        ELSE        'Miami'
+    END                                                                                AS locid_city,
+    CASE (rn % 4)
+        WHEN 1 THEN 'SAN_FRANCISCO'
+        WHEN 2 THEN 'NEW_YORK_CITY'
+        WHEN 3 THEN 'HOUSTON'
+        ELSE        'MIAMI'
+    END                                                                                AS locid_city_code,
+    CASE (rn % 4)
+        WHEN 1 THEN '94102'
+        WHEN 2 THEN '10001'
+        WHEN 3 THEN '77001'
+        ELSE        '33101'
+    END                                                                                AS locid_postal_code,
+    $test_encrypted_locid                                                              AS encrypted_locid,
+    CASE (rn % 4) WHEN 1 THEN 50 WHEN 2 THEN 100 WHEN 3 THEN 200 ELSE 500 END        AS locid_horizontal_accuracy
+FROM gen;
+
+
+-- ---------------------------------------------------------------------------
 -- STEP 6: LOCID_BUILDS_IPV4_EXPLODED (100 rows)
 --
 -- One row per /24 subnet, representing the .1 host address.
@@ -190,7 +251,7 @@ FROM gen;
 
 
 -- ---------------------------------------------------------------------------
--- STEP 7: CUSTOMER_TEST_INPUT (100 rows)
+-- STEP 7: CUSTOMER_TEST_INPUT — IPv4 rows (100 rows)
 --
 -- Each row uses the .1 host from a generated /24 subnet so that it matches
 -- exactly one LOCID_BUILDS_IPV4_EXPLODED entry (and therefore one LOCID_BUILDS row).
@@ -214,7 +275,26 @@ FROM gen;
 
 
 -- ---------------------------------------------------------------------------
--- STEP 8: CONSUMER_TEST.NA_TEST_INPUT (100 rows)
+-- STEP 7b: CUSTOMER_TEST_INPUT — IPv6 rows (10 rows)
+--
+-- One ::1 host per generated /64 subnet, matching the LOCID_BUILDS IPv6 rows
+-- inserted in STEP 5b. Timestamps start at 18:00:00 on 2025-01-10 to avoid
+-- overlap with IPv4 rows while staying within the same 2025-01-08 build range.
+-- ---------------------------------------------------------------------------
+INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
+WITH gen AS (
+    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
+    FROM TABLE(GENERATOR(rowcount => 10))
+)
+SELECT
+    'GEN_V6_' || LPAD(rn::VARCHAR, 4, '0')                                    AS id,
+    '2001:DB8:1:' || rn::VARCHAR || '::1'                                      AS ip_address,
+    DATEADD('minute', rn * 10, '2025-01-10 18:00:00'::TIMESTAMP_NTZ)          AS ts
+FROM gen;
+
+
+-- ---------------------------------------------------------------------------
+-- STEP 8: CONSUMER_TEST.NA_TEST_INPUT — IPv4 + IPv6 rows (110 rows)
 --
 -- Simulates the consumer-owned input table.
 -- Creates the schema and table inline — no need to run
@@ -229,7 +309,7 @@ CREATE OR REPLACE TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (
     ip_addr     VARCHAR          NOT NULL,
     event_ts    TIMESTAMP_NTZ(9) NOT NULL
 )
-COMMENT = 'Sandbox consumer input: 100-row sample for Native App Encrypt testing';
+COMMENT = 'Sandbox consumer input: 110-row sample (100 IPv4 + 10 IPv6) for Native App Encrypt testing';
 
 INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 WITH gen AS (
@@ -242,6 +322,18 @@ SELECT
     DATEADD('minute', rn * 10, '2025-01-10 08:00:00'::TIMESTAMP_NTZ)         AS event_ts
 FROM gen;
 
+-- IPv6 consumer input (10 rows) — mirrors CUSTOMER_TEST_INPUT IPv6 rows (STEP 7b)
+INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
+WITH gen AS (
+    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
+    FROM TABLE(GENERATOR(rowcount => 10))
+)
+SELECT
+    'GEN_V6_' || LPAD(rn::VARCHAR, 4, '0')                                    AS row_id,
+    '2001:DB8:1:' || rn::VARCHAR || '::1'                                      AS ip_addr,
+    DATEADD('minute', rn * 10, '2025-01-10 18:00:00'::TIMESTAMP_NTZ)          AS event_ts
+FROM gen;
+
 
 -- ---------------------------------------------------------------------------
 -- STEP 9: Verify row counts
@@ -252,20 +344,29 @@ SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAG
 UNION ALL
 SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED
 UNION ALL
-SELECT 'CUSTOMER_TEST_INPUT'     AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
+SELECT 'CUSTOMER_TEST_INPUT'        AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
 UNION ALL
 SELECT 'NA_TEST_INPUT'              AS tbl, COUNT(*) AS rows FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
 ORDER BY 1;
 -- Expected:
---   CUSTOMER_TEST_INPUT       100
+--   CUSTOMER_TEST_INPUT          110  (100 IPv4 + 10 IPv6)
 --   LOCID_BUILD_DATES              5
---   LOCID_BUILDS                 100
---   LOCID_BUILDS_IPV4_EXPLODED   100
---   NA_TEST_INPUT                100
+--   LOCID_BUILDS                 110  (100 IPv4 + 10 IPv6)
+--   LOCID_BUILDS_IPV4_EXPLODED   100  (IPv4 only)
+--   NA_TEST_INPUT                110  (100 IPv4 + 10 IPv6)
 
--- Spot-check: verify 10 generated IPs match between LOCID_BUILDS_IPV4_EXPLODED
---             and CUSTOMER_TEST_INPUT (should return 100 rows)
-SELECT COUNT(*) AS matched_ips
+-- Spot-check IPv4: verify all 100 IPv4 IPs match LOCID_BUILDS_IPV4_EXPLODED
+SELECT COUNT(*) AS matched_ipv4
 FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT c
 JOIN LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED e ON e.ip_address = c.ip_address;
 -- Expected: 100
+
+-- Spot-check IPv6: verify all 10 IPv6 IPs fall within a LOCID_BUILDS IPv6 range
+SELECT COUNT(*) AS matched_ipv6
+FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT c
+JOIN LOCID_DEV.STAGING.LOCID_BUILDS lb
+  ON lb.start_ip LIKE '%:%'
+ AND GET_PATH(PARSE_IP(c.ip_address, 'INET'), 'hex_ipv6')
+       BETWEEN lb.start_ip_int_hex AND lb.end_ip_int_hex
+WHERE c.ip_address LIKE '%:%';
+-- Expected: 10
