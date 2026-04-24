@@ -206,14 +206,14 @@ GRANT USAGE ON FUNCTION APP_SCHEMA.HTTP_PING()
 -- UDFs defined: LOCID_BASE_ENCRYPT, LOCID_BASE_DECRYPT, LOCID_TXCLOC_ENCRYPT,
 --               LOCID_TXCLOC_DECRYPT, LOCID_STABLE_CLOC, LOCID_STABLE_CLOC_FROM_PLAIN
 -- =============================================================================
-EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/udfs/locid_udf.sql';
+EXECUTE IMMEDIATE FROM 'src/udfs/locid_udf.sql';
 
 
 -- =============================================================================
 -- 9. Stored Procedures
 -- =============================================================================
-EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/procs/encrypt.sql';
-EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/procs/decrypt.sql';
+EXECUTE IMMEDIATE FROM 'src/procs/encrypt.sql';
+EXECUTE IMMEDIATE FROM 'src/procs/decrypt.sql';
 
 
 -- =============================================================================
