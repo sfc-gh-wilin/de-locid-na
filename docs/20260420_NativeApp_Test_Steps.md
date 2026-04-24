@@ -145,16 +145,16 @@ When running the Encrypt job in the app (Phase 6), select timestamp format **dat
 #### B.1 Upload CSV files to stage (Snow CLI, from repository root)
 
 ```bash
-snow object stage copy Coco/db/LOCID_BUILDS.csv \
+snow stage copy Coco/db/LOCID_BUILDS.csv \
     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 
-snow object stage copy Coco/db/LOCID_BUILDS_IPV4_EXPLODED.csv \
+snow stage copy Coco/db/LOCID_BUILDS_IPV4_EXPLODED.csv \
     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 
-snow object stage copy Coco/db/LOCID_BUILD_DATES.csv \
+snow stage copy Coco/db/LOCID_BUILD_DATES.csv \
     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 
-snow object stage copy Coco/db/CUSTOMER_TEST_INPUT.csv \
+snow stage copy Coco/db/CUSTOMER_TEST_INPUT.csv \
     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE --overwrite --connection wl_sandbox_dcr
 ```
 
@@ -217,7 +217,7 @@ snow app deploy --connection wl_sandbox_dcr
 Verify files were uploaded:
 
 ```bash
-snow object stage list @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandbox_dcr
+snow stage list-files @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandbox_dcr
 # Expected: setup.sql, manifest.yml, README.md, lib/encode-lib-*.jar,
 #           src/udfs/locid_udf.sql, src/procs/encrypt.sql, src/procs/decrypt.sql,
 #           streamlit/app.py, streamlit/pages/*.py, streamlit/utils/*.py
@@ -334,11 +334,11 @@ These tests validate the UDFs in `LOCID_DEV.STAGING` independently of the app.
 ### 4.1 Upload JAR to provider stage (if not already done in Phase 1.5)
 
 ```bash
-snow object stage copy \
+snow stage copy \
     "Coco/tmp/20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar" \
     @LOCID_DEV.STAGING.LOCID_STAGE --overwrite --connection wl_sandbox_dcr
 
-snow object stage list @LOCID_DEV.STAGING.LOCID_STAGE --connection wl_sandbox_dcr
+snow stage list-files @LOCID_DEV.STAGING.LOCID_STAGE --connection wl_sandbox_dcr
 ```
 
 ### 4.2 Run UDF round-trip tests
