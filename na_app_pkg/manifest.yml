@@ -24,11 +24,7 @@ artifacts:
 # The consumer is prompted to approve this privilege during installation.
 privileges:
   - CREATE EXTERNAL ACCESS INTEGRATION:
-      description: >
-        Allows the app to create an External Access Integration to reach
-        central.locid.com over HTTPS (port 443). Used for license validation,
-        cryptographic secret retrieval, and usage statistics reporting.
-        No customer data is sent — only job-level metrics (row counts, runtime).
+      description: "Allows the app to create an EAI to reach central.locid.com (HTTPS 443) for license validation and usage statistics. No customer data is sent."
 
 references:
   # INPUT_TABLE — consumer input table (read by every Encrypt job)
