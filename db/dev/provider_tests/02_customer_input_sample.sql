@@ -2,12 +2,12 @@
 -- 02_customer_input_sample.sql
 -- LocID Dev: Consumer-side test table for Native App sandbox testing
 --
--- Run order: after 01_load_test_data.sql (CUSTOMER_TEST_INPUT_2K must be loaded).
+-- Run order: after 01_load_test_data.sql (CUSTOMER_TEST_INPUT must be loaded).
 --
 -- PURPOSE:
 --   Creates a schema and input table that simulates the consumer's own data
 --   environment. In production the consumer provides their own table; in sandbox
---   we mirror CUSTOMER_TEST_INPUT_2K here so that the Native App can be tested
+--   we mirror CUSTOMER_TEST_INPUT here so that the Native App can be tested
 --   end-to-end with a realistic consumer boundary.
 --
 -- Schema: LOCID_DEV.CONSUMER_TEST
@@ -48,11 +48,11 @@ COMMENT = 'Sandbox consumer input: 100-row sample for Native App Encrypt testing
 
 -- ---------------------------------------------------------------------------
 -- STEP 3: Populate from test data loaded in 01_load_test_data.sql
---         Maps CUSTOMER_TEST_INPUT_2K columns → NA_TEST_INPUT columns.
+--         Maps CUSTOMER_TEST_INPUT columns → NA_TEST_INPUT columns.
 -- ---------------------------------------------------------------------------
 INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 SELECT id, ip_address, ts
-FROM   LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K;
+FROM   LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
 
 
 -- ---------------------------------------------------------------------------

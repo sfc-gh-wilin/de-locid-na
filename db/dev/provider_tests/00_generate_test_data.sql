@@ -53,7 +53,7 @@ SELECT $test_encrypted_locid AS test_encrypted_locid;
 --         Skip this step if 01_load_test_data.sql has already been run
 --         (tables already exist due to CREATE TABLE IF NOT EXISTS).
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K (
+CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (
     id          VARCHAR(16777216),
     ip_address  VARCHAR(16777216),
     ts          TIMESTAMP_NTZ(9)
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT_2K (
 TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILD_DATES;
 TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS;
 TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
-TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K;
+TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
 
 
 -- ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ FROM gen;
 
 
 -- ---------------------------------------------------------------------------
--- STEP 7: CUSTOMER_TEST_INPUT_2K (100 rows)
+-- STEP 7: CUSTOMER_TEST_INPUT (100 rows)
 --
 -- Each row uses the .1 host from a generated /24 subnet so that it matches
 -- exactly one LOCID_BUILDS_IPV4_EXPLODED entry (and therefore one LOCID_BUILDS row).
@@ -201,7 +201,7 @@ FROM gen;
 --
 -- For the Native App Encrypt proc, select timestamp format: 'datetime' (not epoch_ms).
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K (id, ip_address, ts)
+INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS rn
     FROM TABLE(GENERATOR(rowcount => 100))
@@ -219,7 +219,7 @@ FROM gen;
 -- Simulates the consumer-owned input table.
 -- Creates the schema and table inline — no need to run
 -- 02_customer_input_sample.sql first.
--- Column names differ from CUSTOMER_TEST_INPUT_2K: row_id, ip_addr, event_ts
+-- Column names differ from CUSTOMER_TEST_INPUT: row_id, ip_addr, event_ts
 -- ---------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS LOCID_DEV.CONSUMER_TEST
     COMMENT = 'Sandbox consumer simulation — mirrors a customer-owned schema for Native App testing';
@@ -252,20 +252,20 @@ SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAG
 UNION ALL
 SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED
 UNION ALL
-SELECT 'CUSTOMER_TEST_INPUT_2K'     AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K
+SELECT 'CUSTOMER_TEST_INPUT'     AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
 UNION ALL
 SELECT 'NA_TEST_INPUT'              AS tbl, COUNT(*) AS rows FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
 ORDER BY 1;
 -- Expected:
---   CUSTOMER_TEST_INPUT_2K       100
+--   CUSTOMER_TEST_INPUT       100
 --   LOCID_BUILD_DATES              5
 --   LOCID_BUILDS                 100
 --   LOCID_BUILDS_IPV4_EXPLODED   100
 --   NA_TEST_INPUT                100
 
 -- Spot-check: verify 10 generated IPs match between LOCID_BUILDS_IPV4_EXPLODED
---             and CUSTOMER_TEST_INPUT_2K (should return 100 rows)
+--             and CUSTOMER_TEST_INPUT (should return 100 rows)
 SELECT COUNT(*) AS matched_ips
-FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K c
+FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT c
 JOIN LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED e ON e.ip_address = c.ip_address;
 -- Expected: 100

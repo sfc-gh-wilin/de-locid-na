@@ -9,7 +9,7 @@
 --   LOCID_BUILDS                 10,000 rows  (weekly IP→LocID map, IPv4 + IPv6)
 --   LOCID_BUILDS_IPV4_EXPLODED   10,000 rows  (exploded IPv4 equi-join table)
 --   LOCID_BUILD_DATES               60 rows   (build calendar, date range lookup)
---   CUSTOMER_TEST_INPUT_2K         100 rows   (sample customer input for testing)
+--   CUSTOMER_TEST_INPUT         100 rows   (sample customer input for testing)
 --
 -- Source CSVs are in: Coco/db/
 -- CUSTOMER_TEST_OUTPUT_2K.csv is reference-only; load not required.
@@ -45,7 +45,7 @@ CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
 --     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
 --     AUTO_COMPRESS = FALSE  OVERWRITE = TRUE;
 --
--- PUT file://Coco/db/CUSTOMER_TEST_INPUT_2K.csv
+-- PUT file://Coco/db/CUSTOMER_TEST_INPUT.csv
 --     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
 --     AUTO_COMPRESS = FALSE  OVERWRITE = TRUE;
 -- ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
 -- Verify all four files are present before proceeding
 LIST @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE;
 -- Expected: 4 rows (LOCID_BUILDS.csv.gz, LOCID_BUILDS_IPV4_EXPLODED.csv.gz,
---                    LOCID_BUILD_DATES.csv.gz, CUSTOMER_TEST_INPUT_2K.csv.gz)
+--                    LOCID_BUILD_DATES.csv.gz, CUSTOMER_TEST_INPUT.csv.gz)
 -- Note: SnowSQL auto-compresses to .gz even with AUTO_COMPRESS=FALSE when staging;
 --       the stage metadata is transparent to COPY INTO.
 
@@ -64,7 +64,7 @@ LIST @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE;
 
 -- Customer test input: simulates the customer-provided IP+timestamp table
 -- Column types mirror Coco/db/tables.sql exactly.
-CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K (
+CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (
     id          VARCHAR(16777216),
     ip_address  VARCHAR(16777216),
     ts          TIMESTAMP_NTZ(9)
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT_2K (
 TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS;
 TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
 TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILD_DATES;
-TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K;
+TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
 
 
 -- ---------------------------------------------------------------------------
@@ -189,13 +189,13 @@ FILE_FORMAT = (
 
 
 -- ---------------------------------------------------------------------------
--- STEP 8: Load CUSTOMER_TEST_INPUT_2K (100 rows)
+-- STEP 8: Load CUSTOMER_TEST_INPUT (100 rows)
 --
 -- CSV column order: ID, IP_ADDRESS, TS — matches table order.
 -- TS format: 'YYYY-MM-DD HH24:MI:SS.FF3' (e.g. 2025-08-20 21:16:25.195)
 -- ---------------------------------------------------------------------------
-COPY INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K
-FROM @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE/CUSTOMER_TEST_INPUT_2K.csv
+COPY INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
+FROM @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE/CUSTOMER_TEST_INPUT.csv
 FILE_FORMAT = (
     TYPE                         = CSV
     SKIP_HEADER                  = 1
@@ -215,10 +215,10 @@ SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAG
 UNION ALL
 SELECT 'LOCID_BUILD_DATES'          AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.LOCID_BUILD_DATES
 UNION ALL
-SELECT 'CUSTOMER_TEST_INPUT_2K'     AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT_2K
+SELECT 'CUSTOMER_TEST_INPUT'     AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
 ORDER BY 1;
 -- Expected:
---   CUSTOMER_TEST_INPUT_2K       100
+--   CUSTOMER_TEST_INPUT       100
 --   LOCID_BUILD_DATES             60
 --   LOCID_BUILDS              10,000
 --   LOCID_BUILDS_IPV4_EXPLODED 10,000
