@@ -1,0 +1,51 @@
+# =============================================================================
+# snowflake.yml — Snow CLI Native App project definition
+#
+# Usage (run from na_app_pkg/):
+#   snow app deploy --connection <conn>                       # upload files → stage
+#   snow app version create v1_0 --force --skip-git-check \
+#       --connection <conn>                                   # create/patch version
+#   snow app run --version v1_0 --connection <conn>           # install / upgrade app
+#
+# Pre-requisite: encode-lib JAR must be placed in src/lib/ before deploying.
+#   cp "Coco/tmp/20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar" \
+#      na_app_pkg/src/lib/
+# =============================================================================
+
+definition_version: 2
+
+entities:
+  pkg:
+    type: application package
+    identifier: LOCID_DEV_PKG
+    stage: APP_SCHEMA.APP_STAGE
+    manifest: manifest.yml
+    artifacts:
+      # Root files (setup script + manifest + readme)
+      - src: setup.sql
+        dest: setup.sql
+      - src: manifest.yml
+        dest: manifest.yml
+      - src: README.md
+        dest: README.md
+
+      # encode-lib JAR: local src/lib/ → stage lib/
+      # UDFs reference @APP_SCHEMA.APP_STAGE/lib/encode-lib-*.jar
+      - src: src/lib/
+        dest: lib/
+
+      # SQL scripts (UDFs + stored procs)
+      - src: src/udfs/
+        dest: src/udfs/
+      - src: src/procs/
+        dest: src/procs/
+
+      # Streamlit app
+      - src: streamlit/
+        dest: streamlit/
+
+  app:
+    type: application
+    identifier: LOCID_DEV_APP
+    from:
+      target: pkg

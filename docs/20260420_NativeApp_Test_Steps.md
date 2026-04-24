@@ -187,65 +187,50 @@ This creates `LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT` (100 rows) — the simulate
 
 ## Phase 3 — Deploy Native App
 
-This phase creates the application package, uploads all app files, and installs the app.
+This phase uses Snow CLI with `na_app_pkg/snowflake.yml` to deploy the app package and install the app.  
+All `snow app` commands must be run from inside `na_app_pkg/` (or pass `--project-definition na_app_pkg/snowflake.yml` from the repo root).
 
-### 3.1 Create the application package
+---
 
-Run as `LOCID_APP_ADMIN` (has `CREATE APPLICATION PACKAGE` privilege):
+### 3.1 Pre-requisite — copy encode-lib JAR into `src/lib/`
 
-```bash
-snow sql --connection wl_sandbox_dcr -q "USE ROLE LOCID_APP_ADMIN"
-snow sql --connection wl_sandbox_dcr -q "CREATE APPLICATION PACKAGE IF NOT EXISTS LOCID_DEV_PKG COMMENT = 'LocID Native App — sandbox development package'"
-snow sql --connection wl_sandbox_dcr -q "CREATE SCHEMA IF NOT EXISTS LOCID_DEV_PKG.APP_SCHEMA"
-snow sql --connection wl_sandbox_dcr -q "CREATE STAGE  IF NOT EXISTS LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE DIRECTORY = (ENABLE = TRUE)"
-```
+The JAR is not checked in to git. Copy it once before the first deploy:
 
-### 3.2 Upload app files (Snow CLI)
-
-Run from the repository root. Upload manifest and setup script first, then all other files.
+Verify it is in place:
 
 ```bash
-# Root files
-snow object stage copy na_app_pkg/manifest.yml @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/setup.sql    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/README.md    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --overwrite --connection wl_sandbox_dcr
-
-# encode-lib JAR
-snow object stage copy \
-    "Coco/tmp/20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar" \
-    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/lib/ --overwrite --connection wl_sandbox_dcr
-
-# UDF and proc SQL scripts
-snow object stage copy na_app_pkg/src/udfs/locid_udf.sql    @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/udfs/  --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/src/procs/encrypt.sql      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/procs/ --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/src/procs/decrypt.sql      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/src/procs/ --overwrite --connection wl_sandbox_dcr
-
-# Streamlit app
-snow object stage copy na_app_pkg/streamlit/app.py                        @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/        --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/streamlit/pages/01_setup_wizard.py      @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/streamlit/pages/02_run_encrypt.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/streamlit/pages/03_run_decrypt.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/streamlit/pages/04_job_history.py       @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/streamlit/pages/05_configuration.py     @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/pages/  --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/streamlit/utils/locid_central.py        @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/utils/  --overwrite --connection wl_sandbox_dcr
-snow object stage copy na_app_pkg/streamlit/utils/entitlements.py         @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE/streamlit/utils/  --overwrite --connection wl_sandbox_dcr
+ls na_app_pkg/src/lib/
+# encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
 ```
 
-Verify all files uploaded:
+---
+
+### 3.2 Deploy app package (Snow CLI)
+
+`snow app deploy` creates `LOCID_DEV_PKG` (if missing) and uploads all artifacts defined in `snowflake.yml` to `@APP_SCHEMA.APP_STAGE`:
+
+```bash
+cd na_app_pkg
+snow app deploy --connection wl_sandbox_dcr
+```
+
+Verify files were uploaded:
 
 ```bash
 snow object stage list @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandbox_dcr
-# Expected: 15+ rows covering manifest.yml, setup.sql, JAR, SQL scripts, Streamlit pages
+# Expected: setup.sql, manifest.yml, README.md, lib/encode-lib-*.jar,
+#           src/udfs/locid_udf.sql, src/procs/encrypt.sql, src/procs/decrypt.sql,
+#           streamlit/app.py, streamlit/pages/*.py, streamlit/utils/*.py
 ```
 
-Also see `db/dev/provider/07_deploy_jar.sql` for the JAR upload step in isolation.
+---
 
 ### 3.3 Create the EAI (if not already present)
 
-The `manifest.yml` declares `LOCID_CENTRAL_EAI`. This must exist as an account-level object before the app can be installed. Check and create if missing:
+This is a one-time account-level setup. Check first:
 
-```sql
-SHOW EXTERNAL ACCESS INTEGRATIONS LIKE 'LOCID_CENTRAL_EAI';
+```bash
+snow sql --connection wl_sandbox_dcr -q "SHOW EXTERNAL ACCESS INTEGRATIONS LIKE 'LOCID_CENTRAL_EAI'"
 ```
 
 If not present, create it:
@@ -261,27 +246,29 @@ CREATE EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
     ENABLED = TRUE;
 ```
 
-### 3.4 Add app version
+---
 
-```sql
-ALTER APPLICATION PACKAGE LOCID_DEV_PKG
-    ADD VERSION v1_0
-    USING '@LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE';
+### 3.4 Create app version
+
+```bash
+cd na_app_pkg
+snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr
 ```
+
+`--force` overwrites any existing `v1_0` version. `--skip-git-check` suppresses the uncommitted-files warning.
+
+---
 
 ### 3.5 Install the application
 
-Run as `LOCID_APP_INSTALLER` (has `CREATE APPLICATION` privilege):
-
-```sql
-USE ROLE LOCID_APP_INSTALLER;
-
-CREATE APPLICATION LOCID_DEV_APP
-    FROM APPLICATION PACKAGE LOCID_DEV_PKG
-    USING VERSION v1_0;
+```bash
+cd na_app_pkg
+snow app run --version v1_0 --connection wl_sandbox_dcr
 ```
 
-> If you need to iterate on the app code, use `ALTER APPLICATION PACKAGE LOCID_DEV_PKG ADD PATCH FOR VERSION v1_0 USING '@LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE'` to create a patch, then `ALTER APPLICATION LOCID_DEV_APP UPGRADE USING VERSION v1_0`.
+`snow app run` creates `LOCID_DEV_APP` if it does not exist, or upgrades it if it does.
+
+---
 
 ### 3.6 Grant the app access to consumer data and warehouse
 
@@ -299,6 +286,25 @@ GRANT CREATE TABLE ON SCHEMA LOCID_DEV.CONSUMER_TEST     TO APPLICATION LOCID_DE
 
 -- Warehouse
 GRANT USAGE ON WAREHOUSE <YOUR_WAREHOUSE>                TO APPLICATION LOCID_DEV_APP;
+```
+
+---
+
+### Re-deploying after code changes
+
+After editing any file in `na_app_pkg/`:
+
+```bash
+cd na_app_pkg
+
+# 1. Upload changed files
+snow app deploy --connection wl_sandbox_dcr
+
+# 2. Add a new patch to the existing version
+snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr
+
+# 3. Upgrade the running app
+snow app run --version v1_0 --connection wl_sandbox_dcr
 ```
 
 ---
