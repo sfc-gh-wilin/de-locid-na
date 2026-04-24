@@ -227,24 +227,13 @@ snow object stage list @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandb
 
 ### 3.3 Create the EAI (if not already present)
 
-This is a one-time account-level setup. Check first:
+This is a one-time account-level setup. The `LOCID_CENTRAL_EAI` must exist before `snow app run` can install the app.
 
 ```bash
-snow sql --connection wl_sandbox_dcr -q "SHOW EXTERNAL ACCESS INTEGRATIONS LIKE 'LOCID_CENTRAL_EAI'"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/07_eai_setup.sql"
 ```
 
-If not present, create it:
-
-```sql
-CREATE NETWORK RULE LOCID_CENTRAL_RULE
-    TYPE = HOST_PORT
-    MODE = EGRESS
-    VALUE_LIST = ('central.locid.com:443');
-
-CREATE EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
-    ALLOWED_NETWORK_RULES = (LOCID_CENTRAL_RULE)
-    ENABLED = TRUE;
-```
+The file checks if the EAI already exists, then creates `LOCID_DEV.STAGING.LOCID_CENTRAL_RULE` (network rule) and `LOCID_CENTRAL_EAI` if missing. Requires a role with `CREATE INTEGRATION` privilege (e.g. `ACCOUNTADMIN`).
 
 ---
 
