@@ -191,6 +191,14 @@ This creates `LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT` (100 rows) — the simulate
 This phase uses Snow CLI with `na_app_pkg/snowflake.yml` to deploy the app package and install the app.  
 All `snow app` commands must be run from inside `na_app_pkg/` (or pass `--project-definition na_app_pkg/snowflake.yml` from the repo root).
 
+**Role convention for this phase:**
+
+| Command type | How role is set |
+|---|---|
+| `snow app deploy / version / run` | Automatically from `meta.role` in `snowflake.yml` — no `--role` flag needed |
+| `snow sql -f <file>` | `USE ROLE` at the top of each SQL file |
+| `snow sql -q <query>` / `snow stage` | Must pass `--role` explicitly |
+
 ---
 
 ### 3.1 Pre-requisite — copy encode-lib JAR into `src/lib/`
@@ -218,7 +226,8 @@ snow app deploy --connection wl_sandbox_dcr
 Verify files were uploaded:
 
 ```bash
-snow stage list-files @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandbox_dcr
+snow stage list-files @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE \
+    --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 # Expected: setup.sql, manifest.yml, README.md, lib/encode-lib-*.jar,
 #           src/udfs/locid_udf.sql, src/procs/encrypt.sql, src/procs/decrypt.sql,
 #           streamlit/app.py, streamlit/pages/*.py, streamlit/utils/*.py
@@ -233,6 +242,10 @@ data sharing script. This creates `LOCID_SHARE` inside the app package and expos
 `LOCID_BUILDS`, `LOCID_BUILDS_IPV4_EXPLODED`, and `LOCID_BUILD_DATES` as Secure Views
 to all installed app instances.
 
+`snowflake.yml` declares `meta.role: LOCID_APP_ADMIN` for the `pkg` entity, so
+`snow app deploy` creates `LOCID_DEV_PKG` under that role. This script runs as the
+same role and therefore has the OWNERSHIP needed for package operations.
+
 ```bash
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/08_share_to_pkg.sql"
 ```
@@ -240,7 +253,7 @@ snow sql --connection wl_sandbox_dcr -f "db/dev/provider/08_share_to_pkg.sql"
 Verify:
 
 ```bash
-snow sql --connection wl_sandbox_dcr \
+snow sql --connection wl_sandbox_dcr --role LOCID_APP_ADMIN \
     -q "SHOW VIEWS IN SCHEMA LOCID_DEV_PKG.LOCID_SHARE"
 # Expected: 3 views — LOCID_BUILDS, LOCID_BUILDS_IPV4_EXPLODED, LOCID_BUILD_DATES
 ```

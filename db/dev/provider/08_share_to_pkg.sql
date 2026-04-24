@@ -5,6 +5,9 @@
 -- Run order: AFTER Phase 3.2 (snow app deploy has created LOCID_DEV_PKG).
 --            Re-run whenever provider source tables are re-created.
 --
+-- Role: LOCID_APP_ADMIN — this role owns LOCID_DEV_PKG because snowflake.yml
+--       declares meta.role: LOCID_APP_ADMIN for the pkg entity.
+--
 -- What this does:
 --   1. Creates a LOCID_SHARE schema inside the Application Package.
 --   2. Creates Secure Views wrapping the three provider source tables.
@@ -23,14 +26,6 @@
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-
--- =============================================================================
--- CONFIGURATION — set this value before running
--- =============================================================================
-SET app_pkg_name = 'LOCID_DEV_PKG';   -- Application Package name
-SET provider_db  = 'LOCID_DEV';       -- Provider source database
-SET provider_sch = 'LOCID_DEV.STAGING'; -- Provider source schema
--- =============================================================================
 
 
 -- ---------------------------------------------------------------------------

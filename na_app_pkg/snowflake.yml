@@ -20,6 +20,8 @@ entities:
     identifier: LOCID_DEV_PKG
     stage: APP_SCHEMA.APP_STAGE
     manifest: manifest.yml
+    meta:
+      role: LOCID_APP_ADMIN
     artifacts:
       # Root files (setup script + manifest + readme)
       - src: setup.sql
@@ -52,3 +54,5 @@ entities:
     identifier: LOCID_DEV_APP
     from:
       target: pkg
+    meta:
+      role: LOCID_APP_INSTALLER
