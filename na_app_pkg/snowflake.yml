@@ -31,18 +31,21 @@ entities:
 
       # encode-lib JAR: local src/lib/ → stage lib/
       # UDFs reference @APP_SCHEMA.APP_STAGE/lib/encode-lib-*.jar
+      # dest: ./ places the lib/ directory at the stage root → lib/encode-lib-*.jar
       - src: src/lib/
-        dest: lib/
+        dest: ./
 
       # SQL scripts (UDFs + stored procs)
+      # dest: src/ places each directory inside src/ → src/udfs/... and src/procs/...
       - src: src/udfs/
-        dest: src/udfs/
+        dest: src/
       - src: src/procs/
-        dest: src/procs/
+        dest: src/
 
       # Streamlit app
+      # dest: ./ places the streamlit/ directory at the stage root → streamlit/app.py
       - src: streamlit/
-        dest: streamlit/
+        dest: ./
 
   app:
     type: application
