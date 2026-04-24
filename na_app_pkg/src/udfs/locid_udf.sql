@@ -16,9 +16,25 @@
 --   4. LOCID_TXCLOC_DECRYPT  — production: TX_CLOC → JSON (location_id, timestamp, enc_client_id)
 --   5. LOCID_STABLE_CLOC     — production: encrypted_locid (from share) → STABLE_CLOC UUID
 --
--- KEY DERIVATION (PRODUCTION MODE):
---   AES key is derived from LocID Central secrets (confirmed — developer-integration-guide.md 2026-04-15):
---     secret.replaceAll("~","=")  →  Base64.getUrlDecoder().decode()  →  AES key bytes
+-- KEY MAP — secrets used across all UDFs
+-- (neither the License Key nor the API Key is passed to UDFs directly)
+--
+--   base_locid_secret  → APP_CONFIG 'base_locid_secret' (fetched from license endpoint secrets)
+--                        Base64-URL encoded, ~ as alternate padding.
+--                        Key derivation: secret.replaceAll("~","=") → Base64.getUrlDecoder.decode() → AES key
+--                        Used by: BaseLocIdEncryption  (UDFs 1, 2, 3, 5, 6)
+--                        Parameter name in UDFs: key_str  (UDF 1/2),  base_locid_key  (UDF 3/5/6)
+--
+--   scheme_secret      → APP_CONFIG 'scheme_secret' (fetched from license endpoint secrets)
+--                        Same encoding and key derivation as base_locid_secret.
+--                        Used by: EncScheme0  (UDFs 3, 4)
+--                        Parameter name in UDFs: scheme_key
+--
+--   API Key            → NOT used in any UDF.
+--                        Used only as de-access-token HTTP header for stats reporting.
+--
+--   License Key        → NOT passed to any UDF.
+--                        Used to call LocID Central API to retrieve secrets + access[].
 --
 -- JAR: encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar  (Scala 2.13 / Java 17)
 --
@@ -41,7 +57,7 @@
 --    Returns: base64-URL encoded ciphertext.
 --
 --    Input:  loc_id  — raw base LocID string  e.g. '31F24ZE1W1YX58K2R1139'
---            key_str — license key string (Base64-URL encoded, from LocID Central)
+--            key_str — base_locid_secret (Base64-URL encoded AES key, from license endpoint secrets)
 -- =============================================================================
 CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_BASE_ENCRYPT(
     LOC_ID   VARCHAR,
@@ -81,7 +97,7 @@ $$;
 --    Decrypts a base64-URL encoded ciphertext back to the raw base LocID string.
 --
 --    Input:  encrypted_loc_id — base64-URL encoded ciphertext (output of LOCID_BASE_ENCRYPT)
---            key_str          — same key used to encrypt
+--            key_str          — base_locid_secret (same key used to encrypt)
 -- =============================================================================
 CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_BASE_DECRYPT(
     ENCRYPTED_LOC_ID  VARCHAR,

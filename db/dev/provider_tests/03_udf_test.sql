@@ -46,7 +46,8 @@ SET namespace_guid = 'ffffffff111122223333444444444444';
 -- PREREQUISITE: Verify JAR is on stage
 -- ---------------------------------------------------------------------------
 -- Expected: one row for encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
--- If this returns zero rows, run db/dev/provider/07_deploy_jar.sql first.
+-- If this returns zero rows, copy the JAR to na_app_pkg/src/lib/ and run
+-- `snow app deploy --connection <conn>` from na_app_pkg/ first.
 LIST @LOCID_DEV.STAGING.LOCID_STAGE;
 
 

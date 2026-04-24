@@ -15,8 +15,8 @@ This guide walks through deploying the LocID Native App from scratch in a sandbo
 |-------|-------|
 | Role setup | `db/dev/provider/00_roles.sql` |
 | Provider setup | `db/dev/provider/01_setup.sql` → `06_udfs.sql` |
+| EAI setup | `db/dev/provider/07_eai_setup.sql` |
 | Test data | `db/dev/provider_tests/01_load_test_data.sql`, `02_customer_input_sample.sql` |
-| JAR deploy | `db/dev/provider/07_deploy_jar.sql` |
 | UDF tests | `db/dev/provider_tests/03_udf_test.sql` |
 | Cross-compat | `db/dev/provider_tests/04_cross_compat_test.sql` |
 
