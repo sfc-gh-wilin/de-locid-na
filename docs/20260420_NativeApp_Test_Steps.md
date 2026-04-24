@@ -112,9 +112,9 @@ Choose **one** option. Both produce the same table structure; the difference is 
 
 ### Option A — Synthetic generated data (no CSV files)
 
-Requires Phase 1 Steps 1.1–1.6 (UDFs must exist) and your dev license key.
+Requires Phase 1 Steps 1.1–1.6 (UDFs must exist) and your LocID license key.
 
-1. Open `db/dev/provider_tests/00_generate_test_data.sql`, set `$dev_key` at the top, then run:
+1. Open `db/dev/provider_tests/00_generate_test_data.sql`, set `$license_key` at the top, then run:
    ```bash
    snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/00_generate_test_data.sql"
    ```
@@ -321,10 +321,10 @@ snow object stage list @LOCID_DEV.STAGING.LOCID_STAGE --connection wl_sandbox_dc
 
 Run `db/dev/provider_tests/03_udf_test.sql` step by step.
 
-Before running, set the dev license key:
+Before running, set the license key:
 
 ```sql
-SET dev_key = 'YOUR_ACTUAL_DEV_LICENSE_KEY';
+SET license_key = 'YOUR_ACTUAL_LICENSE_KEY';
 ```
 
 Expected results:

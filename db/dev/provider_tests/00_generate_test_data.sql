@@ -21,10 +21,11 @@
 --   Build date:         2025-01-08
 --   Customer event ts:  2025-01-10 (falls within the 2025-01-08 build range)
 --   All rows produce valid LOCID_TXCLOC_ENCRYPT / LOCID_STABLE_CLOC output
---   when $dev_key matches the key registered with LocID Central.
+--   when $license_key matches the key registered with LocID Central.
 --
--- IMPORTANT — $dev_key:
---   Set $dev_key to your actual dev license key BEFORE running this file.
+-- IMPORTANT — $license_key:
+--   Set $license_key to your actual LocID license key BEFORE running this file.
+--   Format: '1569-XXXX-XXXX-XXXX-XXXX-XXXX'
 --   The same key must be used in APP_CONFIG for the Native App proc calls
 --   to succeed. Replace the placeholder below with your actual key.
 -- =============================================================================
@@ -32,8 +33,9 @@
 USE DATABASE LOCID_DEV;
 USE SCHEMA   LOCID_DEV.STAGING;
 
--- ⚠ Replace with your actual dev license key (same key used in 03_udf_test.sql)
-SET dev_key = 'REPLACE_WITH_YOUR_DEV_LICENSE_KEY';
+-- ⚠ Replace with your LocID license key (same key used in 03_udf_test.sql)
+--   Format: '1569-XXXX-XXXX-XXXX-XXXX-XXXX'
+SET license_key = 'REPLACE_WITH_YOUR_LICENSE_KEY';
 
 
 -- ---------------------------------------------------------------------------
@@ -43,10 +45,10 @@ SET dev_key = 'REPLACE_WITH_YOUR_DEV_LICENSE_KEY';
 --         LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT must exist (run 06_udfs.sql first).
 -- ---------------------------------------------------------------------------
 SET test_encrypted_locid = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT('31F24ZE1W1YX58K2R1139', $dev_key)
+    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT('31F24ZE1W1YX58K2R1139', $license_key)
 );
 SELECT $test_encrypted_locid AS test_encrypted_locid;
--- Expected: non-null base64-URL string (exact value depends on $dev_key)
+-- Expected: non-null base64-URL string (exact value depends on $license_key)
 
 
 -- ---------------------------------------------------------------------------
