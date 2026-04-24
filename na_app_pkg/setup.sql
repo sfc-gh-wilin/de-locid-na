@@ -205,7 +205,46 @@ EXECUTE IMMEDIATE FROM '@APP_SCHEMA.APP_STAGE/src/procs/decrypt.sql';
 
 
 -- =============================================================================
--- 10. Final Grants
+-- 10. Reference Callback
+--     Handles consumer object binding at configuration time.
+--     Snowflake calls this procedure when the consumer binds or removes a
+--     reference — either through the Streamlit setup wizard or by calling
+--     LOCID_DEV_APP.APP_SCHEMA.register_single_callback(...) directly.
+--
+--     References declared in manifest.yml:
+--       INPUT_TABLE   — consumer input table     (SELECT)
+--       OUTPUT_SCHEMA — consumer output schema   (CREATE TABLE, USAGE)
+--       APP_WAREHOUSE — warehouse for job runs   (USAGE)
+-- =============================================================================
+CREATE OR REPLACE PROCEDURE APP_SCHEMA.register_single_callback(
+    ref_name     STRING,
+    operation    STRING,
+    ref_or_alias STRING)
+RETURNS STRING
+LANGUAGE SQL
+AS
+$$
+BEGIN
+    CASE (operation)
+        WHEN 'ADD' THEN
+            SELECT system$set_reference(:ref_name, :ref_or_alias);
+        WHEN 'REMOVE' THEN
+            SELECT system$remove_reference(:ref_name);
+        WHEN 'CLEAR' THEN
+            SELECT system$remove_reference(:ref_name);
+        ELSE
+            RETURN 'Unknown operation: ' || operation;
+    END CASE;
+    RETURN 'Operation ' || operation || ' succeeds.';
+END;
+$$;
+
+GRANT USAGE ON PROCEDURE APP_SCHEMA.register_single_callback(STRING, STRING, STRING)
+    TO APPLICATION ROLE APP_ADMIN;
+
+
+-- =============================================================================
+-- 11. Final Grants
 -- =============================================================================
 GRANT USAGE ON ALL FUNCTIONS  IN SCHEMA APP_SCHEMA TO APPLICATION ROLE APP_ADMIN;
 GRANT USAGE ON ALL PROCEDURES IN SCHEMA APP_SCHEMA TO APPLICATION ROLE APP_ADMIN;

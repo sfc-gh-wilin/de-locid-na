@@ -259,22 +259,51 @@ snow app run --version v1_0 --connection wl_sandbox_dcr
 
 ---
 
-### 3.6 Grant the app access to consumer data and warehouse
+### 3.6 Bind references — grant the app access to consumer data and warehouse
+
+The app uses `references` (declared in `manifest.yml`) instead of direct `GRANT … TO APPLICATION`
+statements. Snowflake manages the underlying privilege grants automatically when a reference is bound.
+
+Three references must be bound before running any job:
+
+| Reference | Object type | Privilege(s) |
+|---|---|---|
+| `INPUT_TABLE` | TABLE | SELECT |
+| `OUTPUT_SCHEMA` | SCHEMA | CREATE TABLE, USAGE |
+| `APP_WAREHOUSE` | WAREHOUSE | USAGE |
+
+**Option A — Streamlit setup wizard (recommended)**
+
+Open the app in Snowsight and follow the setup wizard. Each reference has a picker that lets the
+consumer select the target object. Snowflake calls `APP_SCHEMA.register_single_callback`
+automatically on each selection.
+
+**Option B — SQL (dev / automation)**
 
 Replace `<YOUR_WAREHOUSE>` with the warehouse the app should use for jobs:
 
 ```sql
--- Input table read access
-GRANT SELECT ON TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
-    TO APPLICATION LOCID_DEV_APP;
+USE ROLE LOCID_APP_INSTALLER;
 
--- Output schema write access (app creates output table on first job run)
-GRANT USAGE ON DATABASE LOCID_DEV                        TO APPLICATION LOCID_DEV_APP;
-GRANT USAGE ON SCHEMA   LOCID_DEV.CONSUMER_TEST          TO APPLICATION LOCID_DEV_APP;
-GRANT CREATE TABLE ON SCHEMA LOCID_DEV.CONSUMER_TEST     TO APPLICATION LOCID_DEV_APP;
+-- Bind the input table (grants SELECT automatically via reference)
+CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback(
+    'INPUT_TABLE', 'ADD', 'LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT');
 
--- Warehouse
-GRANT USAGE ON WAREHOUSE <YOUR_WAREHOUSE>                TO APPLICATION LOCID_DEV_APP;
+-- Bind the output schema (grants CREATE TABLE + USAGE automatically via reference)
+CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback(
+    'OUTPUT_SCHEMA', 'ADD', 'LOCID_DEV.CONSUMER_TEST');
+
+-- Bind the job warehouse (grants USAGE automatically via reference)
+CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback(
+    'APP_WAREHOUSE', 'ADD', '<YOUR_WAREHOUSE>');
+```
+
+To remove a binding (e.g. to switch to a different table or warehouse):
+
+```sql
+CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback('INPUT_TABLE',   'REMOVE', '');
+CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback('OUTPUT_SCHEMA', 'REMOVE', '');
+CALL LOCID_DEV_APP.APP_SCHEMA.register_single_callback('APP_WAREHOUSE', 'REMOVE', '');
 ```
 
 ---
