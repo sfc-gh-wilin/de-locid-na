@@ -142,15 +142,27 @@ GRANT SELECT ON TABLE APP_SCHEMA.APP_LOGS
 
 
 -- =============================================================================
--- 6. Network Rule — LocID Central
---    Schema-level object; referenced by LOCID_CENTRAL_EAI declared in manifest.yml.
---    The External Access Integration itself is an account-level object and is
---    declared in manifest.yml (external_access_integrations), not created here.
+-- 6. Network Rule + External Access Integration — LocID Central
+--
+--    The network rule is a schema-level object (created here in APP_SCHEMA).
+--    The EAI is an account-level object created in the consumer account using
+--    the CREATE EXTERNAL ACCESS INTEGRATION privilege declared in manifest.yml.
+--    The consumer is prompted to approve this privilege during installation.
+--
+--    Both objects are referenced by name in:
+--      APP_SCHEMA.HTTP_PING()         (section 7)
+--      APP_SCHEMA.LOCID_ENCRYPT(...)  (src/procs/encrypt.sql)
+--      APP_SCHEMA.LOCID_DECRYPT(...)  (src/procs/decrypt.sql)
+--      Scala UDFs                     (src/udfs/locid_udf.sql)
 -- =============================================================================
 CREATE OR REPLACE NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE
     TYPE       = HOST_PORT
     MODE       = EGRESS
     VALUE_LIST = ('central.locid.com:443');
+
+CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
+    ALLOWED_NETWORK_RULES = (APP_SCHEMA.LOCID_CENTRAL_RULE)
+    ENABLED = TRUE;
 
 
 -- =============================================================================

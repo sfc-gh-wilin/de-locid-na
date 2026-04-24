@@ -225,15 +225,20 @@ snow object stage list @LOCID_DEV_PKG.APP_SCHEMA.APP_STAGE --connection wl_sandb
 
 ---
 
-### 3.3 Create the EAI (if not already present)
+### 3.3 Approve external access at install time
 
-This is a one-time account-level setup. The `LOCID_CENTRAL_EAI` must exist before `snow app run` can install the app.
+`setup.sql` creates `LOCID_CENTRAL_EAI` in the consumer account during installation
+(using the `CREATE EXTERNAL ACCESS INTEGRATION` privilege declared in `manifest.yml`).
+No manual SQL is needed.
 
-```bash
-snow sql --connection wl_sandbox_dcr -f "db/dev/provider/07_eai_setup.sql"
-```
+When `snow app run` installs the app, Snowflake will prompt for approval of the
+`CREATE EXTERNAL ACCESS INTEGRATION` privilege. In Snowsight, this appears as a
+permission dialog during app configuration. Approve it to enable outbound HTTPS to
+`central.locid.com`.
 
-The file checks if the EAI already exists, then creates `LOCID_DEV.STAGING.LOCID_CENTRAL_RULE` (network rule) and `LOCID_CENTRAL_EAI` if missing. Requires a role with `CREATE INTEGRATION` privilege (e.g. `ACCOUNTADMIN`).
+> **Note:** `db/dev/provider/07_eai_setup.sql` is only needed for the **dev provider**
+> environment (running UDFs directly against `LOCID_DEV.STAGING`). It is not part of
+> the Native App install flow.
 
 ---
 

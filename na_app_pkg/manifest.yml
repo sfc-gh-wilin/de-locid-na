@@ -1,4 +1,4 @@
-manifest_version: 1
+manifest_version: 2
 
 # =============================================================================
 # LocID Native App — manifest.yml
@@ -18,32 +18,17 @@ artifacts:
   # Primary Streamlit entry point: auto-launched when consumer opens the app
   default_streamlit: streamlit/app.py
 
-# All enrichment jobs are triggered on-demand via the Streamlit UI.
-privileges: []
-
-# External Access Integration — LocID Central
-# The app makes outbound HTTPS calls to central.locid.com for:
-#   - License validation and cryptographic secret retrieval
-#   - Usage statistics reporting after each job run
-#
-# LOCID_CENTRAL_EAI is an account-level object and must be declared here
-# rather than created in setup.sql. The network rule (schema-level) is
-# still created in setup.sql. The consumer approves external access at
-# install time via the Snowflake installation UI.
-#
-# The EAI is referenced by name in:
-#   - APP_SCHEMA.HTTP_PING()            (setup.sql)
-#   - APP_SCHEMA.LOCID_ENCRYPT(...)     (src/procs/encrypt.sql)
-#   - APP_SCHEMA.LOCID_DECRYPT(...)     (src/procs/decrypt.sql)
-external_access_integrations:
-  - name:        LOCID_CENTRAL_EAI
-    description: >
-      Allows the app to reach central.locid.com over HTTPS (port 443).
-      Used for license validation, cryptographic secret retrieval, and
-      usage statistics reporting. No customer data is sent — only
-      job-level metrics (row counts, runtime).
-    allowed_network_rules:
-      - APP_SCHEMA.LOCID_CENTRAL_RULE
+# The app makes outbound HTTPS calls to central.locid.com for license validation
+# and usage statistics. It requires the CREATE EXTERNAL ACCESS INTEGRATION privilege
+# so that setup.sql can create LOCID_CENTRAL_EAI in the consumer account at install time.
+# The consumer is prompted to approve this privilege during installation.
+privileges:
+  - CREATE EXTERNAL ACCESS INTEGRATION:
+      description: >
+        Allows the app to create an External Access Integration to reach
+        central.locid.com over HTTPS (port 443). Used for license validation,
+        cryptographic secret retrieval, and usage statistics reporting.
+        No customer data is sent — only job-level metrics (row counts, runtime).
 
 references:
   # INPUT_TABLE — consumer input table (read by every Encrypt job)
