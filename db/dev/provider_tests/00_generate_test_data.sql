@@ -31,6 +31,7 @@
 --   to succeed. Replace the placeholder below with your actual secret.
 -- =============================================================================
 
+USE ROLE LOCID_APP_ADMIN;
 USE DATABASE LOCID_DEV;
 USE SCHEMA   LOCID_DEV.STAGING;
 
@@ -342,15 +343,15 @@ FROM gen;
 -- ---------------------------------------------------------------------------
 -- STEP 9: Verify row counts
 -- ---------------------------------------------------------------------------
-SELECT 'LOCID_BUILD_DATES'          AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.LOCID_BUILD_DATES
+SELECT 'LOCID_BUILD_DATES'          AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILD_DATES
 UNION ALL
-SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.LOCID_BUILDS
+SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILDS
 UNION ALL
-SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED
+SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED
 UNION ALL
-SELECT 'CUSTOMER_TEST_INPUT'        AS tbl, COUNT(*) AS rows FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
+SELECT 'CUSTOMER_TEST_INPUT'        AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
 UNION ALL
-SELECT 'NA_TEST_INPUT'              AS tbl, COUNT(*) AS rows FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
+SELECT 'NA_TEST_INPUT'              AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
 ORDER BY 1;
 -- Expected:
 --   CUSTOMER_TEST_INPUT          110  (100 IPv4 + 10 IPv6)
