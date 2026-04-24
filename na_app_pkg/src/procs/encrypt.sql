@@ -22,15 +22,21 @@
 --   exposed via the app package's included share. Update before app deployment.
 -- =============================================================================
 
+-- Consumer references used by this procedure (declared in manifest.yml):
+--   INPUT_TABLE   — consumer input table; read via reference('INPUT_TABLE')
+--                   Privilege granted by Snowflake automatically when the
+--                   consumer binds the reference.
+--   OUTPUT_SCHEMA — consumer output schema; output table is created here via
+--                   reference('OUTPUT_SCHEMA').<table_name>
+--   APP_WAREHOUSE — warehouse for job execution; set via
+--                   USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
-    INPUT_TABLE   VARCHAR,    -- fully qualified: MY_DB.MY_SCHEMA.MY_TABLE
-    OUTPUT_TABLE  VARCHAR,    -- fully qualified: MY_DB.MY_SCHEMA.LOCID_RESULTS
+    OUTPUT_TABLE  VARCHAR,    -- table name only (schema provided by OUTPUT_SCHEMA reference)
     ID_COL        VARCHAR,    -- column name for unique row identifier
     IP_COL        VARCHAR,    -- column name for IP address
     TS_COL        VARCHAR,    -- column name for timestamp
     TS_FORMAT     VARCHAR,    -- 'epoch_sec' | 'epoch_ms' | 'timestamp'
-    OUTPUT_COLS   ARRAY,      -- requested output column names (empty = all entitled)
-    WAREHOUSE     VARCHAR     -- warehouse to execute job on
+    OUTPUT_COLS   ARRAY       -- requested output column names (empty = all entitled)
 )
 RETURNS VARIANT
 LANGUAGE PYTHON
@@ -255,9 +261,9 @@ def _log_job(session, job_id, operation, rows_in, rows_matched, rows_out,
 
 def encrypt_handler(
     session: snowpark.Session,
-    input_table: str, output_table: str,
+    output_table: str,
     id_col: str, ip_col: str, ts_col: str,
-    ts_format: str, output_cols: list, warehouse: str,
+    ts_format: str, output_cols: list,
 ) -> dict:
 
     job_id   = str(uuid.uuid4())
@@ -265,14 +271,22 @@ def encrypt_handler(
     rows_in = rows_matched = rows_out = 0
 
     # Validate caller-supplied identifiers before embedding in SQL
-    for name in (input_table, output_table, id_col, ip_col, ts_col):
+    for name in (output_table, id_col, ip_col, ts_col):
         _validate_id(name)
+
+    cur_wh = None  # resolved after APP_WAREHOUSE reference is set (Step 0)
 
     BUILDS    = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS'
     BUILDS_V4 = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS_IPV4_EXPLODED'
     DATES     = f'{_PROVIDER_SCHEMA}.LOCID_BUILD_DATES'
 
     try:
+        # ------------------------------------------------------------------
+        # Step 0: Set job warehouse from bound APP_WAREHOUSE reference
+        # ------------------------------------------------------------------
+        session.sql("USE WAREHOUSE reference('APP_WAREHOUSE')").collect()
+        cur_wh = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
+
         # ------------------------------------------------------------------
         # Step 1: Entitlement check
         # ------------------------------------------------------------------
@@ -290,7 +304,7 @@ def encrypt_handler(
         client_id  = sec['client_id']          # int — embedded directly
         ns_guid    = _sql_lit(sec['namespace_guid'])
 
-        rows_in = session.sql(f"SELECT COUNT(*) FROM {input_table}").collect()[0][0]
+        rows_in = session.sql("SELECT COUNT(*) FROM reference('INPUT_TABLE')").collect()[0][0]
 
         # Timestamp → epoch-seconds SQL expression
         if ts_format == 'epoch_ms':
@@ -307,7 +321,7 @@ def encrypt_handler(
             CREATE OR REPLACE TEMPORARY TABLE _locid_ipv4 AS
             WITH inp AS (
                 SELECT {id_col} AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
-                FROM {input_table}
+                FROM reference('INPUT_TABLE')
                 WHERE {ip_col} NOT LIKE '%:%'
             ),
             rel_builds AS (
@@ -372,7 +386,7 @@ def encrypt_handler(
                 {ip_col}  AS _ip,
                 {ts_expr} AS _ts,
                 GET_PATH(PARSE_IP({ip_col}, 'INET'), 'hex_ipv6') AS ip_hex
-            FROM {input_table}
+            FROM reference('INPUT_TABLE')
             WHERE {ip_col} LIKE '%:%'
         """).collect()
 
@@ -524,12 +538,12 @@ def encrypt_handler(
         # Step 7: Write output table
         # ------------------------------------------------------------------
         session.sql(f"""
-            CREATE OR REPLACE TABLE {output_table} AS
+            CREATE OR REPLACE TABLE reference('OUTPUT_SCHEMA').{output_table} AS
             SELECT {', '.join(select_exprs)}
             FROM _locid_matched
         """).collect()
 
-        rows_out  = session.sql(f"SELECT COUNT(*) FROM {output_table}").collect()[0][0]
+        rows_out  = session.sql(f"SELECT COUNT(*) FROM reference('OUTPUT_SCHEMA').{output_table}").collect()[0][0]
         runtime_s = round(time.time() - start_ts, 2)
 
         # ------------------------------------------------------------------
@@ -537,8 +551,9 @@ def encrypt_handler(
         # ------------------------------------------------------------------
         _log_job(
             session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None, input_table, output_table,
-            warehouse, active_cols,
+            runtime_s, 'SUCCESS', None, 'reference(INPUT_TABLE)',
+            f"reference(OUTPUT_SCHEMA).{output_table}",
+            cur_wh, active_cols,
         )
 
         # ------------------------------------------------------------------
@@ -559,14 +574,15 @@ def encrypt_handler(
         runtime_s = round(time.time() - start_ts, 2)
         _log_job(
             session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc), input_table, output_table,
-            warehouse, [],
+            runtime_s, 'FAILED', str(exc), 'reference(INPUT_TABLE)',
+            f"reference(OUTPUT_SCHEMA).{output_table}",
+            cur_wh, [],
         )
         raise RuntimeError(f'LOCID_ENCRYPT failed: {exc}') from exc
 $$;
 
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
-    VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY, VARCHAR
+    VARCHAR, VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY
 ) TO APPLICATION ROLE APP_ADMIN;
 
 
