@@ -244,10 +244,13 @@ with act_col:
         st.info("No jobs run yet.")
 
 # ---------------------------------------------------------------------------
-# Sidebar footer — client info
+# Sidebar footer — client info + runtime version (diagnostic)
 # ---------------------------------------------------------------------------
 if client_name != "—":
     st.sidebar.markdown("---")
     st.sidebar.caption(f"**{client_name}**")
+
+st.sidebar.markdown("---")
+st.sidebar.caption(f"Streamlit {st.__version__}")
 
 logger.debug(session, "app.main", "Home view loaded")
