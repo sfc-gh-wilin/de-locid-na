@@ -264,12 +264,12 @@ GRANT USAGE ON PROCEDURE APP_SCHEMA.register_single_callback(STRING, STRING, STR
 -- =============================================================================
 -- 11. Streamlit App
 --     FROM '/streamlit' → stage root's streamlit/ directory
---     MAIN_FILE = '/app.py' → app.py relative to FROM directory
+--     MAIN_FILE = '/Home.py' → Home.py relative to FROM directory
 --     Referenced by manifest.yml artifacts.default_streamlit: APP_SCHEMA.LOCID_APP
 -- =============================================================================
 CREATE OR REPLACE STREAMLIT APP_SCHEMA.LOCID_APP
     FROM '/streamlit'
-    MAIN_FILE = '/app.py';
+    MAIN_FILE = '/Home.py';
 
 GRANT USAGE ON STREAMLIT APP_SCHEMA.LOCID_APP TO APPLICATION ROLE APP_ADMIN;
 GRANT USAGE ON STREAMLIT APP_SCHEMA.LOCID_APP TO APPLICATION ROLE APP_VIEWER;

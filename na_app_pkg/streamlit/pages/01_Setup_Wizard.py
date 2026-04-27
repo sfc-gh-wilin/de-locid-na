@@ -286,4 +286,4 @@ elif step == "I":
         # Clean up wizard-specific session state
         for key in ("wizard_step", "license_key", "license_data", "connectivity_ok"):
             st.session_state.pop(key, None)
-        st.switch_page("app.py")
+        st.switch_page("Home.py")

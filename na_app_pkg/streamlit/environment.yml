@@ -1,5 +1,8 @@
 name: sf_env
 channels:
   - snowflake
-dependencies:
-  - streamlit=1.40.0
+dependencies: []
+# NOTE: streamlit= version pin has no effect in Snowflake Native Apps.
+# The Streamlit runtime is bundled by Snowflake in the container layer
+# and is NOT controlled by environment.yml. Add extra packages here as needed
+# (e.g. pandas, plotly) but do not specify streamlit=.
