@@ -19,9 +19,6 @@ from snowflake.snowpark.context import get_active_session
 from utils.locid_central import get_secrets
 from utils.entitlements import _get_active_entitlements
 from utils import logger
-
-st.logo("logo.svg")
-
 session = get_active_session()
 
 
@@ -98,7 +95,7 @@ with col2:
 colA, colB = st.columns(2)
 with colA:
     if st.button("✏️ Update License Key"):
-        st.switch_page("pages/01_setup_wizard.py")
+        st.switch_page("views/setup_wizard.py")
 with colB:
     if st.button("🔄 Refresh from LocID Central"):
         with st.spinner("Fetching latest secrets and entitlements…"):
@@ -185,4 +182,4 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.subheader("🔧 Advanced")
 if st.button("✨ Re-run Setup Wizard"):
-    st.switch_page("pages/01_setup_wizard.py")
+    st.switch_page("views/setup_wizard.py")
