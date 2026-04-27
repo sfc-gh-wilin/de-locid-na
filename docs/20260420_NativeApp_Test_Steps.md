@@ -109,6 +109,8 @@ Choose **one** option. Both produce the same table structure; the difference is 
 | **A — Generated (recommended for sandbox)** | `00_generate_test_data.sql` | You want synthetic data — no real client CSV files required |
 | **B — CSV load** | `01_load_test_data.sql` | You have the real client CSV files in `Coco/db/` |
 
+**Note: Option A used**
+
 ---
 
 ### Option A — Synthetic generated data (no CSV files)
@@ -220,7 +222,7 @@ ls na_app_pkg/src/lib/
 
 ```bash
 cd na_app_pkg
-snow app deploy --connection wl_sandbox_dcr
+snow app deploy --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 ```
 
 Verify files were uploaded:
@@ -247,6 +249,7 @@ to all installed app instances.
 same role and therefore has the OWNERSHIP needed for package operations.
 
 ```bash
+cd /Users/wilin/Docs/LocalProjects/GitHub/de-locid-na
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/08_share_to_pkg.sql"
 ```
 
@@ -284,7 +287,7 @@ permission dialog during app configuration. Approve it to enable outbound HTTPS 
 
 ```bash
 cd na_app_pkg
-snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr
+snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 ```
 
 `--force` overwrites any existing `v1_0` version. `--skip-git-check` suppresses the uncommitted-files warning.
@@ -295,7 +298,7 @@ snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dc
 
 ```bash
 cd na_app_pkg
-snow app run --version v1_0 --connection wl_sandbox_dcr
+snow app run --version v1_0 --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 ```
 
 `snow app run` creates `LOCID_DEV_APP` if it does not exist, or upgrades it if it does.
