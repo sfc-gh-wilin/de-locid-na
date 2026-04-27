@@ -39,7 +39,7 @@ def _session_id() -> int:
 
 sid = _session_id()
 
-st.markdown("## :material/settings: Configuration")
+st.header("⚙️ Configuration")
 st.divider()
 
 
@@ -85,7 +85,7 @@ def _mask(val: str | None, visible: int = 4) -> str:
 # ---------------------------------------------------------------------------
 # Section 1 — License & Credentials
 # ---------------------------------------------------------------------------
-st.markdown("### :material/key: License & Credentials")
+st.subheader("🔑 License & Credentials")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -97,10 +97,10 @@ with col2:
 
 colA, colB = st.columns(2)
 with colA:
-    if st.button(":material/edit: Update License Key"):
+    if st.button("✏️ Update License Key"):
         st.switch_page("pages/01_setup_wizard.py")
 with colB:
-    if st.button(":material/refresh: Refresh from LocID Central"):
+    if st.button("🔄 Refresh from LocID Central"):
         with st.spinner("Fetching latest secrets and entitlements…"):
             try:
                 get_secrets(session)
@@ -109,19 +109,19 @@ with colB:
                 logger.info(session, "05_configuration.refresh",
                             "Secrets and entitlements refreshed")
                 st.success("Secrets and entitlements refreshed.",
-                           icon=":material/check_circle:")
+                           icon="✅")
                 st.rerun()
             except Exception as e:
                 logger.error(session, "05_configuration.refresh",
                              "Refresh failed", exc=e)
-                st.error(str(e), icon=":material/error:")
+                st.error(str(e), icon="❌")
 
 st.divider()
 
 # ---------------------------------------------------------------------------
 # Section 2 — Current Entitlements
 # ---------------------------------------------------------------------------
-st.markdown("### :material/verified: Current Entitlements")
+st.subheader("✅ Current Entitlements")
 
 ALL_FLAGS = [
     "allow_encrypt", "allow_decrypt",
@@ -144,7 +144,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Section 3 — Output Column Registry
 # ---------------------------------------------------------------------------
-st.markdown("### :material/table_chart: Output Column Registry")
+st.subheader("📊 Output Column Registry")
 st.caption("Managed by LocID via app version releases. Read-only.")
 
 
@@ -183,6 +183,6 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Section 4 — Advanced
 # ---------------------------------------------------------------------------
-st.markdown("### :material/build: Advanced")
-if st.button(":material/auto_fix_high: Re-run Setup Wizard"):
+st.subheader("🔧 Advanced")
+if st.button("✨ Re-run Setup Wizard"):
     st.switch_page("pages/01_setup_wizard.py")

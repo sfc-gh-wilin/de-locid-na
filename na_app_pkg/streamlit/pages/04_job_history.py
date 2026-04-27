@@ -33,7 +33,7 @@ def _session_id() -> int:
 
 sid = _session_id()
 
-st.markdown("## :material/history: Job History")
+st.header("🕐 Job History")
 st.caption("Full audit log of all LocID enrichment jobs.")
 st.divider()
 
@@ -101,7 +101,7 @@ else:
         status    = row[6]
         error_msg = row[7]
 
-        status_icon = ":material/check_circle:" if status == "SUCCESS" else ":material/error:"
+        status_icon = "✅" if status == "SUCCESS" else "❌"
         label = (
             f"{status_icon} `{job_id[:8]}` · **{operation}** · "
             f"{str(run_dt)[:16]} · {rows_out:,} rows · {runtime_s}s · {status}"
@@ -118,8 +118,8 @@ else:
                 st.metric("Rows out", f"{rows_out:,}")
                 st.metric("Runtime",  f"{runtime_s}s")
             if error_msg:
-                st.error(f"Error: {error_msg}", icon=":material/error:")
-            if st.button(":material/replay: Re-run with same settings",
+                st.error(f"Error: {error_msg}", icon="❌")
+            if st.button("🔄 Re-run with same settings",
                          key=f"rerun_{job_id}"):
                 logger.info(session, "04_job_history.rerun",
                             f"Re-run requested for job {job_id}")
@@ -138,7 +138,7 @@ if rows:
     del df  # free memory immediately after serialising
 
     st.download_button(
-        label=":material/download: Export as CSV",
+        label="⬇️ Export as CSV",
         data=csv_bytes,
         file_name="locid_job_history.csv",
         mime="text/csv",

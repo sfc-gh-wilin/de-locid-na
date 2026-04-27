@@ -37,7 +37,7 @@ def _session_id() -> int:
 
 sid = _session_id()
 
-st.markdown("## :material/lock_open: Run Decrypt")
+st.header("🔓 Run Decrypt")
 st.caption("Decode TX_CLOC values back to STABLE_CLOC and geo context.")
 st.divider()
 
@@ -83,7 +83,7 @@ st.divider()
 # Step 1 — Select Input Table
 # ---------------------------------------------------------------------------
 if step == 1:
-    st.subheader(":material/table: Step 1 — Select Input Table")
+    st.subheader("📋 Step 1 — Select Input Table")
     input_table = st.text_input("Input table (fully qualified)",
                                 placeholder="MY_DB.MY_SCHEMA.MY_TABLE",
                                 key="dec_input_table_input")
@@ -110,7 +110,7 @@ if step == 1:
 # Step 2 — Map Columns
 # ---------------------------------------------------------------------------
 elif step == 2:
-    st.subheader(":material/table_rows: Step 2 — Map Columns")
+    st.subheader("📋 Step 2 — Map Columns")
     columns = st.session_state.get("dec_input_columns", [])
     if not columns:
         st.error("Column list is empty — go back and re-enter the table name.")
@@ -133,13 +133,13 @@ elif step == 2:
 # Step 3 — Configure Output
 # ---------------------------------------------------------------------------
 elif step == 3:
-    st.subheader(":material/output: Step 3 — Configure Output")
+    st.subheader("📤 Step 3 — Configure Output")
     output_mode  = st.radio("", ["Create new table", "Overwrite existing table"])
     output_table = st.text_input("Output table (fully qualified)",
                                  placeholder="MY_DB.MY_SCHEMA.LOCID_RESULTS")
     if output_mode == "Overwrite existing table" and output_table:
         st.warning(f"This will overwrite **{output_table}**. Existing data will be lost.",
-                   icon=":material/warning:")
+                   icon="⚠️")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
@@ -155,7 +155,7 @@ elif step == 3:
 # Step 4 — Select Output Columns
 # ---------------------------------------------------------------------------
 elif step == 4:
-    st.subheader(":material/view_column: Step 4 — Select Output Columns")
+    st.subheader("📊 Step 4 — Select Output Columns")
     available_cols = get_active_output_cols(sid, "decrypt")
     selected = []
     for col in available_cols:
@@ -180,7 +180,7 @@ elif step == 4:
 # Step 5 — Review & Run
 # ---------------------------------------------------------------------------
 elif step == 5:
-    st.subheader(":material/play_circle: Step 5 — Review & Run")
+    st.subheader("▶️ Step 5 — Review & Run")
     st.write(f"**Input table:** `{st.session_state.get('dec_input_table')}`")
     st.write(f"**Output table:** `{st.session_state.get('dec_output_table')}`")
     st.write(
@@ -197,7 +197,7 @@ elif step == 5:
             st.session_state.dec_step = 4
             st.rerun()
     with col2:
-        if st.button(":material/play_arrow: Run Job", disabled=not warehouse, type="primary"):
+        if st.button("▶️ Run Job", disabled=not warehouse, type="primary"):
             with st.spinner("Running LocID Decrypt job…"):
                 try:
                     logger.info(session, "03_run_decrypt.run_job",
@@ -220,7 +220,7 @@ elif step == 5:
                             f"{result.get('rows_out', 0):,} rows decoded "
                             f"out of {result.get('rows_in', 0):,} "
                             f"in {result.get('runtime_s', 0):.1f}s",
-                            icon=":material/check_circle:"
+                            icon="✅"
                         )
                         st.caption(f"Job ID: {result.get('job_id', '—')}")
                         logger.info(session, "03_run_decrypt.run_job",
@@ -228,13 +228,13 @@ elif step == 5:
                                     f"rows_out={result.get('rows_out')}")
                     else:
                         err = result.get("error", status)
-                        st.error(f"Job failed — {err}", icon=":material/error:")
+                        st.error(f"Job failed — {err}", icon="❌")
                         logger.error(session, "03_run_decrypt.run_job",
                                      f"Job FAILED: {err}")
                 except Exception as e:
                     logger.error(session, "03_run_decrypt.run_job",
                                  "Job threw an exception", exc=e)
-                    st.error(f"Error running decrypt job: {e}", icon=":material/error:")
+                    st.error(f"Error running decrypt job: {e}", icon="❌")
 
             # Reset for next run; discard heavy state
             for key in ("dec_input_columns",):

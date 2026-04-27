@@ -99,13 +99,13 @@ if not onboarding_complete:
     st.warning(
         "Setup is not complete. Open **Setup Wizard** from the sidebar to "
         "finish configuring your LocID license and connectivity.",
-        icon=":material/warning:"
+        icon="⚠️"
     )
 
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-st.markdown("## :material/dashboard: LocID for Snowflake")
+st.header("📊 LocID for Snowflake")
 st.caption("Location identity enrichment — running entirely inside your Snowflake account.")
 st.divider()
 
@@ -157,17 +157,17 @@ central_label, central_fresh = _central_refresh_label(refreshed_at)
 col_lic, col_central, col_job = st.columns(3)
 
 with col_lic:
-    st.markdown("#### :material/verified_user: License")
+    st.subheader("✅ License")
     st.metric("Status", lic_status)
     st.caption(f"Client: {client_name} · Exp: {lic_expiry}")
 
 with col_central:
-    st.markdown("#### :material/cloud: LocID Central")
+    st.subheader("☁️ LocID Central")
     st.metric("Status", "CONNECTED" if central_fresh else "STALE")
     st.caption(central_label)
 
 with col_job:
-    st.markdown("#### :material/history: Last Job")
+    st.subheader("🕐 Last Job")
     if last_job:
         st.metric("Status", last_job["status"])
         rows_label = f"{last_job['rows_out']:,}" if last_job["rows_out"] is not None else "—"
@@ -186,15 +186,15 @@ st.divider()
 # ---------------------------------------------------------------------------
 btn1, btn2, btn3 = st.columns(3)
 with btn1:
-    if st.button(":material/lock: Run Encrypt", use_container_width=True,
+    if st.button("🔒 Run Encrypt", use_container_width=True,
                  disabled=not onboarding_complete):
         st.switch_page("pages/02_run_encrypt.py")
 with btn2:
-    if st.button(":material/lock_open: Run Decrypt", use_container_width=True,
+    if st.button("🔓 Run Decrypt", use_container_width=True,
                  disabled=not onboarding_complete):
         st.switch_page("pages/03_run_decrypt.py")
 with btn3:
-    if st.button(":material/history: View Job History", use_container_width=True):
+    if st.button("🕐 View Job History", use_container_width=True):
         st.switch_page("pages/04_job_history.py")
 
 st.divider()
@@ -205,7 +205,7 @@ st.divider()
 ent_col, act_col = st.columns(2)
 
 with ent_col:
-    st.markdown("#### :material/verified: Your Entitlements")
+    st.subheader("✅ Your Entitlements")
     st.caption("Fetched from LocID Central — drives output columns.")
 
     ALL_FLAGS = ["allow_encrypt", "allow_decrypt", "allow_tx",
@@ -230,11 +230,11 @@ with ent_col:
                 st.error(f"✗ {flag}", icon=None)
 
 with act_col:
-    st.markdown("#### :material/timeline: Recent Activity")
+    st.subheader("📈 Recent Activity")
     recent = _load_recent_jobs(sid)
     if recent:
         for job in recent:
-            icon  = ":material/check_circle:" if job["status"] == "SUCCESS" else ":material/error:"
+            icon  = "✅" if job["status"] == "SUCCESS" else "❌"
             rows  = f"{job['rows_out']:,}" if job["rows_out"] is not None else "—"
             color = "green" if job["status"] == "SUCCESS" else "red"
             st.markdown(

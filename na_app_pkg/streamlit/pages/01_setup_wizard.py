@@ -25,7 +25,7 @@ st.logo("logo.svg")
 
 session = get_active_session()
 
-st.markdown("## :material/auto_fix_high: Setup Wizard")
+st.header("✨ Setup Wizard")
 st.caption("Complete this wizard once after installing the app.")
 st.divider()
 
@@ -58,7 +58,7 @@ step = st.session_state.wizard_step
 # Screen A — Welcome
 # ---------------------------------------------------------------------------
 if step == "A":
-    st.markdown("### :material/waving_hand: Welcome to LocID for Snowflake")
+    st.subheader("👋 Welcome to LocID for Snowflake")
     st.write(
         "This wizard will connect your LocID license to Snowflake and verify "
         "that the app can reach LocID Central. It takes about 5 minutes."
@@ -72,7 +72,7 @@ if step == "A":
 # Screen B — Have a key?
 # ---------------------------------------------------------------------------
 elif step == "B":
-    st.markdown("### :material/key: Do you have a LocID license key?")
+    st.subheader("🔑 Do you have a LocID license key?")
     choice = st.radio("", ["Yes, I have a license key", "No, I need one"])
     col1, col2 = st.columns(2)
     with col1:
@@ -88,7 +88,7 @@ elif step == "B":
 # Screen C — Contact Sales
 # ---------------------------------------------------------------------------
 elif step == "C":
-    st.markdown("### :material/contact_support: Contact LocID")
+    st.subheader("💬 Contact LocID")
     st.info(
         "To get a LocID license key, contact LocID at **locid.com**. "
         "Once you have your license key, re-open this wizard to continue setup."
@@ -101,7 +101,7 @@ elif step == "C":
 # Screen D — Enter License Key
 # ---------------------------------------------------------------------------
 elif step == "D":
-    st.markdown("### :material/key: Enter Your License Key")
+    st.subheader("🔑 Enter Your License Key")
     key_input = st.text_input("License Key", type="password",
                               placeholder="1569-XXXX-XXXX-XXXX-XXXX-XXXX")
     col1, col2 = st.columns(2)
@@ -133,7 +133,7 @@ elif step == "D":
 # Screen E — Review Privileges
 # ---------------------------------------------------------------------------
 elif step == "E":
-    st.markdown("### :material/admin_panel_settings: Review Required Privileges")
+    st.subheader("⚙️ Review Required Privileges")
     st.write("The app needs the following grants. Run the SQL below as ACCOUNTADMIN.")
     st.code(
         "GRANT EXECUTE TASK ON ACCOUNT TO APPLICATION <app_name>;\n"
@@ -154,11 +154,11 @@ elif step == "E":
 # Screen F — Create App Objects
 # ---------------------------------------------------------------------------
 elif step == "F":
-    st.markdown("### :material/build: Initialising App Objects")
-    st.success("APP_CONFIG table — OK", icon=":material/check_circle:")
-    st.success("JOB_LOG table — OK",   icon=":material/check_circle:")
-    st.success("APP_LOGS table — OK",  icon=":material/check_circle:")
-    st.success("HTTP_PING UDF — OK",   icon=":material/check_circle:")
+    st.subheader("🔧 Initialising App Objects")
+    st.success("APP_CONFIG table — OK", icon="✅")
+    st.success("JOB_LOG table — OK",   icon="✅")
+    st.success("APP_LOGS table — OK",  icon="✅")
+    st.success("HTTP_PING UDF — OK",   icon="✅")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Back"):
@@ -173,8 +173,8 @@ elif step == "F":
 # Screen G — Test Connectivity
 # ---------------------------------------------------------------------------
 elif step == "G":
-    st.markdown("### :material/cloud: Test LocID Central Connectivity")
-    if st.button(":material/wifi_tethering: Run Connectivity Test"):
+    st.subheader("☁️ Test LocID Central Connectivity")
+    if st.button("📡 Run Connectivity Test"):
         with st.spinner("Connecting to central.locid.com…"):
             try:
                 result = session.sql("SELECT APP_SCHEMA.HTTP_PING()").collect()[0][0]
@@ -183,11 +183,11 @@ elif step == "G":
                 result = f"FAILED: {e}"
         if result.startswith("OK"):
             st.success(f"LocID Central is reachable — {result}",
-                       icon=":material/check_circle:")
+                       icon="✅")
             logger.info(session, "01_setup_wizard.connectivity", f"Connectivity OK: {result}")
             st.session_state.connectivity_ok = True
         else:
-            st.error(f"Connection failed — {result}", icon=":material/error:")
+            st.error(f"Connection failed — {result}", icon="❌")
             logger.error(session, "01_setup_wizard.connectivity",
                          f"Connectivity failed: {result}")
             st.session_state.connectivity_ok = False
@@ -206,7 +206,7 @@ elif step == "G":
 # Screen H — Select API Key
 # ---------------------------------------------------------------------------
 elif step == "H":
-    st.markdown("### :material/vpn_key: Select API Key")
+    st.subheader("🔑 Select API Key")
     st.write(
         "Your license includes one or more API keys. Select the key this "
         "Snowflake account should use for LocID lookups."
@@ -277,7 +277,7 @@ elif step == "H":
 # Screen I — Setup Complete
 # ---------------------------------------------------------------------------
 elif step == "I":
-    st.markdown("### :material/check_circle: Setup Complete!")
+    st.subheader("✅ Setup Complete!")
     st.success("Your LocID license is connected and verified.")
     st.write("**What's next:**")
     st.write("- Run an **Encrypt** job to enrich IP+timestamp data with TX_CLOC / STABLE_CLOC")
