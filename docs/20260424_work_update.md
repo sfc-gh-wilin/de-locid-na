@@ -1,6 +1,6 @@
 # LocID Native App — Work Update
 **Project:** LocID — Snowflake Native App
-**Last updated:** 2026-04-24
+**Last updated:** 2026-04-27
 
 ## Sending Over
 
@@ -20,6 +20,8 @@
     - In progress: need more tests
 8. Testing Framework
     - In progress: need more development tests
+9. Sandbox Deployment — First Full Run Fixes *(2026-04-27)*
+    - Completed: all deploy-time errors resolved; app installs and launches
 
 ---
 
@@ -127,8 +129,35 @@
 
 ---
 
+### 11. Sandbox Deployment — First Full Run Fixes *(2026-04-27)*
+
+First end-to-end `snow app run --version v1_0` exposed six errors. All resolved:
+
+- **`Unknown function GEN_RANDOM_UUID`** — PostgreSQL function; replaced with `UUID_STRING()` in `APP_SCHEMA.APP_LOGS` table default clause (`setup.sql`).
+
+- **UDF IMPORTS not allowed in non-versioned schema** — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Created `APP_CODE` as `CREATE OR ALTER VERSIONED SCHEMA` in `setup.sql`; moved all 6 Scala UDFs from `APP_SCHEMA` to `APP_CODE` in `src/udfs/locid_udf.sql`.
+
+- **IMPORTS must use relative path in versioned schema** — Changed all 6 UDF `IMPORTS` from `@APP_SCHEMA.APP_STAGE/lib/...` to `/lib/...` (path relative to version stage root).
+
+- **`default_streamlit` object not found** — Manifest v2 `default_streamlit` must reference a Snowflake STREAMLIT object, not a file path. Added `CREATE OR REPLACE STREAMLIT APP_SCHEMA.LOCID_APP FROM '/streamlit' MAIN_FILE = '/Home.py'` to `setup.sql`; updated `manifest.yml` to `default_streamlit: APP_SCHEMA.LOCID_APP`.
+
+- **Material icons not rendering** — Snowflake Native App Streamlit runtime is pre-1.36 (frozen container layer); `:material/icon:` syntax is not supported anywhere in text. Replaced all 73 occurrences across all Streamlit files with Unicode emoji. Note: `environment.yml` cannot override the runtime version.
+
+- **`AttributeError: module 'streamlit' has no attribute 'navigation'`** — `st.navigation()` requires Streamlit 1.36+, not available in Native App runtime. Reverted pages-under-`views/` refactor; kept standard `pages/` folder with Title_Case filenames for clean sidebar labels.
+
+Additional Streamlit changes:
+- Renamed `app.py` → `Home.py` (sidebar label "Home" instead of "App").
+- Renamed all page files to Title_Case: `01_Setup_Wizard.py`, `02_Run_Encrypt.py`, `03_Run_Decrypt.py`, `04_Job_History.py`, `05_Configuration.py`.
+- Added `streamlit/environment.yml` (conda dependencies; runtime version pin has no effect in Native Apps).
+
+Updated procs to call UDFs in the new `APP_CODE` schema:
+- `src/procs/encrypt.sql`: `APP_CODE.LOCID_TXCLOC_ENCRYPT`, `APP_CODE.LOCID_STABLE_CLOC`.
+- `src/procs/decrypt.sql`: `APP_CODE.LOCID_TXCLOC_DECRYPT`, `APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN`.
+
+---
+
 ## Open Items
 
+- End-to-end Encrypt/Decrypt job test — app now installs; full job run (input table → output table) pending validation.
 - `8.8.8.8` in sandbox `LOCID_BUILDS` — required for cross-compat Test 1; LocID to confirm V6 data availability.
-- End-to-end Encrypt/Decrypt job test — pending JAR staged and `snow app run` install completion.
 - Production key derivation — cross-compat test requires production keys from `central.locid.com`.

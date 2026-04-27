@@ -57,44 +57,64 @@ The app is distributed via the Snowflake Native App Framework. LocID publishes t
 ### App Package Structure
 
 ```
-locid-native-app/
-├── manifest.yml                  # App manifest (privileges, references)
+na_app_pkg/
+├── manifest.yml                  # App manifest (privileges, references, default_streamlit)
 ├── setup.sql                     # Bootstrap: schemas, objects, grants
+├── snowflake.yml                 # Snow CLI project config (artifacts, deploy targets)
 ├── src/
 │   ├── procs/
 │   │   ├── encrypt.sql           # Encrypt stored procedure
 │   │   └── decrypt.sql           # Decrypt stored procedure
 │   ├── udfs/
-│   │   └── locid_udf.sql         # Scala UDF definitions wrapping the JAR
+│   │   └── locid_udf.sql         # Scala UDF definitions (APP_CODE versioned schema)
 │   └── lib/
-│       └── encode-lib-*.jar      # Bundled Java 17 fat JAR (stage artifact)
+│       └── encode-lib-*.jar      # Bundled Scala 2.13 / Java 17 fat JAR
 └── streamlit/
-    ├── app.py                    # Main Streamlit entry point
+    ├── Home.py                   # Main Streamlit entry point (dashboard)
+    ├── environment.yml           # Conda dependencies (runtime version is fixed by Snowflake)
+    ├── logo.svg                  # App logo
+    ├── .streamlit/
+    │   └── config.toml           # Streamlit theme config
     ├── pages/
-    │   ├── 01_setup_wizard.py
-    │   ├── 02_run_encrypt.py
-    │   ├── 03_run_decrypt.py
-    │   ├── 04_job_history.py
-    │   └── 05_configuration.py
+    │   ├── 01_Setup_Wizard.py
+    │   ├── 02_Run_Encrypt.py
+    │   ├── 03_Run_Decrypt.py
+    │   ├── 04_Job_History.py
+    │   └── 05_Configuration.py
     └── utils/
         ├── locid_central.py      # LocID Central API calls (via EAI)
-        └── entitlements.py       # Entitlement check helpers
+        ├── entitlements.py       # Entitlement check helpers
+        └── logger.py             # App logging utilities
 ```
 
 ### Snowflake Objects (App Side — installed in customer account)
 
 ```
-APP_SCHEMA.APP_CONFIG          -- License key, cached secrets, entitlements, output column registry
-APP_SCHEMA.JOB_LOG             -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
-APP_SCHEMA.LOCID_ENCRYPT(...)  -- Encrypt stored procedure
-APP_SCHEMA.LOCID_DECRYPT(...)  -- Decrypt stored procedure
-APP_SCHEMA.LOCID_UDF(...)      -- Scala UDF (encrypt/decrypt via JAR)
-APP_SCHEMA.HTTP_PING()         -- Python UDF to verify EAI connectivity during setup
+-- APP_SCHEMA (non-versioned): tables, stage, network rule, procedures, Streamlit
+APP_SCHEMA.APP_CONFIG                       -- License key, cached secrets, entitlements, output column registry
+APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
+APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID, level, message, created_at)
+APP_SCHEMA.APP_STAGE                        -- Internal stage: JAR, UDF SQL, proc SQL
+APP_SCHEMA.LOCID_CENTRAL_RULE               -- Network rule (allowlist: central.locid.com:443)
+APP_SCHEMA.LOCID_CENTRAL_EAI                -- External Access Integration (created at install time)
+APP_SCHEMA.HTTP_PING()                      -- Python UDF to verify EAI connectivity during setup
+APP_SCHEMA.register_single_callback(...)    -- Callback proc for INPUT_TABLE and APP_WAREHOUSE references
+APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
+APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
+APP_SCHEMA.LOCID_APP                        -- Streamlit application object
+
+-- APP_CODE (versioned schema): Scala UDFs — required by Snowflake for UDFs with JAR IMPORTS
+APP_CODE.LOCID_BASE_ENCRYPT(...)            -- Decrypt base LocID, return encrypted form
+APP_CODE.LOCID_BASE_DECRYPT(...)            -- Decrypt base LocID, return plain form
+APP_CODE.LOCID_TXCLOC_ENCRYPT(...)          -- Generate TX_CLOC from base LocID
+APP_CODE.LOCID_TXCLOC_DECRYPT(...)          -- Decode TX_CLOC → base LocID + metadata
+APP_CODE.LOCID_STABLE_CLOC(...)             -- Generate STABLE_CLOC (UUID format)
+APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(...)  -- Generate STABLE_CLOC from plain base LocID
 ```
 
 ### Scala UDF Design
 
-The `encode-lib` JAR (Scala 2.13 / Java 17) is bundled in the app stage and registered as `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` UDFs with inline Scala handlers — no external wrapper class required. Each UDF embeds its handler class in the `AS $$...$$` block, calling the JAR's public API directly.
+The `encode-lib` JAR (Scala 2.13 / Java 17) is bundled in the app stage. All six Scala UDFs are registered under the `APP_CODE` versioned schema (`CREATE OR ALTER VERSIONED SCHEMA APP_CODE`) — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Each UDF uses `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with an inline handler and a relative IMPORTS path (`/lib/encode-lib-*.jar`).
 
 ### IP Matching Strategy
 
@@ -536,6 +556,23 @@ After installation, the app's `setup.sql` creates all internal objects (schemas,
   GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
   ```
 - For Marketplace installs, `CREATE APPLICATION` on a custom role is the supported least-privilege path. `ACCOUNTADMIN` is not required for the install itself once the grant is in place.
+
+### Deployment Workflow (Provider Side)
+
+From the `na_app_pkg/` directory, using the `LOCID_APP_ADMIN` role:
+
+```bash
+# 1. Upload all artifacts to the app package stage
+snow app deploy --connection wl_sandbox_dcr
+
+# 2. Create or overwrite the named version
+snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr
+
+# 3. Install / upgrade the app to the named version
+snow app run --version v1_0 --connection wl_sandbox_dcr
+```
+
+`snow app deploy` syncs local files to the stage. `snow app version create` bundles the stage snapshot as a named version — required because `APP_CODE` is a versioned schema and Scala UDFs with JAR `IMPORTS` must live in a versioned schema. `snow app run --version` installs or upgrades the app using the named version (not dev-mode).
 
 ---
 
