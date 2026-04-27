@@ -1,5 +1,5 @@
 """
-streamlit/pages/02_run_encrypt.py
+streamlit/views/run_encrypt.py
 LocID Native App — Run Encrypt (View 3)
 
 5-step job submission wizard:
@@ -18,7 +18,7 @@ import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.entitlements import get_active_output_cols
 from utils import logger
-st.logo("logo.svg")
+
 session = get_active_session()
 
 
@@ -36,7 +36,7 @@ def _session_id() -> int:
 
 sid = _session_id()
 
-st.header("🔒 Run Encrypt")
+st.header(":material/lock: Run Encrypt")
 st.caption("Match IP + timestamp data against the LocID data lake.")
 st.divider()
 
@@ -60,7 +60,7 @@ def _load_columns(table_fqn: str) -> list[str]:
         ).collect()
         return [r[0] for r in rows]
     except Exception as e:
-        logger.warning(session, "02_run_encrypt._load_columns",
+        logger.warning(session, "run_encrypt._load_columns",
                        f"Failed to load columns for {table_fqn}: {e}")
         return []
 
@@ -91,7 +91,7 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
         result["cnt_v6"]  = int(ip_rows[2] or 0)
         result["bad_ip"]  = int(ip_rows[3] or 0)
     except Exception as e:
-        logger.warning(session, "02_run_encrypt._validate_inputs",
+        logger.warning(session, "run_encrypt._validate_inputs",
                        f"IP validation failed: {e}")
         result["null_ip"] = result["cnt_v4"] = result["cnt_v6"] = result["bad_ip"] = None
 
@@ -115,12 +115,12 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
                 SUM(IFF({ts_expr} < {cutoff_epoch}, 1, 0)) AS stale_cnt
             FROM {table}
         """).collect()[0]
-        result["ts_min"]     = ts_rows[0]
-        result["ts_max"]     = ts_rows[1]
-        result["null_ts"]    = int(ts_rows[2] or 0)
+        result["ts_min"]      = ts_rows[0]
+        result["ts_max"]      = ts_rows[1]
+        result["null_ts"]     = int(ts_rows[2] or 0)
         result["stale_count"] = int(ts_rows[3] or 0)
     except Exception as e:
-        logger.warning(session, "02_run_encrypt._validate_inputs",
+        logger.warning(session, "run_encrypt._validate_inputs",
                        f"Timestamp validation failed: {e}")
         result["ts_min"] = result["ts_max"] = result["null_ts"] = result["stale_count"] = None
 
@@ -140,8 +140,7 @@ def _show_validation(v: dict) -> None:
             st.warning(f"{bad:,} unparseable IP value(s) — will be skipped during matching.",
                        icon="⚠️")
         if nul:
-            st.warning(f"{nul:,} NULL IP value(s) — will be skipped.",
-                       icon="⚠️")
+            st.warning(f"{nul:,} NULL IP value(s) — will be skipped.", icon="⚠️")
 
     if v.get("stale_count") is not None:
         if v["stale_count"]:
@@ -175,7 +174,7 @@ st.divider()
 # Step 1 — Select Input Table
 # ---------------------------------------------------------------------------
 if step == 1:
-    st.subheader("📋 Step 1 — Select Input Table")
+    st.subheader(":material/table_view: Step 1 — Select Input Table")
     input_table = st.text_input("Input table (fully qualified)",
                                 placeholder="MY_DB.MY_SCHEMA.MY_TABLE",
                                 key="enc_input_table_input")
@@ -186,7 +185,7 @@ if step == 1:
             st.dataframe(preview, use_container_width=True)
             del preview  # free memory — don't persist large DataFrame
         except Exception as e:
-            logger.warning(session, "02_run_encrypt.step1", f"Preview failed: {e}")
+            logger.warning(session, "run_encrypt.step1", f"Preview failed: {e}")
             st.warning(f"Could not load preview: {e}")
     if st.button("Next →", disabled=not input_table):
         cols = _load_columns(input_table)
@@ -202,7 +201,7 @@ if step == 1:
 # Step 2 — Map Columns
 # ---------------------------------------------------------------------------
 elif step == 2:
-    st.subheader("📋 Step 2 — Map Columns")
+    st.subheader(":material/table_rows: Step 2 — Map Columns")
     columns = st.session_state.get("enc_input_columns", [])
     if not columns:
         st.error("Column list is empty — go back and re-enter the table name.")
@@ -219,7 +218,6 @@ elif step == 2:
                 v = _validate_inputs(
                     st.session_state.enc_input_table, col_ip, col_ts, ts_fmt
                 )
-                # Store only the lightweight result dict, not any DataFrame
                 st.session_state.enc_validation      = v
                 st.session_state.enc_validation_cols = (col_ip, col_ts, ts_fmt)
 
@@ -245,7 +243,7 @@ elif step == 2:
 # Step 3 — Configure Output
 # ---------------------------------------------------------------------------
 elif step == 3:
-    st.subheader("📤 Step 3 — Configure Output")
+    st.subheader(":material/output: Step 3 — Configure Output")
     output_mode  = st.radio("", ["Create new table", "Overwrite existing table"])
     output_table = st.text_input("Output table (fully qualified)",
                                  placeholder="MY_DB.MY_SCHEMA.LOCID_RESULTS")
@@ -267,7 +265,7 @@ elif step == 3:
 # Step 4 — Select Output Columns
 # ---------------------------------------------------------------------------
 elif step == 4:
-    st.subheader("📊 Step 4 — Select Output Columns")
+    st.subheader(":material/view_column: Step 4 — Select Output Columns")
     available_cols = get_active_output_cols(sid, "encrypt")
     selected = []
     for col in available_cols:
@@ -292,7 +290,7 @@ elif step == 4:
 # Step 5 — Review & Run
 # ---------------------------------------------------------------------------
 elif step == 5:
-    st.subheader("▶️ Step 5 — Review & Run")
+    st.subheader(":material/play_arrow: Step 5 — Review & Run")
     st.write(f"**Input table:** `{st.session_state.get('enc_input_table')}`")
     st.write(f"**Output table:** `{st.session_state.get('enc_output_table')}`")
     st.write(
@@ -310,10 +308,10 @@ elif step == 5:
             st.session_state.enc_step = 4
             st.rerun()
     with col2:
-        if st.button("▶️ Run Job", disabled=not warehouse, type="primary"):
+        if st.button(":material/play_arrow: Run Job", disabled=not warehouse, type="primary"):
             with st.spinner("Running LocID Encrypt job…"):
                 try:
-                    logger.info(session, "02_run_encrypt.run_job",
+                    logger.info(session, "run_encrypt.run_job",
                                 f"Job started: {st.session_state.enc_input_table} → "
                                 f"{st.session_state.enc_output_table}")
                     raw = session.call(
@@ -338,16 +336,16 @@ elif step == 5:
                             icon="✅"
                         )
                         st.caption(f"Job ID: {result.get('job_id', '—')}")
-                        logger.info(session, "02_run_encrypt.run_job",
+                        logger.info(session, "run_encrypt.run_job",
                                     f"Job SUCCESS: id={result.get('job_id')}, "
                                     f"matched={result.get('rows_matched')}")
                     else:
                         err = result.get("error", status)
                         st.error(f"Job failed — {err}", icon="❌")
-                        logger.error(session, "02_run_encrypt.run_job",
+                        logger.error(session, "run_encrypt.run_job",
                                      f"Job FAILED: {err}")
                 except Exception as e:
-                    logger.error(session, "02_run_encrypt.run_job",
+                    logger.error(session, "run_encrypt.run_job",
                                  "Job threw an exception", exc=e)
                     st.error(f"Error running encrypt job: {e}", icon="❌")
 

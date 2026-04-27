@@ -1,5 +1,5 @@
 """
-streamlit/pages/04_job_history.py
+streamlit/views/job_history.py
 LocID Native App — Job History (View 5)
 
 Full audit log of all Encrypt and Decrypt jobs.
@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils import logger
-st.logo("logo.svg")
+
 session = get_active_session()
 
 
@@ -31,7 +31,7 @@ def _session_id() -> int:
 
 sid = _session_id()
 
-st.header("🕐 Job History")
+st.header(":material/history: Job History")
 st.caption("Full audit log of all LocID enrichment jobs.")
 st.divider()
 
@@ -117,12 +117,12 @@ else:
                 st.metric("Runtime",  f"{runtime_s}s")
             if error_msg:
                 st.error(f"Error: {error_msg}", icon="❌")
-            if st.button("🔄 Re-run with same settings",
+            if st.button(":material/replay: Re-run with same settings",
                          key=f"rerun_{job_id}"):
-                logger.info(session, "04_job_history.rerun",
+                logger.info(session, "job_history.rerun",
                             f"Re-run requested for job {job_id}")
-                page = ("pages/02_Run_Encrypt.py" if operation == "ENCRYPT"
-                        else "pages/03_Run_Decrypt.py")
+                page = ("views/run_encrypt.py" if operation == "ENCRYPT"
+                        else "views/run_decrypt.py")
                 st.switch_page(page)
 
 # ---------------------------------------------------------------------------
@@ -136,10 +136,10 @@ if rows:
     del df  # free memory immediately after serialising
 
     st.download_button(
-        label="⬇️ Export as CSV",
+        label=":material/download: Export as CSV",
         data=csv_bytes,
         file_name="locid_job_history.csv",
         mime="text/csv",
     )
-    logger.debug(session, "04_job_history.export",
+    logger.debug(session, "job_history.export",
                  f"CSV export prepared: {len(rows)} rows")

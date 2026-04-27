@@ -1,5 +1,5 @@
 """
-streamlit/pages/05_configuration.py
+streamlit/views/configuration.py
 LocID Native App — Configuration (View 6)
 
 Sections:
@@ -19,7 +19,7 @@ from snowflake.snowpark.context import get_active_session
 from utils.locid_central import get_secrets
 from utils.entitlements import _get_active_entitlements
 from utils import logger
-st.logo("logo.svg")
+
 session = get_active_session()
 
 
@@ -37,7 +37,7 @@ def _session_id() -> int:
 
 sid = _session_id()
 
-st.header("⚙️ Configuration")
+st.header(":material/tune: Configuration")
 st.divider()
 
 
@@ -58,19 +58,19 @@ def _load_config(_session_id: int) -> dict[str, str | None]:
 
 config = _load_config(sid)
 
-license_key  = config.get("license_id_ref")
-api_key      = config.get("api_key")
-cached_raw   = config.get("cached_license")
+license_key = config.get("license_id_ref")
+api_key     = config.get("api_key")
+cached_raw  = config.get("cached_license")
 
 client_name, lic_expiry = "—", "—"
 if cached_raw:
     try:
-        _ld        = json.loads(cached_raw).get("license", {})
+        _ld         = json.loads(cached_raw).get("license", {})
         client_name = _ld.get("client_name", "—")
-        exp        = _ld.get("expiration_date", "")
-        lic_expiry = exp[:10] if exp else "—"
+        exp         = _ld.get("expiration_date", "")
+        lic_expiry  = exp[:10] if exp else "—"
     except Exception as e:
-        logger.warning(session, "05_configuration.parse_license",
+        logger.warning(session, "configuration.parse_license",
                        f"Failed to parse cached_license: {e}")
 
 
@@ -83,7 +83,7 @@ def _mask(val: str | None, visible: int = 4) -> str:
 # ---------------------------------------------------------------------------
 # Section 1 — License & Credentials
 # ---------------------------------------------------------------------------
-st.subheader("🔑 License & Credentials")
+st.subheader(":material/key: License & Credentials")
 
 col1, col2 = st.columns(2)
 with col1:
@@ -95,22 +95,20 @@ with col2:
 
 colA, colB = st.columns(2)
 with colA:
-    if st.button("✏️ Update License Key"):
-        st.switch_page("pages/01_Setup_Wizard.py")
+    if st.button(":material/edit: Update License Key"):
+        st.switch_page("views/setup_wizard.py")
 with colB:
-    if st.button("🔄 Refresh from LocID Central"):
+    if st.button(":material/refresh: Refresh from LocID Central"):
         with st.spinner("Fetching latest secrets and entitlements…"):
             try:
                 get_secrets(session)
-                # Invalidate config cache so the page reflects the new values
                 _load_config.clear()
-                logger.info(session, "05_configuration.refresh",
+                logger.info(session, "configuration.refresh",
                             "Secrets and entitlements refreshed")
-                st.success("Secrets and entitlements refreshed.",
-                           icon="✅")
+                st.success("Secrets and entitlements refreshed.", icon="✅")
                 st.rerun()
             except Exception as e:
-                logger.error(session, "05_configuration.refresh",
+                logger.error(session, "configuration.refresh",
                              "Refresh failed", exc=e)
                 st.error(str(e), icon="❌")
 
@@ -119,7 +117,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Section 2 — Current Entitlements
 # ---------------------------------------------------------------------------
-st.subheader("✅ Current Entitlements")
+st.subheader(":material/verified_user: Current Entitlements")
 
 ALL_FLAGS = [
     "allow_encrypt", "allow_decrypt",
@@ -142,7 +140,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Section 3 — Output Column Registry
 # ---------------------------------------------------------------------------
-st.subheader("📊 Output Column Registry")
+st.subheader(":material/view_list: Output Column Registry")
 st.caption("Managed by LocID via app version releases. Read-only.")
 
 
@@ -181,6 +179,6 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Section 4 — Advanced
 # ---------------------------------------------------------------------------
-st.subheader("🔧 Advanced")
-if st.button("✨ Re-run Setup Wizard"):
-    st.switch_page("pages/01_Setup_Wizard.py")
+st.subheader(":material/settings: Advanced")
+if st.button(":material/restart_alt: Re-run Setup Wizard"):
+    st.switch_page("views/setup_wizard.py")
