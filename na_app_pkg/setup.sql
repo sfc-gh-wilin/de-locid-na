@@ -125,7 +125,7 @@ GRANT SELECT ON TABLE APP_SCHEMA.JOB_LOG
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS APP_SCHEMA.APP_LOGS (
     log_id      VARCHAR        NOT NULL
-                    DEFAULT GEN_RANDOM_UUID(),
+                    DEFAULT UUID_STRING(),
     level       VARCHAR        NOT NULL,         -- DEBUG|INFO|WARNING|ERROR|TRACE
     source      VARCHAR        NOT NULL,         -- "<file>.<function>"
     logged_at   TIMESTAMP_NTZ  NOT NULL
