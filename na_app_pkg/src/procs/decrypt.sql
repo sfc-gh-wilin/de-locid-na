@@ -301,7 +301,7 @@ def decrypt_handler(
                 {id_col}       AS _id,
                 {txcloc_col}   AS _txcloc,
                 PARSE_JSON(
-                    APP_SCHEMA.LOCID_TXCLOC_DECRYPT({txcloc_col}, {scheme_key})
+                    APP_CODE.LOCID_TXCLOC_DECRYPT({txcloc_col}, {scheme_key})
                 ) AS _decoded
             FROM reference('INPUT_TABLE')
             WHERE {txcloc_col} IS NOT NULL
@@ -327,7 +327,7 @@ def decrypt_handler(
         # Geo context: not embedded in TX_CLOC; returned as NULL in v1.
         COL_SQL = {
             'stable_cloc': (
-                f"APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN("
+                f"APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN("
                 f"  _decoded:location_id::VARCHAR, {ns_guid}, "
                 f"  {client_id}::INT, _decoded:enc_client_id::INT, 'T0')"
             ),

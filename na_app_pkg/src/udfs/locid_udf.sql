@@ -59,7 +59,7 @@
 --    Input:  loc_id  — raw base LocID string  e.g. '31F24ZE1W1YX58K2R1139'
 --            key_str — base_locid_secret (Base64-URL encoded AES key, from license endpoint secrets)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_BASE_ENCRYPT(
+CREATE OR REPLACE FUNCTION APP_CODE.LOCID_BASE_ENCRYPT(
     LOC_ID   VARCHAR,
     KEY_STR  VARCHAR
 )
@@ -99,7 +99,7 @@ $$;
 --    Input:  encrypted_loc_id — base64-URL encoded ciphertext (output of LOCID_BASE_ENCRYPT)
 --            key_str          — base_locid_secret (same key used to encrypt)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_BASE_DECRYPT(
+CREATE OR REPLACE FUNCTION APP_CODE.LOCID_BASE_DECRYPT(
     ENCRYPTED_LOC_ID  VARCHAR,
     KEY_STR           VARCHAR
 )
@@ -149,7 +149,7 @@ $$;
 --            timestamp_sec    — Unix timestamp in seconds (BIGINT → Long)
 --            client_id        — encClientId for TxCloc (INT → Int)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_ENCRYPT(
+CREATE OR REPLACE FUNCTION APP_CODE.LOCID_TXCLOC_ENCRYPT(
     ENCRYPTED_LOCID  VARCHAR,
     BASE_LOCID_KEY   VARCHAR,
     SCHEME_KEY       VARCHAR,
@@ -208,7 +208,7 @@ $$;
 --    Input:  tx_cloc    — TX_CLOC string (output of LOCID_TXCLOC_ENCRYPT)
 --            scheme_key — same EncScheme0 key used to encrypt
 -- =============================================================================
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
+CREATE OR REPLACE FUNCTION APP_CODE.LOCID_TXCLOC_DECRYPT(
     TX_CLOC    VARCHAR,
     SCHEME_KEY VARCHAR
 )
@@ -258,7 +258,7 @@ $$;
 --            enc_client_id    — encrypting client ID (publisher) (INT → Int)
 --            tier             — location tier: 'T0' (rooftop) or 'T1' (low accuracy)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_STABLE_CLOC(
+CREATE OR REPLACE FUNCTION APP_CODE.LOCID_STABLE_CLOC(
     ENCRYPTED_LOCID  VARCHAR,
     BASE_LOCID_KEY   VARCHAR,
     NAMESPACE_GUID   VARCHAR,
@@ -322,7 +322,7 @@ $$;
 --            enc_client_id  — encrypting client ID  (from TX_CLOC decode)
 --            tier           — "T0" or "T1"
 -- =============================================================================
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN(
+CREATE OR REPLACE FUNCTION APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(
     BASE_LOC_ID    VARCHAR,
     NAMESPACE_GUID VARCHAR,
     DEC_CLIENT_ID  INT,
@@ -347,18 +347,7 @@ AS $$
 $$;
 
 
--- =============================================================================
--- Grants
--- =============================================================================
-GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_BASE_ENCRYPT(VARCHAR, VARCHAR)
-    TO APPLICATION ROLE APP_ADMIN;
-GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_BASE_DECRYPT(VARCHAR, VARCHAR)
-    TO APPLICATION ROLE APP_ADMIN;
-GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_TXCLOC_ENCRYPT(VARCHAR, VARCHAR, VARCHAR, BIGINT, INT)
-    TO APPLICATION ROLE APP_ADMIN;
-GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(VARCHAR, VARCHAR)
-    TO APPLICATION ROLE APP_ADMIN;
-GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_STABLE_CLOC(VARCHAR, VARCHAR, VARCHAR, INT, INT, VARCHAR)
-    TO APPLICATION ROLE APP_ADMIN;
-GRANT USAGE ON FUNCTION APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN(VARCHAR, VARCHAR, INT, INT, VARCHAR)
-    TO APPLICATION ROLE APP_ADMIN;
+-- NOTE: Object-level grants are not supported in versioned schemas.
+-- USAGE on APP_CODE schema is granted to APP_ADMIN in setup.sql.
+-- These UDFs are called from owner's-rights stored procs (LOCID_ENCRYPT / LOCID_DECRYPT)
+-- and do not require direct application role grants.

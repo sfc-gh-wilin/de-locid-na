@@ -514,11 +514,11 @@ def encrypt_handler(
         # (publisher = consumer; see developer-integration-guide.md)
         COL_SQL = {
             'tx_cloc': (
-                f"APP_SCHEMA.LOCID_TXCLOC_ENCRYPT("
+                f"APP_CODE.LOCID_TXCLOC_ENCRYPT("
                 f"  encrypted_locid, {base_key}, {scheme_key}, _ts, {client_id}::INT)"
             ),
             'stable_cloc': (
-                f"APP_SCHEMA.LOCID_STABLE_CLOC("
+                f"APP_CODE.LOCID_STABLE_CLOC("
                 f"  encrypted_locid, {base_key}, {ns_guid}, "
                 f"  {client_id}::INT, {client_id}::INT, tier)"
             ),

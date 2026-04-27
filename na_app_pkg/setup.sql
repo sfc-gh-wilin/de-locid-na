@@ -18,12 +18,18 @@ CREATE APPLICATION ROLE IF NOT EXISTS APP_VIEWER;
 
 
 -- =============================================================================
--- 2. Main Schema
+-- 2. Schemas
+--    APP_SCHEMA  — non-versioned, stateful: tables, stage, network rule, output tables
+--    APP_CODE    — versioned, stateless: Scala UDFs with JAR imports
+--                  (CREATE OR ALTER VERSIONED SCHEMA required for UDFs with IMPORTS)
 -- =============================================================================
 CREATE SCHEMA IF NOT EXISTS APP_SCHEMA;
 
 GRANT USAGE ON SCHEMA APP_SCHEMA TO APPLICATION ROLE APP_ADMIN;
 GRANT USAGE ON SCHEMA APP_SCHEMA TO APPLICATION ROLE APP_VIEWER;
+
+CREATE OR ALTER VERSIONED SCHEMA APP_CODE;
+GRANT USAGE ON SCHEMA APP_CODE TO APPLICATION ROLE APP_ADMIN;
 
 
 -- =============================================================================
