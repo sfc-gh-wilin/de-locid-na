@@ -4,14 +4,22 @@
 
 ## Sending Over
 
-  1. Architecture & Documentations
-  2. Provider Database (DDL & UDFs)
-  3. Native App Package Works
-  4. Manifest v2 Upgrade
-  5. EAI Architecture Refactor
-  6. Snow CLI Deployment
-  7. Deployment Roles and Guide
-  8. Testing Framework
+1. Architecture & Documentations
+    - In progress: continue to make adjustments
+2. Provider Database (DDL & UDFs) 
+    - Completed
+3. Native App Package Works
+    - In progress: continue development
+4. Manifest v2 Upgrade
+    - Completed
+5. EAI Architecture Refactor
+    - In progress: need more tests
+6. Snow CLI Deployment
+    - Completed
+7. Deployment Roles and Guide
+    - In progress: need more tests
+8. Testing Framework
+    - In progress: need more development tests
 
 ---
 
