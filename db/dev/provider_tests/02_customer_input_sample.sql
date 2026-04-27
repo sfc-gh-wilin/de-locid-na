@@ -92,6 +92,6 @@ SELECT * FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT LIMIT 5;
 --   locid_city | locid_city_code | locid_postal_code |
 --   locid_horizontal_accuracy | run_dt
 --
--- Compare output against LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT_2K
+-- Compare output against LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT
 -- for end-to-end validation (see docs/20260420_NativeApp_Test_Steps.md).
 -- ---------------------------------------------------------------------------

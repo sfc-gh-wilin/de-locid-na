@@ -12,7 +12,7 @@
 --   CUSTOMER_TEST_INPUT         100 rows   (sample customer input for testing)
 --
 -- Source CSVs are in: Coco/db/
--- CUSTOMER_TEST_OUTPUT_2K.csv is reference-only; load not required.
+-- CUSTOMER_TEST_OUTPUT.csv is reference-only; load not required.
 -- =============================================================================
 
 USE DATABASE LOCID_DEV;
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (
 
 -- Customer test output: expected results for validation (reference, not loaded by procs)
 -- Column types mirror Coco/db/tables.sql exactly.
-CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT_2K (
+CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT (
     id                        VARCHAR(16777216),
     ip_address                VARCHAR(16777216),
     ts                        TIMESTAMP_NTZ(9),

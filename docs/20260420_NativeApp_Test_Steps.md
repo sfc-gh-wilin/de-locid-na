@@ -102,14 +102,14 @@ snow sql --connection wl_sandbox_dcr -f "db/dev/provider/06_udfs.sql"
 
 ## Phase 2 — Load Test Data
 
+**Note: Option A used**
+
 Choose **one** option. Both produce the same table structure; the difference is the data source.
 
 | Option | File | Use when |
 |--------|------|----------|
 | **A — Generated (recommended for sandbox)** | `00_generate_test_data.sql` | You want synthetic data — no real client CSV files required |
 | **B — CSV load** | `01_load_test_data.sql` | You have the real client CSV files in `Coco/db/` |
-
-**Note: Option A used**
 
 ---
 
@@ -306,6 +306,8 @@ snow app run --version v1_0 --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 ---
 
 ### 3.7 Bind references
+
+**Note: Option A used**
 
 The app uses `references` for consumer objects declared in `manifest.yml`.
 Output tables are created by the app in its own `APP_SCHEMA` — no consumer GRANT is needed
