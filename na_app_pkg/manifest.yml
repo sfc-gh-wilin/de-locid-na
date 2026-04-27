@@ -16,7 +16,7 @@ artifacts:
   # Consumer-visible readme shown in the Marketplace listing
   readme: README.md
   # Primary Streamlit entry point: auto-launched when consumer opens the app
-  default_streamlit: streamlit/app.py
+  default_streamlit: APP_SCHEMA.LOCID_APP
 
 # The app makes outbound HTTPS calls to central.locid.com for license validation
 # and usage statistics. It requires the CREATE EXTERNAL ACCESS INTEGRATION privilege
