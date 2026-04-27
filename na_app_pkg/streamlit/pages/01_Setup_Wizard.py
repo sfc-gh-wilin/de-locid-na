@@ -20,6 +20,7 @@ import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.locid_central import fetch_license
 from utils import logger
+st.logo("logo.svg")
 session = get_active_session()
 
 st.header("✨ Setup Wizard")
@@ -285,4 +286,4 @@ elif step == "I":
         # Clean up wizard-specific session state
         for key in ("wizard_step", "license_key", "license_data", "connectivity_ok"):
             st.session_state.pop(key, None)
-        st.switch_page("views/home.py")
+        st.switch_page("app.py")

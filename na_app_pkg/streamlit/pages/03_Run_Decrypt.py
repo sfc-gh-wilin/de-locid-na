@@ -17,6 +17,7 @@ import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.entitlements import get_active_output_cols
 from utils import logger
+st.logo("logo.svg")
 session = get_active_session()
 
 

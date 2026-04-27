@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils import logger
+st.logo("logo.svg")
 session = get_active_session()
 
 
@@ -120,8 +121,8 @@ else:
                          key=f"rerun_{job_id}"):
                 logger.info(session, "04_job_history.rerun",
                             f"Re-run requested for job {job_id}")
-                page = ("views/run_encrypt.py" if operation == "ENCRYPT"
-                        else "views/run_decrypt.py")
+                page = ("pages/02_Run_Encrypt.py" if operation == "ENCRYPT"
+                        else "pages/03_Run_Decrypt.py")
                 st.switch_page(page)
 
 # ---------------------------------------------------------------------------
