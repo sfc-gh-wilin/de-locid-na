@@ -66,7 +66,7 @@ CREATE OR REPLACE FUNCTION APP_CODE.LOCID_BASE_ENCRYPT(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.encrypt'
 AS $$
   import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
@@ -106,7 +106,7 @@ CREATE OR REPLACE FUNCTION APP_CODE.LOCID_BASE_DECRYPT(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.decrypt'
 AS $$
   import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
@@ -159,7 +159,7 @@ CREATE OR REPLACE FUNCTION APP_CODE.LOCID_TXCLOC_ENCRYPT(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.txClocEncrypt'
 AS $$
   import io.ol.locationid.TxCloc
@@ -215,7 +215,7 @@ CREATE OR REPLACE FUNCTION APP_CODE.LOCID_TXCLOC_DECRYPT(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.txClocDecrypt'
 AS $$
   import io.ol.locationid.encoding.EncScheme0
@@ -269,7 +269,7 @@ CREATE OR REPLACE FUNCTION APP_CODE.LOCID_STABLE_CLOC(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.stableCloc'
 AS $$
   import io.ol.locationid.StableCloc
@@ -332,7 +332,7 @@ CREATE OR REPLACE FUNCTION APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('/lib/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.stableClocFromPlain'
 AS $$
   import io.ol.locationid.StableCloc
