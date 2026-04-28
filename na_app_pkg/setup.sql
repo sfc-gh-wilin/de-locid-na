@@ -44,14 +44,18 @@ GRANT USAGE ON SCHEMA APP_CODE TO APPLICATION ROLE APP_ADMIN;
 CREATE STAGE IF NOT EXISTS APP_SCHEMA.APP_STAGE
     DIRECTORY = (ENABLE = TRUE);
 
-GRANT READ ON STAGE APP_SCHEMA.APP_STAGE TO APPLICATION ROLE APP_ADMIN;
+-- READ on APP_STAGE is intentionally NOT granted to APP_ADMIN or APP_VIEWER.
+-- The stage contains the encode-lib JAR and SQL source files; granting READ
+-- would allow consumers with the APP_ADMIN role to download those files.
+-- Procedures and UDFs reference the stage internally — no consumer-facing
+-- READ access is required at runtime.
 
 
 -- =============================================================================
 -- 4. APP_CONFIG Table
 --    Stores license metadata, cached entitlements, and output column registry.
---    Sensitive values (license key, api_key) are stored as Snowflake SECRETs
---    and are NOT written here in plaintext.
+--    Sensitive values (license key, api_key, cached secrets) are stored as
+--    VARCHAR in config_value. Future hardening: migrate to Snowflake SECRETs.
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS APP_SCHEMA.APP_CONFIG (
     config_key         VARCHAR        NOT NULL,

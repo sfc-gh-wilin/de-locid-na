@@ -250,8 +250,8 @@ def _log_perf(session, job_id: str, phases: dict) -> None:
     try:
         msg = json.dumps({'job_id': job_id, 'phases': phases})
         session.sql(
-            "INSERT INTO APP_SCHEMA.APP_LOGS (level, message) VALUES (?, ?)",
-            params=['PERF', msg]
+            "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+            params=['PERF', 'locid_decrypt._log_perf', msg]
         ).collect()
     except Exception:
         pass  # Perf logging must not abort the job
