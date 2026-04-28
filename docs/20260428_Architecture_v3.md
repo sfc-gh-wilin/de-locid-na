@@ -1,6 +1,6 @@
 # LocID Snowflake Native App — Architecture
 
-**Version:** 2.0  
+**Version:** 3.0  
 **Provider:** LocID  
 **Prepared by:** Snowflake Solutions Architecture
 
