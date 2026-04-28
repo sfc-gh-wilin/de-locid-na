@@ -79,7 +79,7 @@ elif step == "B":
             st.rerun()
     with col2:
         if st.button("Continue", type="primary"):
-            st.session_state.wizard_step = "D" if "Yes" in choice else "C"
+            st.session_state.wizard_step = "E" if "Yes" in choice else "C"
             st.rerun()
 
 # ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ elif step == "D":
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Back"):
-            st.session_state.wizard_step = "B"
+            st.session_state.wizard_step = "E"
             st.rerun()
     with col2:
         if st.button("Validate & Continue", type="primary"):
@@ -118,7 +118,7 @@ elif step == "D":
                         _upsert_config("license_id_ref", key_input)
                         st.session_state.license_key  = key_input
                         st.session_state.license_data = data
-                        st.session_state.wizard_step  = "E"
+                        st.session_state.wizard_step  = "F"
                         logger.info(session, "setup_wizard.validate",
                                     "License validated successfully")
                         st.rerun()
@@ -131,21 +131,28 @@ elif step == "D":
 # Screen E — Review Privileges
 # ---------------------------------------------------------------------------
 elif step == "E":
-    st.subheader(":material/admin_panel_settings: Review Required Privileges")
-    st.write("The app needs the following grants. Run the SQL below as ACCOUNTADMIN.")
+    st.subheader(":material/admin_panel_settings: Grant Required Privileges")
+    st.write(
+        "Before the app can validate your license, an **ACCOUNTADMIN** must run "
+        "the SQL below to allow the app to connect to LocID Central."
+    )
+    try:
+        _app_name = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+    except Exception:
+        _app_name = "<app_name>"
     st.code(
-        "GRANT EXECUTE TASK ON ACCOUNT TO APPLICATION <app_name>;\n"
-        "GRANT USAGE ON INTEGRATION LOCID_CENTRAL_EAI TO APPLICATION <app_name>;",
+        f"GRANT EXECUTE TASK ON ACCOUNT TO APPLICATION {_app_name};\n"
+        f"GRANT USAGE ON INTEGRATION LOCID_CENTRAL_EAI TO APPLICATION {_app_name};",
         language="sql"
     )
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Back"):
-            st.session_state.wizard_step = "D"
+            st.session_state.wizard_step = "B"
             st.rerun()
     with col2:
         if st.button("Grants confirmed — Continue", type="primary"):
-            st.session_state.wizard_step = "F"
+            st.session_state.wizard_step = "D"
             st.rerun()
 
 # ---------------------------------------------------------------------------
@@ -160,7 +167,7 @@ elif step == "F":
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Back"):
-            st.session_state.wizard_step = "E"
+            st.session_state.wizard_step = "D"
             st.rerun()
     with col2:
         if st.button("Continue", type="primary"):
