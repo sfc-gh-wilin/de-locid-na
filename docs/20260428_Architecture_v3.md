@@ -643,6 +643,8 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
 
+> **In progress:** A benchmark test using mockup data run in the sandbox to provide more realistic improvement numbers. Results will be added here when ready.
+
 ### What We Are Asking LocID to Provide
 
 Python source implementing the same encoding operations currently provided by `encode-lib`. **A pip package is not required** — plain `.py` files are sufficient. Snowflake Python UDFs support `IMPORTS = ('@stage/locid.py')` to load staged source files directly, the same way the JAR is staged today.
