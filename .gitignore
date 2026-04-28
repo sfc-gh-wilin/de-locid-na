@@ -371,4 +371,4 @@ dmypy.json
 .DS_Store
 
 # Project
-Coco/
+Tmp/
