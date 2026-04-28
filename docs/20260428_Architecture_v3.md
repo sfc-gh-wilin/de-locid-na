@@ -684,6 +684,7 @@ HANDLER = 'decrypt_batch'
 AS $$
 import pandas as pd
 import locid  # sourced from the staged locid.py
+from _snowflake import vectorized
 
 # _scheme_cache: key string → EncScheme0 object; persists across batches in the same worker
 _scheme_cache = {}

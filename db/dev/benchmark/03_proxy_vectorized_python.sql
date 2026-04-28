@@ -42,6 +42,7 @@ AS $$
 import hashlib
 import base64
 import pandas as pd
+from _snowflake import vectorized
 
 # Worker-level cache: key_str → key_bytes
 # Persists across batches in the same worker process — key derivation cost
