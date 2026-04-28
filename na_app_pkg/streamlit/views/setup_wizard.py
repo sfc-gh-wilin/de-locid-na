@@ -131,17 +131,30 @@ elif step == "D":
 # Screen E — Review Privileges
 # ---------------------------------------------------------------------------
 elif step == "E":
-    st.subheader(":material/admin_panel_settings: Grant Required Privileges")
-    st.write(
-        "Before the app can validate your license, an **ACCOUNTADMIN** must run "
-        "the SQL below to allow the app to connect to LocID Central."
-    )
+    st.subheader(":material/admin_panel_settings: Approve Network Access")
     try:
         _app_name = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
     except Exception:
         _app_name = "<app_name>"
+    st.write(
+        "Before the app can validate your license it needs permission to connect "
+        "to **central.locid.com**. An **ACCOUNTADMIN** (or a role with the "
+        "`MANAGE APPLICATION SPECIFICATIONS` privilege) must approve this."
+    )
+    st.markdown("**Option A — Snowsight UI**")
+    st.write(
+        "In the navigation menu go to **Catalog → Apps**, select this app, "
+        "click the **Settings** icon, then choose **Connections**. "
+        "Next to *LocID Central API Access*, click **…** → **Approve**."
+    )
+    st.markdown("**Option B — SQL**")
     st.code(
-        f"GRANT EXECUTE TASK ON ACCOUNT TO APPLICATION {_app_name};\n"
+        f"-- 1. Find the current sequence number:\n"
+        f"SHOW SPECIFICATIONS IN APPLICATION {_app_name};\n\n"
+        f"-- 2. Approve (replace N with SEQUENCE_NUMBER from above, usually 1):\n"
+        f"ALTER APPLICATION {_app_name}\n"
+        f"    APPROVE SPECIFICATION LOCID_CENTRAL_EAI_SPEC SEQUENCE_NUMBER = N;\n\n"
+        f"-- 3. Also grant USAGE on the integration:\n"
         f"GRANT USAGE ON INTEGRATION LOCID_CENTRAL_EAI TO APPLICATION {_app_name};",
         language="sql"
     )
@@ -151,7 +164,7 @@ elif step == "E":
             st.session_state.wizard_step = "B"
             st.rerun()
     with col2:
-        if st.button("Grants confirmed — Continue", type="primary"):
+        if st.button("Approved — Continue", type="primary"):
             st.session_state.wizard_step = "D"
             st.rerun()
 

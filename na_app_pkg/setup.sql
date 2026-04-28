@@ -170,6 +170,15 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
     ALLOWED_NETWORK_RULES = (APP_SCHEMA.LOCID_CENTRAL_RULE)
     ENABLED = TRUE;
 
+-- App specification: registers the host:port with Snowflake so the consumer
+-- can approve the outbound connection in Snowsight (Settings → Connections).
+-- Without an approved spec the EAI exists but network calls return EBUSY.
+ALTER APPLICATION SET SPECIFICATION LOCID_CENTRAL_EAI_SPEC
+    TYPE        = EXTERNAL_ACCESS
+    LABEL       = 'LocID Central API Access'
+    DESCRIPTION = 'Allows the app to connect to central.locid.com (HTTPS 443) for license validation. No customer data is sent.'
+    HOST_PORTS  = ('central.locid.com:443');
+
 
 -- =============================================================================
 -- 7. HTTP_PING UDF  (Python)
