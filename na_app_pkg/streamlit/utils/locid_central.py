@@ -11,17 +11,61 @@ Endpoints used:
   POST /api/0/location_id/stats                  → usage statistics
 """
 
+import errno
 import json
 import time
 import urllib.request
 import urllib.error
-from typing import Any
+from typing import Any, Optional
 
 import snowflake.snowpark as snowpark
 from utils import logger
 
 CENTRAL_BASE_URL  = "https://central.locid.com/api/0/location_id"
 CACHE_TTL_SECONDS = 3600    # refresh secrets if older than 1 hour
+
+# Retry config for transient EBUSY errors in Snowflake's sandboxed network stack.
+# OSError(EBUSY) can occur on the first connection attempt while the sandbox
+# network interface initialises; retrying with backoff resolves this reliably.
+_EBUSY_RETRIES = 3
+_EBUSY_DELAYS  = (0.5, 1.0, 2.0)  # seconds between successive attempts
+
+
+def _urlopen_with_retry(
+    req: urllib.request.Request,
+    timeout: int,
+    session: Optional[snowpark.Session] = None,
+    source: str = "",
+):
+    """Open req with automatic retry on transient EBUSY errors.
+
+    If session is provided, each retry and final exhaustion are logged as
+    WARNING rows in APP_SCHEMA.APP_LOGS so operators can see the attempt count.
+    """
+    _src = source or "locid_central"
+    for attempt in range(_EBUSY_RETRIES + 1):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except (OSError, urllib.error.URLError) as exc:
+            is_ebusy = (
+                (isinstance(exc, OSError) and exc.errno == errno.EBUSY)
+                or (isinstance(exc, urllib.error.URLError)
+                    and isinstance(exc.reason, OSError)
+                    and exc.reason.errno == errno.EBUSY)
+            )
+            if is_ebusy and attempt < _EBUSY_RETRIES:
+                delay = _EBUSY_DELAYS[attempt]
+                if session:
+                    logger.warning(session, _src,
+                        f"EBUSY on attempt {attempt + 1}/{_EBUSY_RETRIES + 1}"
+                        f" — retrying in {delay:.1f}s")
+                time.sleep(delay)
+            else:
+                if session and is_ebusy:
+                    logger.warning(session, _src,
+                        f"EBUSY persisted after {attempt + 1}/{_EBUSY_RETRIES + 1}"
+                        " attempts — giving up")
+                raise
 
 _UPSERT_SQL = (
     "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
@@ -64,7 +108,7 @@ def fetch_license(session: snowpark.Session, license_key: str) -> dict[str, Any]
     req = urllib.request.Request(url)
 
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with _urlopen_with_retry(req, 15, session, "locid_central.fetch_license") as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
         logger.error(session, "locid_central.fetch_license",
@@ -178,7 +222,7 @@ def report_stats(session: snowpark.Session, job_id: str,
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=10):
+        with _urlopen_with_retry(req, 10, session, "locid_central.report_stats"):
             logger.debug(session, "locid_central.report_stats",
                          f"Stats posted: job={job_id}, rows={rows_processed}")
     except Exception as e:
