@@ -77,7 +77,8 @@ na_app_pkg/
 ├── src/
 │   ├── procs/
 │   │   ├── encrypt.sql           # Encrypt stored procedure
-│   │   └── decrypt.sql           # Decrypt stored procedure
+│   │   ├── decrypt.sql           # Decrypt stored procedure
+│   │   └── fetch_license.sql     # License fetch stored procedure (EXTERNAL_ACCESS_INTEGRATIONS = LOCID_CENTRAL_EAI)
 │   ├── udfs/
 │   │   └── locid_udf.sql         # Scala UDF definitions (APP_CODE versioned schema)
 │   └── lib/
@@ -95,7 +96,7 @@ na_app_pkg/
     │   ├── 04_Job_History.py
     │   └── 05_Configuration.py
     └── utils/
-        ├── locid_central.py      # LocID Central API calls (via EAI)
+        ├── locid_central.py      # LocID Central client — delegates HTTP to LOCID_FETCH_LICENSE stored procedure (Streamlit cannot make direct HTTP calls in Native Apps)
         ├── entitlements.py       # Entitlement check helpers
         └── logger.py             # App logging utilities
 ```
@@ -122,7 +123,9 @@ APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID
 APP_SCHEMA.APP_STAGE                        -- Internal stage: JAR, UDF SQL, proc SQL
 APP_SCHEMA.LOCID_CENTRAL_RULE               -- Network rule (allowlist: central.locid.com:443)
 APP_SCHEMA.LOCID_CENTRAL_EAI                -- External Access Integration (created at install time)
+LOCID_CENTRAL_EAI_SPEC                      -- App specification (consumer must approve before EAI is usable; see Setup Wizard Screen E)
 APP_SCHEMA.HTTP_PING()                      -- Python UDF to verify EAI connectivity during setup
+APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)     -- Python stored procedure — fetches/caches license from LocID Central via EAI; called by Streamlit via session.call()
 APP_SCHEMA.register_single_callback(...)    -- Callback proc for INPUT_TABLE and APP_WAREHOUSE references
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
@@ -215,7 +218,7 @@ POST https://central.locid.com/api/0/location_id/stats
 - On app launch: check `license_last_verified_at` in `APP_CONFIG`. If older than 24 hours (or not set), re-fetch from LocID Central and update `APP_CONFIG`.
 - On job run: use cached values. If cache is missing → abort (secrets required).
 - If refresh fails: use cached values, log warning.
-- The license key is stored as a Snowflake `SECRET`, referenced by the EAI — never exposed in query results or UI.
+- The license key is stored in `APP_CONFIG` (`license_id_ref`). The full license payload (including cryptographic secrets) is cached in `APP_CONFIG` (`cached_license`) after each successful fetch from LocID Central.
 
 ---
 
@@ -227,9 +230,9 @@ Multi-screen Streamlit wizard, runs once post-install.
 [Welcome]
     └── [Have a LocID license key?]
             ├── No  → [Contact LocID Sales] → END (no forward navigation)
-            └── Yes → [Enter License Key (masked)]
-                        → [Review & Request Privileges]
-                            → [Create Shared App Objects]
+            └── Yes → [Approve Network Access (EAI spec — ACCOUNTADMIN action)]
+                        → [Enter License Key + Validate against LocID Central]
+                            → [Create App Objects]
                                 → [Test EAI Connectivity]
                                     → [Select API Key]
                                         → [Setup Complete]
@@ -242,10 +245,10 @@ Multi-screen Streamlit wizard, runs once post-install.
 | **A. Welcome** | Intro | "Get started" CTA |
 | **B. Have a key?** | Gate | Yes/No radio |
 | **C. Contact Sales** | Dead end (no key) | Show LocID contact info, close wizard |
-| **D. Enter License Key** | Capture credential | Masked input, validate format, store as Snowflake SECRET |
-| **E. Review Privileges** | Grant check | Check EAI, DB/schema grants; show SQL for ACCOUNTADMIN |
-| **F. Create App Objects** | Bootstrap | Create APP_SHARED schema, APP_CONFIG, JOB_LOG, HTTP_PING UDF |
-| **G. Test Connectivity** | Validate EAI | Call LocID Central license endpoint; show status + latency |
+| **E. Approve Network Access** | EAI spec approval (runs before D) | Shows `SHOW SPECIFICATIONS` + `ALTER APPLICATION APPROVE SPECIFICATION` SQL for ACCOUNTADMIN; also `GRANT USAGE ON INTEGRATION`; **must be completed before license validation** |
+| **D. Enter License Key** | Validate license | Masked input; calls `APP_SCHEMA.LOCID_FETCH_LICENSE` stored procedure (requires EAI spec approved at Screen E); caches full license payload in `APP_CONFIG` |
+| **F. Create App Objects** | Bootstrap check | Verifies APP_CONFIG, JOB_LOG, APP_LOGS, HTTP_PING UDF |
+| **G. Test Connectivity** | Validate EAI | Calls `APP_SCHEMA.HTTP_PING()` — HEAD request to `central.locid.com` |
 | **H. Select API Key** | API key picker | List ACTIVE keys from `access[]` with masked api_key, api_key_id, provider_id, namespace_guid; user selects which to use; stored in APP_CONFIG |
 | **I. Success** | Done | Summary checklist, link to docs, "Launch App" |
 
@@ -812,12 +815,12 @@ GRANT USAGE ON WAREHOUSE <customer_warehouse> TO ROLE LOCID_APP_INSTALLER;
 GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
 ```
 
-After installation, the app's `setup.sql` creates all internal objects (schemas, tables, UDFs, stored procedures) within the app container — no additional consumer-side grants are required for those.
+After installation, the app's `setup.sql` creates all internal objects (schemas, tables, UDFs, stored procedures) within the app container. One additional post-install step is required: the consumer must approve the `LOCID_CENTRAL_EAI_SPEC` app specification so the EAI can make outbound HTTPS calls. The Setup Wizard (Screen E) provides the exact SQL.
 
 ### Notes
 
 - The one-time `GRANT ... TO ROLE` steps must be executed by `ACCOUNTADMIN`. This is unavoidable, but it is a **one-time setup only** — all routine operations use the custom role thereafter.
-- The app's onboarding wizard (Screen E — Review Privileges) checks required grants and surfaces the remediation SQL to the installer if any are missing.
+- The app's onboarding wizard (Screen E — Approve Network Access) guides the installer through approving the `LOCID_CENTRAL_EAI_SPEC` app specification and granting `USAGE ON INTEGRATION` — required before the license can be validated at Screen D.
 - If the customer's environment uses a standard role hierarchy (e.g. `SYSADMIN` → custom roles), grant `LOCID_APP_INSTALLER` to `SYSADMIN` for hierarchy compliance:
   ```sql
   GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
