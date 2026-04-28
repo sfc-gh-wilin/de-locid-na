@@ -220,6 +220,7 @@ EXECUTE IMMEDIATE FROM 'src/udfs/locid_udf.sql';
 -- =============================================================================
 EXECUTE IMMEDIATE FROM 'src/procs/encrypt.sql';
 EXECUTE IMMEDIATE FROM 'src/procs/decrypt.sql';
+EXECUTE IMMEDIATE FROM 'src/procs/fetch_license.sql';
 
 
 -- =============================================================================
@@ -269,8 +270,7 @@ GRANT USAGE ON PROCEDURE APP_SCHEMA.register_single_callback(STRING, STRING, STR
 -- =============================================================================
 CREATE OR REPLACE STREAMLIT APP_SCHEMA.LOCID_APP
     FROM '/streamlit'
-    MAIN_FILE = '/Home.py'
-    EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI);
+    MAIN_FILE = '/Home.py';
 
 GRANT USAGE ON STREAMLIT APP_SCHEMA.LOCID_APP TO APPLICATION ROLE APP_ADMIN;
 GRANT USAGE ON STREAMLIT APP_SCHEMA.LOCID_APP TO APPLICATION ROLE APP_VIEWER;
