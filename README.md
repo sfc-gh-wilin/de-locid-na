@@ -143,6 +143,8 @@ APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(...)  -- Generate STABLE_CLOC from plain b
 
 The `encode-lib` JAR (Scala 2.13 / Java 17) is bundled in the app stage. All six Scala UDFs are registered under the `APP_CODE` versioned schema (`CREATE OR ALTER VERSIONED SCHEMA APP_CODE`) — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Each UDF uses `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with an inline handler and a relative IMPORTS path (`/lib/encode-lib-*.jar`).
 
+> **Note:** Snowflake UDF supported languages are Java, Scala, Python, JavaScript, and SQL. Rust is **not** a supported UDF language in Snowflake. The Scala + JAR approach via `encode-lib` is the correct and only JVM-native path available; there is no Rust UDF migration path.
+
 > **Status (2026-04-15):** Inline Scala approach validated in dev environment (`LOCID_DEV.STAGING`). SnowflakeHandler wrapper is no longer required. Working handler implementations: `db/dev/provider/06_udfs.sql`. Native app UDF file: `na_app_pkg/src/udfs/locid_udf.sql`.
 
 Key functions:
@@ -651,6 +653,22 @@ Scalar UDF (current):      Python vectorized UDF (target):
 ```
 
 Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes.
+
+### Performance Estimates
+
+Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 rows per batch** per worker node. The throughput gain for this specific workload comes from two sources:
+
+- **Fewer dispatch crossings** — the Python–SQL boundary is crossed `ceil(N / batch_size)` times instead of `N` times.
+- **Amortised key setup** — `scheme_key` and `base_locid_key` are constants per query. A vectorized handler initialises cipher objects once per batch (or once per worker via `_scheme_cache`) instead of once per row.
+
+| Row count    | Expected improvement vs. current scalar Scala UDFs         |
+|--------------|------------------------------------------------------------|
+| < 1M         | Marginal — IP matching SQL dominates runtime               |
+| 1M – 10M     | 3–5× UDF throughput improvement likely                     |
+| 10M – 100M   | 5–10× UDF throughput improvement expected                  |
+| > 100M       | 5–10× or more — key-setup amortisation most impactful      |
+
+> These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
 
 ### What LocID Needs to Provide
 

@@ -254,6 +254,18 @@ def _log_job(session, job_id, operation, rows_in, rows_matched, rows_out,
     ).collect()
 
 
+def _log_perf(session, job_id: str, phases: dict) -> None:
+    """Write phase-level timing to APP_SCHEMA.APP_LOGS. Non-blocking."""
+    try:
+        msg = json.dumps({'job_id': job_id, 'phases': phases})
+        session.sql(
+            "INSERT INTO APP_SCHEMA.APP_LOGS (level, message) VALUES (?, ?)",
+            params=['PERF', msg]
+        ).collect()
+    except Exception:
+        pass  # Perf logging must not abort the job
+
+
 # =============================================================================
 # Main handler
 # =============================================================================
@@ -281,17 +293,22 @@ def encrypt_handler(
     BUILDS_V4 = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS_IPV4_EXPLODED'
     DATES     = f'{_PROVIDER_SCHEMA}.LOCID_BUILD_DATES'
 
+    phases: dict = {}
+    _pt = time.perf_counter()
+
     try:
         # ------------------------------------------------------------------
         # Step 0: Set job warehouse from bound APP_WAREHOUSE reference
         # ------------------------------------------------------------------
         session.sql("USE WAREHOUSE reference('APP_WAREHOUSE')").collect()
         cur_wh = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
+        phases['warehouse_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Step 1: Entitlement check
         # ------------------------------------------------------------------
         _check_entitlement(session, 'allow_encrypt')
+        phases['entitlement_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Step 2: Fetch secrets from LocID Central (cached)
@@ -314,6 +331,8 @@ def encrypt_handler(
             ts_expr = f"DATE_PART(epoch_second, {ts_col}::TIMESTAMP_NTZ)::BIGINT"
         else:   # epoch_sec (default)
             ts_expr = f"{ts_col}::BIGINT"
+
+        phases['secrets_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Step 3: IPv4 matching — equi-join via LOCID_BUILDS_IPV4_EXPLODED
@@ -352,6 +371,7 @@ def encrypt_handler(
                AND l.start_ip = lb.start_ip
                AND l.end_ip   = lb.end_ip
         """).collect()
+        phases['ipv4_match_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Step 4: IPv6 matching — optimised 6-pass cascading hex-prefix range join
@@ -500,6 +520,7 @@ def encrypt_handler(
         rows_matched = session.sql(
             "SELECT COUNT(*) FROM _locid_matched"
         ).collect()[0][0]
+        phases['ipv6_match_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Step 5: Apply UDFs — TX_CLOC and STABLE_CLOC
@@ -553,6 +574,9 @@ def encrypt_handler(
 
         rows_out  = session.sql(f"SELECT COUNT(*) FROM APP_SCHEMA.{output_table}").collect()[0][0]
         runtime_s = round(time.time() - start_ts, 2)
+        phases['udf_output_s'] = round(time.perf_counter() - _pt, 3)
+        phases['total_s'] = runtime_s
+        _log_perf(session, job_id, phases)
 
         # ------------------------------------------------------------------
         # Step 8: Log to JOB_LOG
@@ -581,6 +605,8 @@ def encrypt_handler(
 
     except Exception as exc:
         runtime_s = round(time.time() - start_ts, 2)
+        phases['total_s'] = runtime_s
+        _log_perf(session, job_id, phases)
         _log_job(
             session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
             runtime_s, 'FAILED', str(exc), 'reference(INPUT_TABLE)',
