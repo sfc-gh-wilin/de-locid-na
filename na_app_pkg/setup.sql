@@ -54,8 +54,10 @@ CREATE STAGE IF NOT EXISTS APP_SCHEMA.APP_STAGE
 -- =============================================================================
 -- 4. APP_CONFIG Table
 --    Stores license metadata, cached entitlements, and output column registry.
---    Sensitive values (license key, api_key, cached secrets) are stored as
---    VARCHAR in config_value. Future hardening: migrate to Snowflake SECRETs.
+--    Sensitive values (license key, api_key, cryptographic secrets) are stored
+--    in Snowflake SECRETs (section 4a). APP_CONFIG holds only masked display
+--    hints (license_id_ref = first-4-chars + "****", api_key_hint = first-8-chars)
+--    and stripped cached_license JSON (no secrets field, no api_key values).
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS APP_SCHEMA.APP_CONFIG (
     config_key         VARCHAR        NOT NULL,
@@ -97,6 +99,141 @@ SELECT col, val, TRUE FROM (VALUES
 WHERE NOT EXISTS (
     SELECT 1 FROM APP_SCHEMA.APP_CONFIG WHERE config_key = t.col
 );
+
+
+-- =============================================================================
+-- 4a. Snowflake SECRETs
+--
+--   Sensitive credentials are stored here — NOT as plain VARCHAR in APP_CONFIG.
+--   All secret writes go through stored procedures (EXECUTE AS OWNER), which
+--   have OWNERSHIP on these objects. APP_ADMIN is granted READ so that proc
+--   SECRETS = (...) clauses resolve; WRITE on secrets is NOT grantable to
+--   APPLICATION ROLEs (Snowflake restriction), hence the proc-mediated design.
+--
+--   LOCID_LICENSE_KEY  — full license key (written by LOCID_FETCH_LICENSE)
+--   LOCID_API_KEY      — selected API bearer token (written by LOCID_SET_API_KEY)
+--   LOCID_BASE_SECRET  — base_locid_secret AES key (written by LOCID_FETCH_LICENSE)
+--   LOCID_SCHEME_SECRET— scheme_secret AES key (written by LOCID_FETCH_LICENSE)
+-- =============================================================================
+CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_LICENSE_KEY
+    TYPE          = GENERIC_STRING
+    SECRET_STRING = ''
+    COMMENT       = 'Full LocID license key. Written only by LOCID_FETCH_LICENSE stored procedure.';
+
+CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_API_KEY
+    TYPE          = GENERIC_STRING
+    SECRET_STRING = ''
+    COMMENT       = 'Selected API bearer token. Written only by LOCID_SET_API_KEY stored procedure.';
+
+CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_BASE_SECRET
+    TYPE          = GENERIC_STRING
+    SECRET_STRING = ''
+    COMMENT       = 'base_locid_secret AES key from LocID Central. Written only by LOCID_FETCH_LICENSE.';
+
+CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_SCHEME_SECRET
+    TYPE          = GENERIC_STRING
+    SECRET_STRING = ''
+    COMMENT       = 'scheme_secret AES key from LocID Central. Written only by LOCID_FETCH_LICENSE.';
+
+-- Grant READ so that proc SECRETS = (...) clauses can reference these secrets.
+-- (WRITE is not grantable to APPLICATION ROLEs — all writes go through procs.)
+GRANT READ ON SECRET APP_SCHEMA.LOCID_LICENSE_KEY   TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_API_KEY       TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_BASE_SECRET   TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_SCHEME_SECRET TO APPLICATION ROLE APP_ADMIN;
+
+
+-- =============================================================================
+-- 4b. Upgrade migration — move existing APP_CONFIG sensitive data into SECRETs
+--
+--   Runs at every upgrade. Checks each secret: if it is still empty AND the
+--   corresponding APP_CONFIG row holds a full (non-masked) value, the value is
+--   migrated into the secret and APP_CONFIG is updated to the masked hint.
+--   Idempotent: once migrated, the secret is non-empty and the block is a no-op.
+-- =============================================================================
+EXECUTE IMMEDIATE $$
+DECLARE
+    v_lic    VARCHAR DEFAULT NULL;
+    v_api    VARCHAR DEFAULT NULL;
+    v_cache  VARIANT DEFAULT NULL;
+BEGIN
+    -- ----------------------------------------------------------------
+    -- Migrate license key (only when APP_CONFIG has a full key > 12 chars)
+    -- ----------------------------------------------------------------
+    SELECT config_value INTO v_lic
+        FROM APP_SCHEMA.APP_CONFIG
+        WHERE config_key = 'license_id_ref' AND is_active = TRUE LIMIT 1;
+    IF (v_lic IS NOT NULL AND LENGTH(v_lic) > 12) THEN
+        ALTER SECRET APP_SCHEMA.LOCID_LICENSE_KEY SET SECRET_STRING = :v_lic;
+        UPDATE APP_SCHEMA.APP_CONFIG
+            SET config_value = SUBSTR(:v_lic, 1, 4) || '-****',
+                last_refreshed_at = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ
+            WHERE config_key = 'license_id_ref';
+    END IF;
+
+    -- ----------------------------------------------------------------
+    -- Migrate api_key (APP_CONFIG key 'api_key' → LOCID_API_KEY secret
+    -- + new 'api_key_hint' row with first-8-chars)
+    -- ----------------------------------------------------------------
+    SELECT config_value INTO v_api
+        FROM APP_SCHEMA.APP_CONFIG
+        WHERE config_key = 'api_key' AND is_active = TRUE LIMIT 1;
+    IF (v_api IS NOT NULL AND LENGTH(v_api) > 8) THEN
+        ALTER SECRET APP_SCHEMA.LOCID_API_KEY SET SECRET_STRING = :v_api;
+        MERGE INTO APP_SCHEMA.APP_CONFIG AS t
+            USING (SELECT 'api_key_hint' AS k,
+                          SUBSTR(:v_api, 1, 8) AS v,
+                          CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ AS ts) AS s
+                ON t.config_key = s.k
+            WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = s.ts
+            WHEN NOT MATCHED THEN INSERT (config_key, config_value, last_refreshed_at, is_active)
+                VALUES (s.k, s.v, s.ts, TRUE);
+        DELETE FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key';
+    END IF;
+
+    -- ----------------------------------------------------------------
+    -- Migrate crypto secrets from cached_license JSON
+    -- (strip secrets field + replace api_key with api_key_hint in access[])
+    -- ----------------------------------------------------------------
+    SELECT PARSE_JSON(config_value) INTO v_cache
+        FROM APP_SCHEMA.APP_CONFIG
+        WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1;
+    IF (v_cache IS NOT NULL) THEN
+        LET v_base_val   VARCHAR := v_cache:secrets:base_locid_secret::VARCHAR;
+        LET v_scheme_val VARCHAR := v_cache:secrets:scheme_secret::VARCHAR;
+        IF (v_base_val IS NOT NULL AND LENGTH(:v_base_val) > 0) THEN
+            ALTER SECRET APP_SCHEMA.LOCID_BASE_SECRET   SET SECRET_STRING = :v_base_val;
+        END IF;
+        IF (v_scheme_val IS NOT NULL AND LENGTH(:v_scheme_val) > 0) THEN
+            ALTER SECRET APP_SCHEMA.LOCID_SCHEME_SECRET SET SECRET_STRING = :v_scheme_val;
+        END IF;
+        -- Strip secrets field; replace api_key with api_key_hint in access entries
+        UPDATE APP_SCHEMA.APP_CONFIG
+            SET config_value = (
+                SELECT OBJECT_CONSTRUCT_KEEP_NULL(
+                    'license',  v_cache:license,
+                    'access',   (
+                        SELECT ARRAY_AGG(
+                            CASE WHEN a.value:api_key IS NOT NULL
+                                 THEN OBJECT_INSERT(
+                                          OBJECT_DELETE(a.value::OBJECT, 'api_key'),
+                                          'api_key_hint',
+                                          SUBSTR(a.value:api_key::VARCHAR, 1, 8),
+                                          TRUE
+                                      )
+                                 ELSE a.value::OBJECT
+                            END
+                        )
+                        FROM TABLE(FLATTEN(v_cache:access)) a
+                    )
+                )::VARCHAR
+            )
+            WHERE config_key = 'cached_license';
+    END IF;
+
+    RETURN 'Migration complete.';
+END;
+$$;
 
 
 -- =============================================================================
@@ -212,6 +349,97 @@ def ping() -> str:
 $$;
 
 GRANT USAGE ON FUNCTION APP_SCHEMA.HTTP_PING()
+    TO APPLICATION ROLE APP_ADMIN;
+
+
+-- =============================================================================
+-- 7b. LOCID_SET_API_KEY Procedure  (Python, inline)
+--
+--   Called from Setup Wizard Screen H when the consumer selects an API key.
+--   Reads the full api_key from the cached_license JSON in APP_CONFIG (where it
+--   is stored temporarily after LOCID_FETCH_LICENSE runs in Screen D), writes it
+--   to the LOCID_API_KEY secret, stores a masked hint in APP_CONFIG, and scrubs
+--   all full api_key values from cached_license.
+--
+--   Runs EXECUTE AS OWNER (default) — required because APP_ADMIN cannot ALTER
+--   a Snowflake SECRET directly (WRITE privilege is not grantable to APPLICATION
+--   ROLEs). The proc's OWNER context has OWNERSHIP on all app-created objects.
+-- =============================================================================
+CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(API_KEY_ID INTEGER)
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'set_api_key_handler'
+AS $$
+import json
+import snowflake.snowpark as snowpark
+
+_UPSERT_SQL = (
+    "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
+    "USING (SELECT ? AS k, ? AS v) AS s ON t.config_key = s.k "
+    "WHEN MATCHED THEN UPDATE SET config_value = s.v, "
+    "last_refreshed_at = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ "
+    "WHEN NOT MATCHED THEN INSERT "
+    "(config_key, config_value, last_refreshed_at, is_active) "
+    "VALUES (s.k, s.v, "
+    "CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ, TRUE)"
+)
+
+
+def set_api_key_handler(session: snowpark.Session, api_key_id: int) -> str:
+    # Read cached_license — still has full api_key values at this stage
+    rows = session.sql(
+        "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
+        "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
+    ).collect()
+    if not rows or not rows[0][0]:
+        raise RuntimeError(
+            "No cached license found. Complete license validation (Screen D) first."
+        )
+
+    data = json.loads(rows[0][0])
+    entry = next(
+        (e for e in data.get('access', [])
+         if e.get('status') == 'ACTIVE' and e.get('api_key_id') == api_key_id),
+        None
+    )
+    if not entry:
+        raise RuntimeError(
+            f"API key ID {api_key_id} not found or is not ACTIVE in cached license."
+        )
+    full_key = entry.get('api_key', '')
+    if not full_key:
+        raise RuntimeError(
+            f"API key ID {api_key_id} has no key value in cached license."
+        )
+
+    # Write full key to secret
+    session.sql(
+        "ALTER SECRET APP_SCHEMA.LOCID_API_KEY SET SECRET_STRING = ?",
+        params=[full_key]
+    ).collect()
+
+    # Write masked hint to APP_CONFIG
+    session.sql(_UPSERT_SQL, params=['api_key_hint', full_key[:8]]).collect()
+
+    # Scrub full api_key values from cached_license; replace with api_key_hint
+    for e in data.get('access', []):
+        if 'api_key' in e:
+            e['api_key_hint'] = e['api_key'][:8]
+            del e['api_key']
+
+    session.sql(_UPSERT_SQL, params=['cached_license', json.dumps(data)]).collect()
+
+    # Remove old 'api_key' row from APP_CONFIG if it exists
+    session.sql(
+        "DELETE FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key'"
+    ).collect()
+
+    return f"API key {api_key_id} stored in LOCID_API_KEY secret."
+$$;
+
+GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER)
     TO APPLICATION ROLE APP_ADMIN;
 
 

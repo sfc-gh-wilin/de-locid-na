@@ -92,7 +92,7 @@ na_app_pkg/
 
 ```
 -- APP_SCHEMA (non-versioned): tables, stage, network rule, procedures, Streamlit
-APP_SCHEMA.APP_CONFIG                       -- License key, cached secrets, entitlements, output column registry
+APP_SCHEMA.APP_CONFIG                       -- Masked credential hints, entitlements, output column registry; full secrets in GENERIC_STRING SECRET objects
 APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
 APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID, level, message, created_at)
 APP_SCHEMA.APP_STAGE                        -- Internal stage: JAR, UDF SQL, proc SQL
@@ -100,7 +100,8 @@ APP_SCHEMA.LOCID_CENTRAL_RULE               -- Network rule (allowlist: central.
 APP_SCHEMA.LOCID_CENTRAL_EAI                -- External Access Integration (created at install time)
 LOCID_CENTRAL_EAI_SPEC                      -- App specification (consumer must approve before EAI is usable; see Setup Wizard Screen E)
 APP_SCHEMA.HTTP_PING()                      -- Python UDF to verify EAI connectivity during setup
-APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)     -- Python stored procedure — fetches/caches license from LocID Central via EAI; called by Streamlit via session.call()
+APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)     -- Python stored procedure — fetches license from LocID Central; writes crypto keys to GENERIC_STRING SECRETs; stores stripped cache in APP_CONFIG
+APP_SCHEMA.LOCID_SET_API_KEY(INTEGER)       -- Python stored procedure — writes selected API key to LOCID_API_KEY SECRET; stores api_key_hint in APP_CONFIG; scrubs full key from cached_license
 APP_SCHEMA.register_single_callback(...)    -- Callback proc for INPUT_TABLE and APP_WAREHOUSE references
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
@@ -179,7 +180,7 @@ POST https://central.locid.com/api/0/location_id/stats
 - On job run: use cached values. If cache is missing, the job is aborted — secrets are required.
 - If a refresh fails, cached values are used and a warning is logged.
 
-The license key is stored in `APP_CONFIG` (`license_id_ref`). The full license payload (including cryptographic secrets) is cached in `APP_CONFIG` (`cached_license`) after each successful fetch from LocID Central.
+Sensitive values are stored as Snowflake `GENERIC_STRING` SECRETs (`LOCID_LICENSE_KEY`, `LOCID_API_KEY`, `LOCID_BASE_SECRET`, `LOCID_SCHEME_SECRET`). `APP_CONFIG` holds only masked hints (`license_id_ref` = first 4 chars + `-****`; `api_key_hint` = first 8 chars). The cached license payload (`cached_license`) is stripped of the `secrets` field before storage.
 
 ---
 
@@ -208,7 +209,7 @@ A guided wizard runs once after install and can be re-accessed from the Configur
 | **D. Enter License Key** | Masked input; calls `APP_SCHEMA.LOCID_FETCH_LICENSE` stored procedure (requires EAI spec approved at Screen E); caches full license payload in `APP_CONFIG` |
 | **F. Create App Objects** | Bootstraps `APP_CONFIG`, `JOB_LOG`, and the `HTTP_PING` UDF |
 | **G. Test Connectivity** | Calls `APP_SCHEMA.HTTP_PING()` — HEAD request to `central.locid.com` |
-| **H. Select API Key** | Lists ACTIVE entries from `access[]`; user selects which API key to use; `api_key_id`, `namespace_guid`, `provider_id` stored in `APP_CONFIG` |
+| **H. Select API Key** | Lists ACTIVE entries using `api_key_hint` (first 8 chars); user selects which API key to use; calls `APP_SCHEMA.LOCID_SET_API_KEY` to write full key to `LOCID_API_KEY` SECRET and scrub cache; `api_key_id`, `namespace_guid`, `client_id` stored in `APP_CONFIG` |
 | **I. Success** | Summary checklist and "Launch App" button |
 
 ---
@@ -490,9 +491,15 @@ Read-only for customers. Updated by LocID via app version releases when new fiel
 
 - All customer data remains in the customer's Snowflake account at all times.
 - LocID's data lake is shared as read-only objects — no customer rows are written to LocID's account.
-- License key stored in `APP_CONFIG` (`license_id_ref`); full license payload (including cryptographic secrets) cached in `APP_CONFIG` (`cached_license`) — never exposed in query results or logs.
-- Cryptographic keys (AES) fetched at runtime from LocID Central, passed as UDF parameters, never persisted in tables.
-- Masking policy on `APP_CONFIG` for sensitive configuration rows.
+- All sensitive credentials are stored as Snowflake `GENERIC_STRING` SECRET objects — never in plain `APP_CONFIG` rows or query results:
+  - `APP_SCHEMA.LOCID_LICENSE_KEY` — full LocID license key (written by `LOCID_FETCH_LICENSE`)
+  - `APP_SCHEMA.LOCID_API_KEY` — selected API bearer token (written by `LOCID_SET_API_KEY`)
+  - `APP_SCHEMA.LOCID_BASE_SECRET` — `base_locid_secret` AES key (written by `LOCID_FETCH_LICENSE`)
+  - `APP_SCHEMA.LOCID_SCHEME_SECRET` — `scheme_secret` AES key (written by `LOCID_FETCH_LICENSE`)
+- `APP_CONFIG` stores only masked hints: `license_id_ref` (first 4 chars + `-****`) and `api_key_hint` (first 8 chars).
+- All SECRET writes are routed through stored procedures (`EXECUTE AS OWNER`) — `GRANT WRITE ON SECRET TO APPLICATION ROLE` is not a valid privilege; OWNER context is required.
+- The cached license payload (`cached_license`) is stripped before storage: the `secrets` field is removed and `api_key` values are replaced with `api_key_hint` entries — so full credentials never appear in APP_CONFIG.
+- Masking policy on `APP_CONFIG.config_value` for sensitive configuration rows.
 
 ---
 

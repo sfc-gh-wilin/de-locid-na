@@ -50,7 +50,7 @@ def _load_config(_session_id: int) -> dict[str, str | None]:
     _session = _gas()
     rows = _session.sql(
         "SELECT config_key, config_value FROM APP_SCHEMA.APP_CONFIG "
-        "WHERE config_key IN ('license_id_ref', 'api_key', 'cached_license', 'api_key_id') "
+        "WHERE config_key IN ('license_id_ref', 'api_key_hint', 'cached_license', 'api_key_id') "
         "AND is_active = TRUE"
     ).collect()
     return {r[0]: r[1] for r in rows}
@@ -58,8 +58,8 @@ def _load_config(_session_id: int) -> dict[str, str | None]:
 
 config = _load_config(sid)
 
-license_key = config.get("license_id_ref")
-api_key     = config.get("api_key")
+license_key  = config.get("license_id_ref")
+api_key_hint = config.get("api_key_hint")
 cached_raw  = config.get("cached_license")
 
 client_name, lic_expiry = "—", "—"
@@ -88,7 +88,7 @@ st.subheader(":material/key: License & Credentials")
 col1, col2 = st.columns(2)
 with col1:
     st.text_input("License Key", value=_mask(license_key), disabled=True)
-    st.text_input("API Key",     value=_mask(api_key),     disabled=True)
+    st.text_input("API Key",     value=(api_key_hint + "****") if api_key_hint else "—", disabled=True)
 with col2:
     st.text_input("Client",  value=client_name, disabled=True)
     st.text_input("Expires", value=lic_expiry,  disabled=True)

@@ -36,15 +36,17 @@ def _get_config(session: snowpark.Session, key: str):
 
 def fetch_license(session: snowpark.Session, license_key: str) -> dict[str, Any]:
     """
-    Fetch license metadata, entitlements, and cryptographic secrets from
-    LocID Central.
+    Fetch license metadata and entitlements from LocID Central.
 
     Delegates to APP_SCHEMA.LOCID_FETCH_LICENSE, which has the required
     EXTERNAL_ACCESS_INTEGRATIONS and handles HTTPS, EBUSY retry, and
-    APP_CONFIG caching.
+    APP_CONFIG caching.  Cryptographic secrets are written to Snowflake
+    SECRET objects by the proc and are not returned here.
 
-    Returns the full API response dict:
-      { "license": {...}, "access": [...], "secrets": {...} }
+    Returns the stripped API response dict:
+      { "license": {...}, "access": [...] }
+      (access[] entries contain api_key_hint instead of api_key;
+       the secrets field is omitted)
     """
     try:
         raw = session.call("APP_SCHEMA.LOCID_FETCH_LICENSE", license_key)
@@ -58,63 +60,27 @@ def fetch_license(session: snowpark.Session, license_key: str) -> dict[str, Any]
     return data
 
 
-def _extract_secrets(session: snowpark.Session, data: dict[str, Any]) -> dict[str, Any]:
+def get_secrets(session: snowpark.Session) -> None:
     """
-    Normalise the full LocID Central license response into the fields needed
-    for UDF calls and entitlement checks.
+    Ensure the license cache is fresh.  Re-fetches from LocID Central via
+    LOCID_FETCH_LICENSE if the cached_license entry is older than
+    CACHE_TTL_SECONDS.
 
-    Returns:
-      base_locid_secret, scheme_secret — AES key strings (Base64-URL + ~ padding)
-      client_id                        — license.client_id (int)
-      namespace_guid                   — from the selected API key's access entry
+    Cryptographic secrets are stored in Snowflake SECRET objects by the proc
+    and are not accessible from Streamlit.
+
+    Raises RuntimeError if no license has been configured yet.
     """
-    secrets      = data.get("secrets", {})
-    license_info = data.get("license", {})
-
-    key_row = _get_config(session, "api_key_id")
-    sel_id  = int(key_row[0]) if key_row and key_row[0] else None
-
-    entry = None
-    for item in data.get("access", []):
-        if item.get("status") == "ACTIVE":
-            if sel_id is None or item.get("api_key_id") == sel_id:
-                entry = item
-                if sel_id is not None:
-                    break
-
-    if not entry:
-        logger.error(session, "locid_central._extract_secrets",
-                     "No active API key found in license response")
-        raise RuntimeError(
-            "No active API key found in license. Check your configuration."
-        )
-
-    return {
-        "base_locid_secret": secrets.get("base_locid_secret", ""),
-        "scheme_secret":     secrets.get("scheme_secret", ""),
-        "client_id":         int(license_info.get("client_id", 0)),
-        "namespace_guid":    entry.get("namespace_guid", ""),
-    }
-
-
-def get_secrets(session: snowpark.Session) -> dict[str, Any]:
-    """
-    Return normalised license secrets. Uses the APP_CONFIG cache if fresh
-    (< CACHE_TTL_SECONDS); otherwise re-fetches via the LOCID_FETCH_LICENSE
-    stored procedure.
-
-    Raises RuntimeError if the license has not been configured yet.
-    """
-    cached = _get_config(session, "cached_license")
-    if cached and cached[1]:
-        age_s = time.time() - cached[1].timestamp()
-        if age_s < CACHE_TTL_SECONDS:
-            return _extract_secrets(session, json.loads(cached[0]))
-
     lic_row = _get_config(session, "license_id_ref")
     if not lic_row or not lic_row[0]:
         raise RuntimeError("License not configured. Complete the Setup Wizard first.")
 
-    logger.info(session, "locid_central.get_secrets", "Cache stale — re-fetching from LocID Central")
-    data = fetch_license(session, lic_row[0])
-    return _extract_secrets(session, data)
+    cached = _get_config(session, "cached_license")
+    if cached and cached[1]:
+        age_s = time.time() - cached[1].timestamp()
+        if age_s < CACHE_TTL_SECONDS:
+            return
+
+    logger.info(session, "locid_central.get_secrets",
+                "Cache stale — re-fetching from LocID Central")
+    fetch_license(session, "")

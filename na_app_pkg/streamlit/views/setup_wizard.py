@@ -115,7 +115,6 @@ elif step == "D":
                 with st.spinner("Validating license with LocID Central…"):
                     try:
                         data = fetch_license(session, key_input)
-                        _upsert_config("license_id_ref", key_input)
                         st.session_state.license_key  = key_input
                         st.session_state.license_data = data
                         st.session_state.wizard_step  = "F"
@@ -257,11 +256,8 @@ elif step == "H":
             st.session_state.wizard_step = "G"
             st.rerun()
     else:
-        def _mask_key(k: str) -> str:
-            return k[:8] + "****" if k and len(k) > 8 else "****"
-
         labels = [
-            f"API Key #{e.get('api_key_id')} — {_mask_key(e.get('api_key', ''))}"
+            f"API Key #{e.get('api_key_id')} — {e.get('api_key_hint', '????') + '****'}"
             for e in active_entries
         ]
 
@@ -280,13 +276,14 @@ elif step == "H":
         with col2:
             if st.button("Confirm Selection", type="primary"):
                 entry = active_entries[chosen_idx]
-                _upsert_config("api_key_id",           str(entry.get("api_key_id", "")))
-                _upsert_config("api_key",               entry.get("api_key", ""))
-                _upsert_config("namespace_guid",        entry.get("namespace_guid", ""))
-                _upsert_config("client_id",             str(client_id))
-                _upsert_config("onboarding_complete",   "true")
+                api_key_id = int(entry.get("api_key_id", 0))
+                session.call("APP_SCHEMA.LOCID_SET_API_KEY", api_key_id)
+                _upsert_config("api_key_id",         str(api_key_id))
+                _upsert_config("namespace_guid",     entry.get("namespace_guid", ""))
+                _upsert_config("client_id",          str(client_id))
+                _upsert_config("onboarding_complete", "true")
                 logger.info(session, "setup_wizard.api_key",
-                            f"API key selected: {entry.get('api_key_id')}")
+                            f"API key selected: {api_key_id}")
                 st.session_state.wizard_step = "I"
                 st.rerun()
 

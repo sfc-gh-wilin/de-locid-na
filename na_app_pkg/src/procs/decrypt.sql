@@ -45,6 +45,12 @@ LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
 EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
 PACKAGES = ('snowflake-snowpark-python')
+SECRETS = (
+    (license_key   = APP_SCHEMA.LOCID_LICENSE_KEY),
+    (api_key       = APP_SCHEMA.LOCID_API_KEY),
+    (base_secret   = APP_SCHEMA.LOCID_BASE_SECRET),
+    (scheme_secret = APP_SCHEMA.LOCID_SCHEME_SECRET)
+)
 HANDLER = 'decrypt_handler'
 AS $$
 import json
@@ -55,6 +61,7 @@ import urllib.error
 import uuid
 
 import snowflake.snowpark as snowpark
+import _snowflake
 
 # =============================================================================
 # Helpers (self-contained — mirrors encrypt.sql helpers)
@@ -81,12 +88,27 @@ def _get_config(session, key: str):
     return rows[0] if rows else None
 
 
-def _extract_secrets(session, data: dict) -> dict:
-    secrets      = data.get('secrets', {})
-    license_info = data.get('license', {})
+def _get_secrets(session) -> dict:
+    """Return license secrets. Refreshes via LOCID_FETCH_LICENSE if cache is > 1 hour old.
+    Crypto secrets are read from Snowflake SECRETs via _snowflake module — never from APP_CONFIG.
+    """
+    cached = _get_config(session, 'cached_license')
+    if not (cached and cached[1] and time.time() - cached[1].timestamp() < 3600):
+        # Cache stale or missing — delegate refresh to LOCID_FETCH_LICENSE
+        session.call("APP_SCHEMA.LOCID_FETCH_LICENSE", "")
+        cached = _get_config(session, 'cached_license')
+        if not cached or not cached[0]:
+            raise RuntimeError("License not configured. Complete the Setup Wizard first.")
 
-    k_row  = _get_config(session, 'api_key_id')
-    sel_id = int(k_row[0]) if k_row and k_row[0] else None
+    # Read crypto secrets from Snowflake SECRETs (never from APP_CONFIG)
+    base_locid_secret = _snowflake.get_generic_secret_string('base_secret')
+    scheme_secret     = _snowflake.get_generic_secret_string('scheme_secret')
+
+    # Read non-secret fields from stripped cached JSON
+    data     = json.loads(cached[0])
+    lic_info = data.get('license', {})
+    k_row    = _get_config(session, 'api_key_id')
+    sel_id   = int(k_row[0]) if k_row and k_row[0] else None
 
     entry = None
     for item in data.get('access', []):
@@ -102,42 +124,11 @@ def _extract_secrets(session, data: dict) -> dict:
         )
 
     return {
-        'base_locid_secret': secrets.get('base_locid_secret', ''),
-        'scheme_secret':     secrets.get('scheme_secret', ''),
-        'client_id':         int(license_info.get('client_id', 0)),
+        'base_locid_secret': base_locid_secret,
+        'scheme_secret':     scheme_secret,
+        'client_id':         int(lic_info.get('client_id', 0)),
         'namespace_guid':    entry.get('namespace_guid', ''),
     }
-
-
-def _get_secrets(session) -> dict:
-    cached = _get_config(session, 'cached_license')
-    if cached and cached[1]:
-        if time.time() - cached[1].timestamp() < 3600:
-            return _extract_secrets(session, json.loads(cached[0]))
-
-    lic_row = _get_config(session, 'license_id_ref')
-    if not lic_row or not lic_row[0]:
-        raise RuntimeError("License not configured. Complete the Setup Wizard first.")
-
-    url = f"https://central.locid.com/api/0/location_id/license/{lic_row[0]}"
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url), timeout=15) as resp:
-            data = json.loads(resp.read().decode())
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"LocID Central license fetch failed: HTTP {exc.code}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"LocID Central license fetch failed: {exc}") from exc
-
-    session.sql(
-        "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
-        "USING (SELECT ? AS k, ? AS v) AS s ON t.config_key = s.k "
-        "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP "
-        "WHEN NOT MATCHED THEN INSERT (config_key, config_value, last_refreshed_at, is_active) "
-        "VALUES (s.k, s.v, CURRENT_TIMESTAMP, TRUE)",
-        params=['cached_license', json.dumps(data)]
-    ).collect()
-
-    return _extract_secrets(session, data)
 
 
 def _check_entitlement(session, flag: str) -> None:
@@ -198,19 +189,19 @@ def _entitled_cols(session, operation: str) -> list:
 
 
 def _post_stats(session, rows_processed: int, runtime_s: float, metric_key: str) -> None:
-    api_row = _get_config(session, 'api_key')
-    lic_row = _get_config(session, 'license_id_ref')
-    if not api_row or not lic_row:
+    api_key_val = _snowflake.get_generic_secret_string('api_key')
+    lic_key_val = _snowflake.get_generic_secret_string('license_key')
+    if not api_key_val or not lic_key_val:
         return
 
     payload = json.dumps([{
-        'identifier': lic_row[0],
+        'identifier': lic_key_val,
         'source':     'snowflake-native-app',
         'timestamp':  int(time.time() * 1000),
         'data_type':  'usage_metrics',
         'data': {
             'metric_key':      metric_key,
-            'dimensions':      {'api_key': api_row[0], 'hit': 1, 'tier': 0},
+            'dimensions':      {'api_key': api_key_val, 'hit': 1, 'tier': 0},
             'metric_value':    rows_processed,
             'metric_datatype': 'Long',
         },
@@ -220,7 +211,7 @@ def _post_stats(session, rows_processed: int, runtime_s: float, metric_key: str)
         req = urllib.request.Request(
             'https://central.locid.com/api/0/location_id/stats',
             data=payload,
-            headers={'Content-Type': 'application/json', 'de-access-token': api_row[0]},
+            headers={'Content-Type': 'application/json', 'de-access-token': api_key_val},
             method='POST',
         )
         with urllib.request.urlopen(req, timeout=10):
