@@ -643,7 +643,15 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
 
-> **In progress:** A benchmark test using mockup data run in the sandbox to provide more realistic improvement numbers. Results will be added here when ready.
+**Sandbox benchmark results — XS warehouse, 5M rows (2026-04-28)**
+
+| Approach | UDF | Elapsed (s) | Throughput (krows/s) | Notes |
+|----------|-----|:-----------:|:--------------------:|-------|
+| A — Scala scalar (JAR) | `LOCID_BASE_ENCRYPT` | 0.316 | 15,823 | Actual AES-128 ECB via encode-lib |
+| B — Python scalar proxy | `PROXY_SCALAR` | 0.051 | 98,039 | HMAC-SHA256 proxy (locid.py not yet available) |
+| C — Python vectorized proxy | `PROXY_VECTORIZED` | — | — | Pending re-run after import fix |
+
+> **Interpretation:** A and B use different operations (AES-128 vs HMAC-SHA256 proxy) so the B/A ratio (~6.2×) reflects both operation complexity and dispatch overhead differences — not a clean vectorization gain. The C/B ratio (once available) will isolate the `@vectorized` batch-dispatch gain independent of operation type. Once `locid.py` is provided by LocID, all three approaches will use the same crypto operation, making the A/C comparison production-accurate.
 
 ### What We Are Asking LocID to Provide
 
