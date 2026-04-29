@@ -100,19 +100,30 @@ The following objects are created in your app database:
 
 ## Required Grants (post-installation)
 
-After installing the app, grant the app SELECT access to any table you want to use as input:
+The Snowsight **App Permissions** screen prompts you to configure the warehouse and
+input table bindings. Each action requires a specific role:
+
+| Action | Role needed |
+|--------|-------------|
+| Approve `CREATE EXTERNAL ACCESS INTEGRATION` | ACCOUNTADMIN or role with `MANAGE APPLICATION SPECIFICATIONS` |
+| Bind the Job Warehouse | Role that **owns** the warehouse, or has `USAGE WITH GRANT OPTION` |
+| Bind the Input Table | Role that **owns** the table, or has `SELECT WITH GRANT OPTION` |
+
+These may require you to switch roles in Snowsight if your warehouse and input table
+are owned by different roles. You can also run the grants manually in SQL:
 
 ```sql
+-- Run as the role that owns the warehouse (or ACCOUNTADMIN):
+GRANT USAGE ON WAREHOUSE <your_warehouse>
+    TO APPLICATION <app_name>;
+
+-- Run as the role that owns the input table (or ACCOUNTADMIN):
 GRANT SELECT ON TABLE <your_db>.<your_schema>.<your_table>
     TO APPLICATION <app_name>;
 ```
 
-Grant the app USAGE on the warehouse you want it to use:
-
-```sql
-GRANT USAGE ON WAREHOUSE <your_warehouse>
-    TO APPLICATION <app_name>;
-```
+The input table can be in any database in your account — it does not need to be
+in the app database.
 
 ---
 

@@ -61,6 +61,18 @@ if step == "A":
         "This wizard will connect your LocID license to Snowflake and verify "
         "that the app can reach LocID Central. It takes about 5 minutes."
     )
+    st.info(
+        "**Before you begin — run this wizard as ACCOUNTADMIN** (or a role "
+        "with equivalent privileges).\n\n"
+        "Setup requires a role that can:\n"
+        "- Approve the app's outbound network connection to `central.locid.com`\n"
+        "- Grant the app USAGE on a warehouse (used to run Encrypt / Decrypt jobs)\n"
+        "- Grant the app SELECT on your input table (the table containing IP addresses "
+        "to enrich)\n\n"
+        "After setup is complete you can launch the app as any role granted the "
+        "`APP_ADMIN` application role.",
+        icon="ℹ️",
+    )
     if st.button("Get Started", type="primary"):
         logger.info(session, "setup_wizard", "Wizard started")
         st.session_state.wizard_step = "B"
