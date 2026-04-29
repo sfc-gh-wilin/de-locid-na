@@ -62,15 +62,17 @@ if step == "A":
         "that the app can reach LocID Central. It takes about 5 minutes."
     )
     st.info(
-        "**Before you begin — run this wizard as ACCOUNTADMIN** (or a role "
-        "with equivalent privileges).\n\n"
-        "Setup requires a role that can:\n"
-        "- Approve the app's outbound network connection to `central.locid.com`\n"
-        "- Grant the app USAGE on a warehouse (used to run Encrypt / Decrypt jobs)\n"
-        "- Grant the app SELECT on your input table (the table containing IP addresses "
-        "to enrich)\n\n"
-        "After setup is complete you can launch the app as any role granted the "
-        "`APP_ADMIN` application role.",
+        "**If you just installed the app**, Snowsight may have already shown you "
+        "an **App Permissions** screen where you approved the network connection "
+        "and granted access to your warehouse and input table. "
+        "If so, you're ready to continue — this wizard picks up from there.\n\n"
+        "**This wizard covers:**\n"
+        "- Entering your LocID license key\n"
+        "- Verifying connectivity to LocID Central\n"
+        "- Selecting your API key\n\n"
+        "If you still need to approve the network connection or grant warehouse / "
+        "input table access, the wizard will guide you through that too "
+        "(requires ACCOUNTADMIN or equivalent).",
         icon="ℹ️",
     )
     if st.button("Get Started", type="primary"):
