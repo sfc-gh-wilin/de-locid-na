@@ -2,12 +2,11 @@
 streamlit/views/run_decrypt.py
 LocID Native App — Run Decrypt (View 4)
 
-5-step job submission wizard:
-  1. Select input table
-  2. Map columns (unique_id, tx_cloc)
-  3. Configure output table
-  4. Select output columns (gated by entitlement)
-  5. Review & Run
+4-step job submission wizard:
+  1. Input table   (auto-populated from DECRYPT_INPUT_TABLE reference if bound)
+  2. Map columns   (unique_id, tx_cloc)
+  3. Output columns (gated by entitlement)
+  4. Review & Run
 """
 
 import json
@@ -43,6 +42,22 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _get_bound_table(ref_name: str) -> str | None:
+    """Return FQN of the currently bound table for ref_name, or None."""
+    try:
+        rows = session.sql("SELECT SYSTEM$GET_ALL_REFERENCES()").collect()
+        if not rows or not rows[0][0]:
+            return None
+        for ref in json.loads(rows[0][0]):
+            if ref.get('name') == ref_name:
+                bindings = ref.get('bindings', [])
+                if bindings:
+                    return bindings[0].get('name')
+    except Exception:
+        pass
+    return None
+
+
 def _load_columns(table_fqn: str) -> list[str]:
     """Return ordered column names for a fully qualified table."""
     parts = [p.strip().strip('"') for p in table_fqn.strip().split(".")]
@@ -71,38 +86,86 @@ if "dec_step" not in st.session_state:
     st.session_state.dec_step = 1
 
 step  = st.session_state.dec_step
-steps = ["Input", "Map Columns", "Output", "Options", "Review & Run"]
+steps = ["Input", "Map Columns", "Output Columns", "Review & Run"]
 
 st.progress((step - 1) / (len(steps) - 1),
             text=f"Step {step} of {len(steps)}: {steps[step-1]}")
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Step 1 — Select Input Table
+# Step 1 — Input Table
 # ---------------------------------------------------------------------------
 if step == 1:
-    st.subheader(":material/table_view: Step 1 — Select Input Table")
-    input_table = st.text_input("Input table (fully qualified)",
-                                placeholder="MY_DB.MY_SCHEMA.MY_TABLE",
-                                key="dec_input_table_input")
-    if input_table:
+    st.subheader(":material/table_view: Step 1 — Input Table")
+
+    bound = _get_bound_table('DECRYPT_INPUT_TABLE')
+
+    if bound:
+        st.info(f"Using pre-configured input table: `{bound}`", icon="✅")
+        st.caption(
+            "To use a different table, go to Snowsight → Catalog → Apps → "
+            "this app → Settings → Permissions, then re-bind **Input Table for Decrypt**."
+        )
         st.caption("Preview (first 5 rows):")
         try:
-            preview = session.sql(f"SELECT * FROM {input_table} LIMIT 5").to_pandas()
+            preview = session.sql(f"SELECT * FROM {bound} LIMIT 5").to_pandas()
             st.dataframe(preview, use_container_width=True)
-            del preview  # free memory
+            del preview
         except Exception as e:
-            logger.warning(session, "run_decrypt.step1", f"Preview failed: {e}")
             st.warning(f"Could not load preview: {e}")
-    if st.button("Next →", disabled=not input_table):
-        cols = _load_columns(input_table)
-        if not cols:
-            st.error("Could not read columns. Check the table name and your SELECT privilege.")
-        else:
-            st.session_state.dec_input_table   = input_table
-            st.session_state.dec_input_columns = cols
-            st.session_state.dec_step          = 2
-            st.rerun()
+        if st.button("Next →", type="primary"):
+            cols = _load_columns(bound)
+            if not cols:
+                st.error("Could not read columns. Check that the table exists and the app has SELECT access.")
+            else:
+                st.session_state.dec_input_table   = bound
+                st.session_state.dec_input_columns = cols
+                st.session_state.dec_step          = 2
+                st.rerun()
+    else:
+        st.warning(
+            "No input table is configured yet. Enter the table name below, "
+            "grant the app SELECT access, then bind it in Snowsight.",
+            icon="⚠️",
+        )
+        try:
+            _app_name = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
+        except Exception:
+            _app_name = "<app_name>"
+
+        input_table = st.text_input(
+            "Input table (fully qualified)",
+            placeholder="MY_DB.MY_SCHEMA.MY_TABLE",
+            key="dec_input_table_input",
+        )
+        if input_table:
+            st.markdown("**Step 1 — Grant SELECT access:**")
+            st.code(
+                f"GRANT SELECT ON TABLE {input_table}\n"
+                f"    TO APPLICATION {_app_name};",
+                language="sql",
+            )
+            st.markdown(
+                "**Step 2 — Bind the table:** go to Snowsight → Catalog → Apps → "
+                f"this app → Settings → Permissions → **Input Table for Decrypt** → "
+                f"select `{input_table}`."
+            )
+            st.caption("Preview (first 5 rows):")
+            try:
+                preview = session.sql(f"SELECT * FROM {input_table} LIMIT 5").to_pandas()
+                st.dataframe(preview, use_container_width=True)
+                del preview
+            except Exception as e:
+                st.warning(f"Could not load preview: {e}")
+        if st.button("Next →", disabled=not input_table):
+            cols = _load_columns(input_table)
+            if not cols:
+                st.error("Could not read columns. Check the table name and your SELECT privilege.")
+            else:
+                st.session_state.dec_input_table   = input_table
+                st.session_state.dec_input_columns = cols
+                st.session_state.dec_step          = 2
+                st.rerun()
 
 # ---------------------------------------------------------------------------
 # Step 2 — Map Columns
@@ -128,32 +191,10 @@ elif step == 2:
             st.rerun()
 
 # ---------------------------------------------------------------------------
-# Step 3 — Configure Output
+# Step 3 — Select Output Columns
 # ---------------------------------------------------------------------------
 elif step == 3:
-    st.subheader(":material/output: Step 3 — Configure Output")
-    output_mode  = st.radio("", ["Create new table", "Overwrite existing table"])
-    output_table = st.text_input("Output table (fully qualified)",
-                                 placeholder="MY_DB.MY_SCHEMA.LOCID_RESULTS")
-    if output_mode == "Overwrite existing table" and output_table:
-        st.warning(f"This will overwrite **{output_table}**. Existing data will be lost.",
-                   icon="⚠️")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("← Back"):
-            st.session_state.dec_step = 2
-            st.rerun()
-    with col2:
-        if st.button("Next →", disabled=not output_table):
-            st.session_state.dec_output_table = output_table
-            st.session_state.dec_step = 4
-            st.rerun()
-
-# ---------------------------------------------------------------------------
-# Step 4 — Select Output Columns
-# ---------------------------------------------------------------------------
-elif step == 4:
-    st.subheader(":material/view_column: Step 4 — Select Output Columns")
+    st.subheader(":material/view_column: Step 3 — Select Output Columns")
     available_cols = get_active_output_cols(sid, "decrypt")
     selected = []
     for col in available_cols:
@@ -166,49 +207,46 @@ elif step == 4:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
-            st.session_state.dec_step = 3
+            st.session_state.dec_step = 2
             st.rerun()
     with col2:
         if st.button("Next →", disabled=not selected):
             st.session_state.dec_output_cols = selected
-            st.session_state.dec_step = 5
+            st.session_state.dec_step = 4
             st.rerun()
 
 # ---------------------------------------------------------------------------
-# Step 5 — Review & Run
+# Step 4 — Review & Run
 # ---------------------------------------------------------------------------
-elif step == 5:
-    st.subheader(":material/play_arrow: Step 5 — Review & Run")
+elif step == 4:
+    st.subheader(":material/play_arrow: Step 4 — Review & Run")
     st.write(f"**Input table:** `{st.session_state.get('dec_input_table')}`")
-    st.write(f"**Output table:** `{st.session_state.get('dec_output_table')}`")
     st.write(
         f"**Columns mapped:** ID={st.session_state.get('dec_col_id')}, "
         f"TX_CLOC={st.session_state.get('dec_col_txclo')}"
     )
     st.write(f"**Output columns:** {', '.join(st.session_state.get('dec_output_cols', []))}")
-
-    warehouse = st.text_input("Warehouse", placeholder="MY_WAREHOUSE")
+    st.caption(
+        "Output will be written to an auto-named table in APP_SCHEMA "
+        "(e.g. LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
+    )
 
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
-            st.session_state.dec_step = 4
+            st.session_state.dec_step = 3
             st.rerun()
     with col2:
-        if st.button(":material/play_arrow: Run Job", disabled=not warehouse, type="primary"):
+        if st.button(":material/play_arrow: Run Job", type="primary"):
             with st.spinner("Running LocID Decrypt job…"):
                 try:
                     logger.info(session, "run_decrypt.run_job",
-                                f"Job started: {st.session_state.dec_input_table} → "
-                                f"{st.session_state.dec_output_table}")
+                                f"Job started: input={st.session_state.dec_input_table}")
                     raw = session.call(
                         "APP_SCHEMA.LOCID_DECRYPT",
-                        st.session_state.dec_input_table,
-                        st.session_state.dec_output_table,
                         st.session_state.dec_col_id,
                         st.session_state.dec_col_txclo,
                         st.session_state.dec_output_cols,
-                        warehouse,
                     )
                     result = json.loads(raw) if isinstance(raw, str) else raw
                     status = result.get("status", "UNKNOWN")
@@ -220,6 +258,7 @@ elif step == 5:
                             f"in {result.get('runtime_s', 0):.1f}s",
                             icon="✅"
                         )
+                        st.info(f"Output table: `{result.get('output_table', '—')}`")
                         st.caption(f"Job ID: {result.get('job_id', '—')}")
                         logger.info(session, "run_decrypt.run_job",
                                     f"Job SUCCESS: id={result.get('job_id')}, "

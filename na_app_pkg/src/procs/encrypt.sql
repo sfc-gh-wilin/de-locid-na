@@ -23,9 +23,9 @@
 -- =============================================================================
 
 -- Consumer references used by this procedure (declared in manifest.yml):
---   INPUT_TABLE   — consumer input table; read via reference('INPUT_TABLE')
---   APP_WAREHOUSE — warehouse for job execution; set via
---                   USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
+--   ENCRYPT_INPUT_TABLE — consumer input table; read via reference('ENCRYPT_INPUT_TABLE')
+--   APP_WAREHOUSE       — warehouse for job execution; set via
+--                         USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
 --
 -- Output table: auto-generated in APP_SCHEMA as LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS.
 -- The app owns APP_SCHEMA — no consumer GRANT needed.
@@ -312,7 +312,7 @@ def encrypt_handler(
         client_id  = sec['client_id']          # int — embedded directly
         ns_guid    = _sql_lit(sec['namespace_guid'])
 
-        rows_in = session.sql("SELECT COUNT(*) FROM reference('INPUT_TABLE')").collect()[0][0]
+        rows_in = session.sql("SELECT COUNT(*) FROM reference('ENCRYPT_INPUT_TABLE')").collect()[0][0]
 
         # Timestamp → epoch-seconds SQL expression
         if ts_format == 'epoch_ms':
@@ -347,7 +347,7 @@ def encrypt_handler(
             CREATE OR REPLACE TEMPORARY TABLE _locid_ipv4 AS
             WITH inp AS (
                 SELECT {id_col} AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
-                FROM reference('INPUT_TABLE')
+                FROM reference('ENCRYPT_INPUT_TABLE')
                 WHERE {ip_col} NOT LIKE '%:%'
             ),
             rel_builds AS (
@@ -413,7 +413,7 @@ def encrypt_handler(
                 {ip_col}  AS _ip,
                 {ts_expr} AS _ts,
                 GET_PATH(PARSE_IP({ip_col}, 'INET'), 'hex_ipv6') AS ip_hex
-            FROM reference('INPUT_TABLE')
+            FROM reference('ENCRYPT_INPUT_TABLE')
             WHERE {ip_col} LIKE '%:%'
         """).collect()
 
@@ -589,7 +589,7 @@ def encrypt_handler(
         # ------------------------------------------------------------------
         _log_job(
             session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None, 'reference(INPUT_TABLE)',
+            runtime_s, 'SUCCESS', None, 'reference(ENCRYPT_INPUT_TABLE)',
             f"APP_SCHEMA.{output_table}",
             cur_wh, active_cols,
         )
@@ -615,7 +615,7 @@ def encrypt_handler(
         _log_perf(session, job_id, phases)
         _log_job(
             session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc), 'reference(INPUT_TABLE)',
+            runtime_s, 'FAILED', str(exc), 'reference(ENCRYPT_INPUT_TABLE)',
             f"APP_SCHEMA.{output_table}",
             cur_wh, [],
         )

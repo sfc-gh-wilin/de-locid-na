@@ -27,10 +27,20 @@ privileges:
       description: "Creates EAI for HTTPS to central.locid.com (license validation, usage stats). No customer data sent. Requires ACCOUNTADMIN or MANAGE APPLICATION SPECIFICATIONS privilege."
 
 references:
-  # INPUT_TABLE — consumer input table (read by every Encrypt job)
-  - INPUT_TABLE:
-      label: "Input Table"
-      description: "Input table for enrichment (ip_address + timestamp columns required). Read-only. Use a role owning this table or with SELECT WITH GRANT OPTION. Any database is valid."
+  # ENCRYPT_INPUT_TABLE — consumer input table for Encrypt jobs
+  - ENCRYPT_INPUT_TABLE:
+      label: "Input Table for Encrypt"
+      description: "Table with ip_address + timestamp columns for Encrypt jobs. Read-only. Use a role owning this table or with SELECT WITH GRANT OPTION. Any database is valid."
+      privileges:
+        - SELECT
+      object_type: TABLE
+      multi_valued: false
+      register_callback: APP_SCHEMA.register_single_callback
+
+  # DECRYPT_INPUT_TABLE — consumer input table for Decrypt jobs
+  - DECRYPT_INPUT_TABLE:
+      label: "Input Table for Decrypt"
+      description: "Table with TX_CLOC column for Decrypt jobs. Read-only. Use a role owning this table or with SELECT WITH GRANT OPTION. Any database is valid."
       privileges:
         - SELECT
       object_type: TABLE

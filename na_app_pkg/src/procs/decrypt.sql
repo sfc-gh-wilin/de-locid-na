@@ -28,9 +28,9 @@
 -- =============================================================================
 
 -- Consumer references used by this procedure (declared in manifest.yml):
---   INPUT_TABLE   — consumer input table; read via reference('INPUT_TABLE')
---   APP_WAREHOUSE — warehouse for job execution; set via
---                   USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
+--   DECRYPT_INPUT_TABLE — consumer input table; read via reference('DECRYPT_INPUT_TABLE')
+--   APP_WAREHOUSE       — warehouse for job execution; set via
+--                         USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
 --
 -- Output table: auto-generated in APP_SCHEMA as LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS.
 -- The app owns APP_SCHEMA — no consumer GRANT needed.
@@ -296,7 +296,7 @@ def decrypt_handler(
         client_id  = sec['client_id']
         ns_guid    = _sql_lit(sec['namespace_guid'])
 
-        rows_in = session.sql("SELECT COUNT(*) FROM reference('INPUT_TABLE')").collect()[0][0]
+        rows_in = session.sql("SELECT COUNT(*) FROM reference('DECRYPT_INPUT_TABLE')").collect()[0][0]
         phases['secrets_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
@@ -329,7 +329,7 @@ def decrypt_handler(
                 PARSE_JSON(
                     APP_CODE.LOCID_TXCLOC_DECRYPT({txcloc_col}, {scheme_key})
                 ) AS _decoded
-            FROM reference('INPUT_TABLE')
+            FROM reference('DECRYPT_INPUT_TABLE')
             WHERE {txcloc_col} IS NOT NULL
         """).collect()
 
@@ -399,7 +399,7 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         _log_job(
             session, job_id, 'DECRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None, 'reference(INPUT_TABLE)',
+            runtime_s, 'SUCCESS', None, 'reference(DECRYPT_INPUT_TABLE)',
             f"APP_SCHEMA.{output_table}",
             cur_wh, active_cols,
         )
@@ -425,7 +425,7 @@ def decrypt_handler(
         _log_perf(session, job_id, phases)
         _log_job(
             session, job_id, 'DECRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc), 'reference(INPUT_TABLE)',
+            runtime_s, 'FAILED', str(exc), 'reference(DECRYPT_INPUT_TABLE)',
             f"APP_SCHEMA.{output_table}",
             cur_wh, [],
         )
