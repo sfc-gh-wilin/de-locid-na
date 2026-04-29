@@ -43,7 +43,7 @@ RUNTIME_VERSION = '3.11'
 EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
 PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
-    (license_key = APP_SCHEMA.LOCID_LICENSE_KEY)
+    'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY
 )
 HANDLER = 'fetch_license_handler'
 AS $$
