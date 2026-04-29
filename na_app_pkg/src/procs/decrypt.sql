@@ -292,11 +292,28 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         sec        = _get_secrets(session)
         scheme_key = _sql_lit(sec['scheme_secret'])
+        base_key   = _sql_lit(sec['base_locid_secret'])   # used only for JVM warm-up below
         client_id  = sec['client_id']
         ns_guid    = _sql_lit(sec['namespace_guid'])
 
         rows_in = session.sql("SELECT COUNT(*) FROM reference('INPUT_TABLE')").collect()[0][0]
         phases['secrets_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
+
+        # ------------------------------------------------------------------
+        # Step 2b: JVM warm-up — load Scala JAR before the main query
+        #   The first Scala UDF call after a warehouse resume incurs ~200 ms
+        #   of cold-JVM overhead (JVM init + JAR load from stage). Running a
+        #   single-row warm-up here eliminates that latency from the main
+        #   production data query. On a warm JVM this completes in <1 ms.
+        # ------------------------------------------------------------------
+        try:
+            session.sql(f"""
+                SELECT APP_CODE.LOCID_BASE_ENCRYPT('WARMUP00000000000000X', {base_key})
+                FROM TABLE(GENERATOR(ROWCOUNT => 1))
+            """).collect()
+        except Exception:
+            pass  # Non-fatal; JVM is loaded even if the dummy call fails
+        phases['jvm_warmup_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
         # Step 3: Decode TX_CLOC → location_id, timestamp, enc_client_id

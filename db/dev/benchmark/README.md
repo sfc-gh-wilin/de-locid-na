@@ -60,18 +60,15 @@ is available.
 > construction) to be outweighed. C > B will show with the real `locid.py` AES-128 workload
 > where per-row cost is ~1–10 µs and key amortisation is meaningful.
 
-### Warm-up recommendation for Scala UDFs
+### Warm-up for Scala UDFs
 
-The cold-start overhead (~200 ms, one-time per warehouse session) can be avoided by running a
-lightweight warm-up query before the first production encrypt job:
+The cold-start overhead (~200 ms, one-time per warehouse session) is handled automatically by
+the `LOCID_ENCRYPT` and `LOCID_DECRYPT` stored procedures — each proc issues a single-row
+`LOCID_BASE_ENCRYPT` call after secrets are loaded and before the main production query.
+The `jvm_warmup_s` field in `APP_LOGS` shows the actual cost per job.
 
-```sql
--- Run once after warehouse resume, before the main encrypt job
-SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT('WARMUP00000000000000X', $base_locid_secret)
-FROM TABLE(GENERATOR(ROWCOUNT => 1));
-```
-
-This loads the JVM and JAR so the first production query runs at steady-state speed.
+For the benchmark, the warm-up is built into `04_run_timing.sql` via `USE_CACHED_RESULT = FALSE`
+and the sequential run order (A runs first, warming the JVM for B and C in the same session).
 
 The **3–5× improvement** estimate in the architecture doc applies to the actual `locid.py`
 workload vs warm Scala, where AES-128 key derivation costs ~100–1000× more per row than the
