@@ -83,21 +83,35 @@ and reduced crossings meaningful.
 3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
    Approach A only. Set as `$base_locid_secret` in `04_run_timing.sql` before running.
 
+> **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_5M`
+> is recreated with the same deterministic data (identical SQL + identical rows), the result
+> fingerprint matches the cache and all approaches return in ~60–70 ms regardless of true UDF
+> cost. Both `04_run_timing.sql` and `04b_rerun_C_vectorized.sql` include
+> `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
+
 ---
 
 ## Run Order
 
+**Full clean run** (use after cleanup or first time):
+
 ```
-01_setup.sql                  -- once; ~30–60 s on XS to generate 5M rows
-02_proxy_scalar_python.sql    -- register PROXY_SCALAR
+01_setup.sql                   -- once; ~30–60 s on XS to generate 5M rows
+02_proxy_scalar_python.sql     -- register PROXY_SCALAR
 03_proxy_vectorized_python.sql -- register PROXY_VECTORIZED (numpy BLAS handler)
-04_run_timing.sql             -- set $base_locid_secret, then run all three timings
+04_run_timing.sql              -- set $base_locid_secret first, then run all three timings
 ```
 
-To re-run only Approach C (e.g. after updating the vectorized handler):
+**Re-run Approach C only** (e.g. after updating the vectorized handler):
 
 ```
-04b_rerun_C_vectorized.sql    -- re-registers PROXY_VECTORIZED and times C only
+04b_rerun_C_vectorized.sql     -- re-registers PROXY_VECTORIZED and times C only
+```
+
+**Before re-running**, truncate old results to keep the table clean:
+
+```sql
+TRUNCATE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
 ```
 
 ---

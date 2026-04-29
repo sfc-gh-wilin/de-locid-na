@@ -20,6 +20,15 @@ USE ROLE LOCID_APP_ADMIN;
 USE DATABASE LOCID_DEV;
 USE SCHEMA   LOCID_DEV.BENCHMARK;
 
+-- ---------------------------------------------------------------------------
+-- ⚠ Disable result cache for accurate benchmarking.
+--   Without this, Snowflake may return a cached result from a previous run
+--   (identical SQL + identical data = same result fingerprint), making all
+--   approaches appear to complete in ~60–70 ms (cache-return overhead)
+--   instead of showing true UDF computation times.
+-- ---------------------------------------------------------------------------
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
 
 -- ---------------------------------------------------------------------------
 -- STEP 1: Re-register PROXY_VECTORIZED with the numpy-vectorized implementation
@@ -153,3 +162,6 @@ SELECT
     run_at
 FROM LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
 ORDER BY approach, run_at DESC;
+
+-- Restore session default
+ALTER SESSION UNSET USE_CACHED_RESULT;

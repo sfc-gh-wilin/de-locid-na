@@ -2,6 +2,8 @@
 -- db/dev/benchmark/04_run_timing.sql
 -- LocID Dev: UDF throughput benchmark — timing queries for all three approaches
 --
+-- Need replace: 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET'
+--
 -- Runs three SELECT statements (one per approach) with QUERY_TAG set so that
 -- INFORMATION_SCHEMA.QUERY_HISTORY can retrieve the elapsed time for each.
 -- After all three runs, inserts results into LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
@@ -33,6 +35,15 @@ SET base_locid_secret = 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET';
 
 -- Record the warehouse size for the results table
 SET warehouse_size = CURRENT_WAREHOUSE();
+
+-- ---------------------------------------------------------------------------
+-- ⚠ Disable result cache for accurate benchmarking.
+--   Without this, Snowflake may return a cached result from a previous run
+--   (identical SQL + identical data = same result fingerprint), making all
+--   three approaches appear to complete in ~60–70 ms (cache-return overhead)
+--   instead of showing true UDF computation times.
+-- ---------------------------------------------------------------------------
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
 
 
 -- =============================================================================
@@ -162,3 +173,6 @@ SELECT
     run_at
 FROM LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
 ORDER BY approach, run_at DESC;
+
+-- Restore session default
+ALTER SESSION UNSET USE_CACHED_RESULT;
