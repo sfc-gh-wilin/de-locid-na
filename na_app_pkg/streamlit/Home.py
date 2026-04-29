@@ -14,10 +14,10 @@ st.logo("logo.svg")
 
 pg = st.navigation([
     st.Page("views/home.py",          title="Home",          icon=":material/home:"),
-    st.Page("views/setup_wizard.py",  title="Setup Wizard",  icon=":material/settings:"),
     st.Page("views/run_encrypt.py",   title="Run Encrypt",   icon=":material/lock:"),
     st.Page("views/run_decrypt.py",   title="Run Decrypt",   icon=":material/lock_open:"),
     st.Page("views/job_history.py",   title="Job History",   icon=":material/history:"),
     st.Page("views/configuration.py", title="Configuration", icon=":material/tune:"),
+    st.Page("views/setup_wizard.py", title="Setup Wizard", icon=":material/settings:"),
 ])
 pg.run()
