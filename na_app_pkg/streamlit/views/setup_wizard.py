@@ -56,23 +56,14 @@ step = st.session_state.wizard_step
 if step == "A":
     st.subheader(":material/waving_hand: Welcome to LocID for Snowflake")
     st.write(
-        "This wizard will connect your LocID license to Snowflake and verify "
+        "This wizard connects your LocID license to Snowflake and verifies "
         "that the app can reach LocID Central. It takes about 5 minutes."
     )
-    st.info(
-        "**If you just installed the app**, Snowsight may have already shown you "
-        "an **App Permissions** screen where you approved the network connection "
-        "and granted access to your warehouse and input table. "
-        "If so, you're ready to continue — this wizard picks up from there.\n\n"
-        "**This wizard covers:**\n"
-        "- Entering your LocID license key\n"
-        "- Verifying connectivity to LocID Central\n"
-        "- Selecting your API key\n\n"
-        "If you still need to approve the network connection or grant warehouse / "
-        "input table access, the wizard will guide you through that too "
-        "(requires ACCOUNTADMIN or equivalent).",
-        icon="ℹ️",
-    )
+    st.write("**What you'll need:**")
+    st.write("- Your LocID license key")
+    st.write("- A warehouse the app can use for jobs")
+    st.write("- An input table with IP address and timestamp data (for Encrypt) "
+             "or TX_CLOC data (for Decrypt)")
     if st.button("Get Started", type="primary"):
         logger.info(session, "setup_wizard", "Wizard started")
         st.session_state.wizard_step = "B"
