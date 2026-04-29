@@ -651,9 +651,9 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 | B — Python scalar proxy | `PROXY_SCALAR` | 0.073 | 68,493 | 4.3× | SHA-256 proxy; locid.py not yet available (2026-04-29) |
 | C — Python vectorized proxy | `PROXY_VECTORIZED` | 0.064 | 78,125 | 4.9× | numpy BLAS polynomial hash; no Python loop (2026-04-29) |
 
-> **Interpretation:** C is now faster than B (0.064 s vs 0.073 s) — the numpy BLAS rewrite eliminated the Python-level per-row loop and the gain is confirmed. B and C are 4.3× and 4.9× faster than A respectively, consistent with the 3–5× improvement estimate. A is from a cold-JVM run (first call after warehouse resume, includes ~200 ms one-time JVM init); warm steady-state Scala is ~0.111 s (~2.2× slower than Python). B and C are from a separate cache-free run (`USE_CACHED_RESULT = FALSE`, 2026-04-29).
+> **Interpretation:** C is faster than B (0.064 s vs 0.073 s) — the numpy BLAS eliminated the Python-level per-row loop and the gain is confirmed. B and C are 4.3× and 4.9× faster than A respectively, consistent with the 3–5× improvement estimate. A is from a cold-JVM run (first call after warehouse resume, includes ~200 ms one-time JVM init); warm steady-state Scala is ~0.111 s (~2.2× slower than Python). B and C are from a separate cache-free run (`USE_CACHED_RESULT = FALSE`, 2026-04-29).
 
-> **Warm-up note:** The first Scala UDF call after a warehouse resume incurs ~200 ms of cold-JVM overhead (JVM init + JAR load from stage). Both `LOCID_ENCRYPT` and `LOCID_DECRYPT` stored procedures handle this automatically — a single-row `LOCID_BASE_ENCRYPT` call is issued after secrets are loaded and before the main production query, so cold-JVM latency never hits production data. The `jvm_warmup_s` field in `APP_LOGS` shows the actual cost per job.
+> **Warm-up note:** The first Scala UDF call after a warehouse resume incurs ~200 ms of cold-JVM overhead (JVM init + JAR load from stage). Both `LOCID_ENCRYPT` and `LOCID_DECRYPT` stored procedures handle this automatically — a single-row `LOCID_BASE_ENCRYPT` call is issued after secrets are loaded and before the main production query, so cold-JVM latency never hits production data. The `jvm_warmup_s` field in `APP_LOGS` shows the actual cost per job. 
 
 ### What We Are Asking LocID to Provide
 
