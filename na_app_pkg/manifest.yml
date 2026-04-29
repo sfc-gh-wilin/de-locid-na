@@ -24,22 +24,13 @@ artifacts:
 # The consumer is prompted to approve this privilege during installation.
 privileges:
   - CREATE EXTERNAL ACCESS INTEGRATION:
-      description: >
-        Allows the app to create a network rule and external access integration
-        to reach central.locid.com (HTTPS 443) for license validation and
-        usage statistics. No customer data is sent.
-        Requires ACCOUNTADMIN or a role with the MANAGE APPLICATION SPECIFICATIONS privilege.
+      description: "Creates EAI for HTTPS to central.locid.com (license validation, usage stats). No customer data sent. Requires ACCOUNTADMIN or MANAGE APPLICATION SPECIFICATIONS privilege."
 
 references:
   # INPUT_TABLE — consumer input table (read by every Encrypt job)
   - INPUT_TABLE:
       label: "Input Table"
-      description: >
-        The table containing the rows to be enriched (ip_address + timestamp columns required).
-        The app reads this table but never writes to it.
-        Use a role that owns this table or has SELECT WITH GRANT OPTION on it.
-        This table can be in any database in your account — it does not need to be
-        in the app database.
+      description: "Input table for enrichment (ip_address + timestamp columns required). Read-only. Use a role owning this table or with SELECT WITH GRANT OPTION. Any database is valid."
       privileges:
         - SELECT
       object_type: TABLE
@@ -49,10 +40,7 @@ references:
   # APP_WAREHOUSE — warehouse used to execute Encrypt and Decrypt jobs
   - APP_WAREHOUSE:
       label: "Job Warehouse"
-      description: >
-        Warehouse the app uses to execute Encrypt and Decrypt jobs.
-        An X-Small or Small warehouse is sufficient for typical workloads.
-        Use a role that owns this warehouse or has USAGE WITH GRANT OPTION on it.
+      description: "Warehouse for Encrypt/Decrypt jobs. X-Small or Small is sufficient. Use a role owning this warehouse or with USAGE WITH GRANT OPTION."
       privileges:
         - USAGE
       object_type: WAREHOUSE
