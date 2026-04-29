@@ -16,8 +16,11 @@
 --
 --   APP_CONFIG (non-sensitive fields only):
 --     license_id_ref     — masked hint: first-4-chars + "****"
---     cached_license     — JSON with secrets field removed and api_key values
---                          replaced by api_key_hint (first-8-chars) per entry
+--     cached_license     — JSON with only the 'secrets' field removed.
+--                          api_key values are kept intact so LOCID_SET_API_KEY
+--                          (Setup Wizard Screen H) can write them to the
+--                          LOCID_API_KEY secret. LOCID_SET_API_KEY replaces
+--                          api_key with api_key_hint after selection.
 --
 --   This procedure exists because Snowflake Native Apps do not support
 --   EXTERNAL_ACCESS_INTEGRATIONS on Streamlit objects (error 092839). All
@@ -96,19 +99,10 @@ def _strip_sensitive(data: dict) -> dict:
     """
     Return a copy of the LocID Central response safe to cache in APP_CONFIG:
       - Remove the 'secrets' key entirely (base_locid_secret, scheme_secret)
-      - Replace each access[].api_key with api_key_hint (first 8 chars)
+      - Keep api_key values intact — LOCID_SET_API_KEY reads them from here
+        during Setup Wizard Screen H and scrubs them after writing to the secret.
     """
-    stripped = {k: v for k, v in data.items() if k != 'secrets'}
-    access = stripped.get('access', [])
-    clean_access = []
-    for entry in access:
-        e = dict(entry)
-        if 'api_key' in e:
-            e['api_key_hint'] = e['api_key'][:8]
-            del e['api_key']
-        clean_access.append(e)
-    stripped['access'] = clean_access
-    return stripped
+    return {k: v for k, v in data.items() if k != 'secrets'}
 
 
 def fetch_license_handler(session: snowpark.Session, license_id: str) -> dict:

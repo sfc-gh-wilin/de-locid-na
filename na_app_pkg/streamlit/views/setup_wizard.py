@@ -149,7 +149,7 @@ elif step == "E":
         _app_name = "<app_name>"
     st.info(
         "When you first launched this app, Snowsight showed an **App Permissions** "
-        "screen where you could approve the network connection to `central.locid.com`. "
+        "screen where you could approve the network connection to central.locid.com. "
         "If you approved it there, you can click **Approved — Continue** below.\n\n"
         "If you skipped that screen or are unsure, use one of the options below to approve now.",
         icon="ℹ️",
