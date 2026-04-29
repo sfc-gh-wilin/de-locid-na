@@ -196,7 +196,7 @@ elif step == "F":
 # ---------------------------------------------------------------------------
 elif step == "G":
     st.subheader(":material/cloud_circle: Test LocID Central Connectivity")
-    if st.button(":material/wifi_tethering: Run Connectivity Test"):
+    if st.button(":material/wifi_tethering: Run Connectivity Test", type="primary"):
         with st.spinner("Connecting to central.locid.com…"):
             try:
                 result = session.sql("SELECT APP_SCHEMA.HTTP_PING()").collect()[0][0]
