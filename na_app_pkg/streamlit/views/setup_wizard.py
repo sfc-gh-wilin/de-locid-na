@@ -147,10 +147,12 @@ elif step == "E":
         _app_name = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
     except Exception:
         _app_name = "<app_name>"
-    st.write(
-        "Before the app can validate your license it needs permission to connect "
-        "to **central.locid.com**. An **ACCOUNTADMIN** (or a role with the "
-        "`MANAGE APPLICATION SPECIFICATIONS` privilege) must approve this."
+    st.info(
+        "When you first launched this app, Snowsight showed an **App Permissions** "
+        "screen where you could approve the network connection to `central.locid.com`. "
+        "If you approved it there, you can click **Approved — Continue** below.\n\n"
+        "If you skipped that screen or are unsure, use one of the options below to approve now.",
+        icon="ℹ️",
     )
     st.markdown("**Option A — Snowsight UI**")
     st.write(

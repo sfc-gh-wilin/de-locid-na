@@ -98,6 +98,8 @@ if not onboarding_complete:
         "finish configuring your LocID license and connectivity.",
         icon="⚠️"
     )
+    if st.button(":material/settings: Open Setup Wizard", type="primary"):
+        st.switch_page("views/setup_wizard.py")
 
 # ---------------------------------------------------------------------------
 # Header
