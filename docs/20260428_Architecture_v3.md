@@ -645,13 +645,15 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 **Sandbox benchmark results — XS warehouse, 5M rows**
 
-| Approach | UDF | Elapsed (s) | Throughput (krows/s) | Notes |
-|----------|-----|:-----------:|:--------------------:|-------|
-| A — Scala scalar (JAR) | `LOCID_BASE_ENCRYPT` | 0.316 | 15,823 | Actual AES-128 ECB via encode-lib |
-| B — Python scalar proxy | `PROXY_SCALAR` | 0.051 | 98,039 | HMAC-SHA256 proxy (locid.py not yet available) |
-| C — Python vectorized proxy | `PROXY_VECTORIZED` | 0.064 | 78,125 | HMAC-SHA256 proxy, @vectorized |
+| Approach | UDF | Elapsed (s) | Throughput (krows/s) | Speedup vs A | Notes |
+|----------|-----|:-----------:|:--------------------:|:------------:|-------|
+| A — Scala scalar (JAR) | `LOCID_BASE_ENCRYPT` | 0.316 | 15,823 | 1.0× | AES-128 ECB via encode-lib; cold JVM (2026-04-28) |
+| B — Python scalar proxy | `PROXY_SCALAR` | 0.073 | 68,493 | 4.3× | SHA-256 proxy; locid.py not yet available (2026-04-29) |
+| C — Python vectorized proxy | `PROXY_VECTORIZED` | 0.064 | 78,125 | 4.9× | numpy BLAS polynomial hash; no Python loop (2026-04-29) |
 
-> **Interpretation:** C is marginally slower than B because (a) the proxy uses `Series.apply()` — a Python-level loop, not a SIMD/numpy path — so per-element Python calls still occur inside each batch, and (b) HMAC-SHA256 is too fast (~10 ns/row) for the Python↔SQL boundary-crossing savings to outweigh pandas batch overhead. The 3–5× improvement estimate applies to the actual AES-128 workload of `locid.py` on a larger warehouse, where key derivation is compute-heavy and worker-level parallelism multiplies the benefit. A and B are not directly comparable — A runs real AES-128 ECB (encode-lib JAR), B/C use an HMAC-SHA256 proxy.
+> **Interpretation:** C is now faster than B (0.064 s vs 0.073 s) — the numpy BLAS rewrite eliminated the Python-level per-row loop and the gain is confirmed. B and C are 4.3× and 4.9× faster than A respectively, consistent with the 3–5× improvement estimate. A is from a cold-JVM run (first call after warehouse resume, includes ~200 ms one-time JVM init); warm steady-state Scala is ~0.111 s (~2.2× slower than Python). B and C are from a separate cache-free run (`USE_CACHED_RESULT = FALSE`, 2026-04-29).
+
+> **Warm-up note:** The first Scala UDF call after a warehouse resume incurs ~200 ms of cold-JVM overhead (JVM init + JAR load from stage). To avoid this on production data, run a single-row warm-up query before the main encrypt job: `SELECT LOCID_BASE_ENCRYPT('WARMUP00000000000000X', key) FROM TABLE(GENERATOR(ROWCOUNT=>1))`.
 
 ### What We Are Asking LocID to Provide
 

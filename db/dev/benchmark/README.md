@@ -40,38 +40,42 @@ Both proxies are used only because `locid.py` (the Python implementation of `enc
 has not yet been provided by LocID. Results will be re-run with actual AES-128 operations once it
 is available.
 
-### Results — XS warehouse, 5M rows
+### Results — XS warehouse, 5M rows (2026-04-29)
 
-| Approach | Handler | Elapsed (s) | Throughput (krows/s) | Speedup vs A | Status |
-|----------|---------|:-----------:|:--------------------:|:------------:|--------|
-| A — Scala scalar (JAR) | AES-128 ECB via encode-lib | 0.316 | 15,823 | 1.0× | Final |
-| B — Python scalar proxy | SHA-256 per row | 0.051 | 98,039 | 6.2× | Final |
-| C — Python vectorized proxy | SHA-256 + `Series.apply()` | 0.064 | 78,125 | 4.9× | **Pending re-run** |
+| Approach | Handler | Elapsed (s) | Throughput (krows/s) | vs A warm | Notes |
+|----------|---------|:-----------:|:--------------------:|:---------:|-------|
+| A — Scala scalar, **cold JVM** | AES-128 ECB via encode-lib | 0.316 | 15,823 | — | First call after warehouse resume; JVM init + JAR load |
+| A — Scala scalar, **warm JVM** | AES-128 ECB via encode-lib | 0.111 | 45,045 | 1.0× | Steady state; JVM warm, JAR in local disk cache |
+| B — Python scalar proxy | SHA-256 per row | 0.050 | 100,000 | 2.2× | Final |
+| C — Python vectorized proxy | numpy BLAS polynomial hash | 0.055 | 90,909 | 2.0× | Final |
 
-> **C is pending re-run.** The handler was rewritten to use a true numpy BLAS polynomial
-> hash (no Python-level loop). The 0.064 s result above is from the original `Series.apply()`
-> implementation. Run `04b_rerun_C_vectorized.sql` to get the updated number.
+> **A cold vs warm:** The 0.316 s run was the first call in a fresh warehouse session — JVM
+> initialisation, JAR loading from stage, and JIT compilation all occur on first invocation.
+> Subsequent calls in the same session use a warm JVM with the JAR in local disk cache (0.111 s).
+> The warm number is the steady-state figure.
 
-### Why the original C was slower than B
+> **C ≈ B:** The numpy BLAS rewrite removed the Python-level loop, but the proxy compute
+> (polynomial hash on 21-byte strings) is still too fast (~10–50 ns/row with Snowflake's
+> parallel workers) for the `@vectorized` batching overhead (~5 ms/batch for DataFrame
+> construction) to be outweighed. C > B will show with the real `locid.py` AES-128 workload
+> where per-row cost is ~1–10 µs and key amortisation is meaningful.
 
-Two compounding reasons:
+### Warm-up recommendation for Scala UDFs
 
-1. **`Series.apply()` is still a Python for-loop.** The original handler called
-   `df.iloc[:, 0].apply(lambda ...)`, which iterates element-by-element in Python — it is
-   **not** a SIMD or numpy-native path. Per-element Python calls still occurred inside each
-   batch; `@vectorized` only reduced Python↔SQL boundary crossings (from 5M to ~600–5000),
-   not the Python function calls within each batch.
+The cold-start overhead (~200 ms, one-time per warehouse session) can be avoided by running a
+lightweight warm-up query before the first production encrypt job:
 
-2. **The proxy operation was too cheap to expose the gain.** HMAC-SHA256 runs at ~10 ns/row.
-   At that speed the boundary-crossing savings are negligible, and the pandas batch-management
-   overhead (DataFrame construction, index alignment) outweighed them slightly.
+```sql
+-- Run once after warehouse resume, before the main encrypt job
+SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT('WARMUP00000000000000X', $base_locid_secret)
+FROM TABLE(GENERATOR(ROWCOUNT => 1));
+```
 
-The handler has been rewritten. The numpy polynomial hash eliminates Python-level per-row
-calls from the hot path, which should show C ≥ B on the re-run.
+This loads the JVM and JAR so the first production query runs at steady-state speed.
 
 The **3–5× improvement** estimate in the architecture doc applies to the actual `locid.py`
-workload where AES-128 key derivation costs ~100–1000× more per row, making key amortisation
-and reduced crossings meaningful.
+workload vs warm Scala, where AES-128 key derivation costs ~100–1000× more per row than the
+proxy, making key amortisation and reduced boundary crossings meaningful.
 
 ---
 
@@ -154,3 +158,8 @@ DROP SCHEMA IF EXISTS LOCID_DEV.BENCHMARK CASCADE;
 ```
 
 > After cleanup, restart from `01_setup.sql` to rebuild.
+
+If you just need to run 04_run_timing.sql again:
+```sql
+TRUNCATE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
+```
