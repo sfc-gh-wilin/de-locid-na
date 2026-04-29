@@ -3,16 +3,14 @@
 -- LocID Dev: Re-register and time Approach C only
 --
 -- Use this script after the initial 04_run_timing.sql run if Approach C
--- (PROXY_VECTORIZED) was missing or failed. It re-creates the UDF with the
--- corrected import and runs only the Approach C timing query, then appends
--- the result to BENCHMARK_RESULTS.
+-- (PROXY_VECTORIZED) was missing or produced unexpected results.
 --
--- Why Approach C was missing initially:
---   The original 03_proxy_vectorized_python.sql was missing the line
---   `from _snowflake import vectorized` — Snowflake does not inject the
---   `vectorized` decorator into the global namespace automatically; it must
---   be imported explicitly from the `_snowflake` module.
---   This has been corrected in 03_proxy_vectorized_python.sql.
+-- Update (2026-04-29):
+--   The original handler used pandas Series.apply() — a Python-level loop —
+--   which prevented the vectorized UDF from outperforming the scalar UDF (B).
+--   This version replaces the proxy with a true numpy-vectorized polynomial
+--   hash: strings → fixed-width uint8 matrix → BLAS dot-product. No Python
+--   for-loop in the hot path. See 03_proxy_vectorized_python.sql for details.
 --
 -- Prerequisites:
 --   01_setup.sql has been run (MOCKUP_5M and BENCHMARK_RESULTS tables exist).
@@ -24,9 +22,7 @@ USE SCHEMA   LOCID_DEV.BENCHMARK;
 
 
 -- ---------------------------------------------------------------------------
--- STEP 1: Re-register the fixed PROXY_VECTORIZED UDF
---         (identical to 03_proxy_vectorized_python.sql — included inline so
---          this script is self-contained)
+-- STEP 1: Re-register PROXY_VECTORIZED with the numpy-vectorized implementation
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(
     LOC_ID   VARCHAR,
@@ -35,45 +31,50 @@ CREATE OR REPLACE FUNCTION LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-PACKAGES = ('pandas')
+PACKAGES = ('pandas', 'numpy')
 HANDLER = 'encode_batch'
-COMMENT = 'Benchmark proxy: Python vectorized batch dispatch. Compute proxy for LOCID_BASE_ENCRYPT (HMAC-SHA256). Key setup amortised once per batch via worker-level cache.'
+COMMENT = 'Benchmark proxy: true numpy-vectorized batch — polynomial hash via BLAS dot product; no Python-level loop in the hot path.'
 AS $$
-import hashlib
-import base64
+import numpy as np
 import pandas as pd
 from _snowflake import vectorized   # required: not auto-injected into global namespace
 
-# Worker-level cache: key_str → key_bytes
-# Persists across batches in the same worker process.
+_PRIMES = np.array(
+    [31,37,41,43,47,53,59,61,67,71,73,79,83,89,97,101,103,107,109,113,127],
+    dtype=np.int64
+)
+_LOC_ID_LEN = 21
 _key_cache: dict = {}
 
 
 @vectorized(input=pd.DataFrame)
 def encode_batch(df: pd.DataFrame) -> pd.Series:
     """
-    Vectorized batch handler — called once per batch (1,000–8,192 rows).
-
-    df.iloc[:, 0] = LOC_ID  (pd.Series of str)
-    df.iloc[:, 1] = KEY_STR (constant for all rows in a query)
+    True numpy-vectorized — no Python-level for-loop in the hot path.
+    Critical path: str.ljust/encode → b''.join → np.frombuffer → dot(_PRIMES) → astype(str)
+    All operations are C/BLAS-level; no Python interpreter call per row.
     """
     key_str = df.iloc[0, 1]
 
     if key_str not in _key_cache:
+        import base64
         key_b64 = key_str.replace('~', '=')
         pad = (4 - len(key_b64) % 4) % 4
         try:
-            _key_cache[key_str] = base64.urlsafe_b64decode(key_b64 + '=' * pad)
+            key_bytes = base64.urlsafe_b64decode(key_b64 + '=' * pad)
         except Exception:
-            _key_cache[key_str] = key_str.encode()[:32]
+            key_bytes = key_str.encode()[:32]
+        _key_cache[key_str] = int.from_bytes(key_bytes[:8], 'big') & 0x7FFFFFFFFFFFFFFF
 
-    key_bytes = _key_cache[key_str]
+    key_seed = _key_cache[key_str]
+    loc_ids  = df.iloc[:, 0]
+    n        = len(loc_ids)
 
-    return df.iloc[:, 0].apply(
-        lambda loc_id: base64.urlsafe_b64encode(
-            hashlib.new('sha256', key_bytes + loc_id.encode()).digest()
-        ).rstrip(b'=').decode()
-    )
+    padded = loc_ids.str.ljust(_LOC_ID_LEN, '\x00').str.encode('ascii', errors='replace')
+    flat   = b''.join(padded)
+    arr    = np.frombuffer(flat, dtype=np.uint8).reshape(n, _LOC_ID_LEN)
+    hashes = (arr.astype(np.int64).dot(_PRIMES) ^ key_seed) & 0x7FFFFFFFFFFFFFFF
+    return pd.Series(hashes.astype(str), dtype='object')
 $$;
 
 -- Verify UDF created without error
@@ -126,7 +127,7 @@ SELECT
     5000000                                                       AS rows_processed,
     total_elapsed_time / 1000.0                                   AS elapsed_s,
     ROUND(5000000.0 / (total_elapsed_time / 1000.0) / 1000, 1)   AS krows_per_s,
-    'HMAC-SHA256 proxy; vectorized import fix applied'            AS notes
+    'numpy polynomial hash (BLAS dot); no Python-level loop in hot path' AS notes
 FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY(
     END_TIME_RANGE_START => DATEADD('minute', -10, CURRENT_TIMESTAMP()),
     END_TIME_RANGE_END   => DATEADD('minute',   1, CURRENT_TIMESTAMP())

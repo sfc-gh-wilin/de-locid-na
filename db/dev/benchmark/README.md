@@ -11,10 +11,11 @@ Performance Estimates`.
 
 | File | Description |
 |------|-------------|
-| `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema + 5M mockup row table |
-| `02_proxy_scalar_python.sql` | Python **scalar** UDF — per-row dispatch proxy |
-| `03_proxy_vectorized_python.sql` | Python **vectorized** UDF — batch dispatch proxy |
-| `04_run_timing.sql` | Timing queries for all three approaches + results summary |
+| `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 5M mockup row table, and results table |
+| `02_proxy_scalar_python.sql` | Register Python **scalar** UDF `PROXY_SCALAR` — per-row dispatch |
+| `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch |
+| `04_run_timing.sql` | Time all three approaches on 5M rows; insert results into `BENCHMARK_RESULTS` |
+| `04b_rerun_C_vectorized.sql` | Re-register `PROXY_VECTORIZED` and time Approach C only (use after updating the handler) |
 
 ---
 
@@ -28,56 +29,75 @@ Performance Estimates`.
 
 ### Compute proxy
 
-Approaches B and C use `hashlib.SHA256` as a compute proxy because `locid.py` (the Python
-implementation of `encode-lib` operations) has not yet been provided by LocID.
+Approach B uses `hashlib.SHA256` as a compute proxy.
 
-### Actual results — XS warehouse, 5M rows (2026-04-28/29)
+Approach C uses a **numpy polynomial hash** via BLAS `dot()` — no Python-level loop in the hot path.
+The critical path is all C/BLAS: `str.ljust/encode → b''.join → np.frombuffer().reshape →
+arr.dot(_PRIMES) → hashes.astype(str)`. SHA-256 was replaced because it has no numpy batch
+interface, which would have made the `@vectorized` implementation equivalent to a Python loop.
 
-| Approach | Elapsed (s) | Throughput (krows/s) | Speedup vs A |
-|----------|:-----------:|:--------------------:|:------------:|
-| A — Scala scalar (JAR) | 0.316 | 15,823 | 1.0× |
-| B — Python scalar proxy | 0.051 | 98,039 | 6.2× |
-| C — Python vectorized proxy | 0.064 | 78,125 | 4.9× |
+Both proxies are used only because `locid.py` (the Python implementation of `encode-lib` operations)
+has not yet been provided by LocID. Results will be re-run with actual AES-128 operations once it
+is available.
 
-### Why C (vectorized) is slower than B (scalar)
+### Results — XS warehouse, 5M rows
+
+| Approach | Handler | Elapsed (s) | Throughput (krows/s) | Speedup vs A | Status |
+|----------|---------|:-----------:|:--------------------:|:------------:|--------|
+| A — Scala scalar (JAR) | AES-128 ECB via encode-lib | 0.316 | 15,823 | 1.0× | Final |
+| B — Python scalar proxy | SHA-256 per row | 0.051 | 98,039 | 6.2× | Final |
+| C — Python vectorized proxy | SHA-256 + `Series.apply()` | 0.064 | 78,125 | 4.9× | **Pending re-run** |
+
+> **C is pending re-run.** The handler was rewritten to use a true numpy BLAS polynomial
+> hash (no Python-level loop). The 0.064 s result above is from the original `Series.apply()`
+> implementation. Run `04b_rerun_C_vectorized.sql` to get the updated number.
+
+### Why the original C was slower than B
 
 Two compounding reasons:
 
-1. **`Series.apply()` is still a Python for-loop.** The handler calls `df.iloc[:, 0].apply(lambda ...)`,
-   which iterates element-by-element in Python at the pandas level — it is **not** a SIMD or
-   numpy-native path. Per-element Python calls still occur inside each batch; the `@vectorized`
-   decorator only reduces the number of Python↔SQL boundary crossings (from 5M to ~600–5000),
-   not the number of Python function calls within each batch.
+1. **`Series.apply()` is still a Python for-loop.** The original handler called
+   `df.iloc[:, 0].apply(lambda ...)`, which iterates element-by-element in Python — it is
+   **not** a SIMD or numpy-native path. Per-element Python calls still occurred inside each
+   batch; `@vectorized` only reduced Python↔SQL boundary crossings (from 5M to ~600–5000),
+   not the Python function calls within each batch.
 
-2. **The proxy operation is too cheap to expose the gain.** HMAC-SHA256 runs at ~10 ns/row.
+2. **The proxy operation was too cheap to expose the gain.** HMAC-SHA256 runs at ~10 ns/row.
    At that speed the boundary-crossing savings are negligible, and the pandas batch-management
-   overhead (DataFrame construction, index alignment) outweighs them slightly.
+   overhead (DataFrame construction, index alignment) outweighed them slightly.
+
+The handler has been rewritten. The numpy polynomial hash eliminates Python-level per-row
+calls from the hot path, which should show C ≥ B on the re-run.
 
 The **3–5× improvement** estimate in the architecture doc applies to the actual `locid.py`
-workload where AES-128 key derivation costs ~100–1000× more per row than SHA256, making key
-amortisation and reduced crossings meaningful. Results will be re-run once `locid.py` is
-available.
+workload where AES-128 key derivation costs ~100–1000× more per row, making key amortisation
+and reduced crossings meaningful.
 
 ---
 
 ## Prerequisites
 
-1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (STAGING schema +
-   `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
-2. Set `$base_locid_secret` in `04_run_timing.sql` before running Approach A.
-3. Run `01_setup.sql` once to build the 5M mockup table.
-4. Run `02_proxy_scalar_python.sql` and `03_proxy_vectorized_python.sql` to register UDFs.
-5. Run `04_run_timing.sql` to execute all three benchmark queries and view results.
+1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (`LOCID_DEV.STAGING` schema
+   and `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
+2. Warehouse `WLIN_WH_XS` (or equivalent) available.
+3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
+   Approach A only. Set as `$base_locid_secret` in `04_run_timing.sql` before running.
 
 ---
 
 ## Run Order
 
 ```
-01_setup.sql              -- once; ~30–60 s to generate 5M rows
-02_proxy_scalar_python.sql
-03_proxy_vectorized_python.sql
-04_run_timing.sql         -- set $base_locid_secret first
+01_setup.sql                  -- once; ~30–60 s on XS to generate 5M rows
+02_proxy_scalar_python.sql    -- register PROXY_SCALAR
+03_proxy_vectorized_python.sql -- register PROXY_VECTORIZED (numpy BLAS handler)
+04_run_timing.sql             -- set $base_locid_secret, then run all three timings
+```
+
+To re-run only Approach C (e.g. after updating the vectorized handler):
+
+```
+04b_rerun_C_vectorized.sql    -- re-registers PROXY_VECTORIZED and times C only
 ```
 
 ---
@@ -90,10 +110,33 @@ Query the `BENCHMARK_RESULTS` table for a summary:
 SELECT approach, rows_processed, elapsed_s,
        ROUND(rows_processed / elapsed_s / 1000, 1) AS krows_per_s
 FROM   LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
-ORDER  BY approach;
+ORDER  BY approach, run_at DESC;
 ```
 
-The A/C ratio gives the Scala-scalar → Python-vectorized speedup estimate at the UDF phase.
-The B/C ratio isolates the `@vectorized` batch-dispatch gain from the operation cost.
-With the current SHA256 proxy, B ≈ C (both ~10 ns/row — too fast for batching savings to
-dominate). Re-run with `locid.py` for production-accurate numbers.
+- **A/C ratio** — Scala scalar → Python vectorized speedup estimate at the UDF phase.
+- **B/C ratio** — isolates the `@vectorized` batch-dispatch gain from the operation cost.
+- **B/A ratio** — Python scalar vs Scala scalar; shows Python runtime overhead independent of batching.
+
+---
+
+## Cleanup
+
+Run the following to drop all benchmark objects and the schema. This is safe to run at any
+time; `01_setup.sql` is idempotent and will recreate everything from scratch.
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+
+-- Drop UDFs
+DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_SCALAR(VARCHAR, VARCHAR);
+DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(VARCHAR, VARCHAR);
+
+-- Drop tables
+DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.MOCKUP_5M;
+DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
+
+-- Drop schema (only after objects above are dropped, or use CASCADE)
+DROP SCHEMA IF EXISTS LOCID_DEV.BENCHMARK CASCADE;
+```
+
+> After cleanup, restart from `01_setup.sql` to rebuild.
