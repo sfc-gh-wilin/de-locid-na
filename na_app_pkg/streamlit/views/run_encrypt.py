@@ -50,12 +50,17 @@ def _get_bound_table(ref_name: str) -> str | None:
         if not rows or not rows[0][0]:
             return None
         for ref in json.loads(rows[0][0]):
-            if ref.get('name') == ref_name:
+            if ref.get('name', '').upper() == ref_name.upper():
                 bindings = ref.get('bindings', [])
                 if bindings:
-                    return bindings[0].get('name')
-    except Exception:
-        pass
+                    b = bindings[0]
+                    # Snowflake returns the FQN under 'name' or 'objectName'
+                    # depending on object type and platform version
+                    fqn = b.get('name') or b.get('objectName') or b.get('object_name')
+                    return fqn or None
+    except Exception as e:
+        logger.warning(session, "run_encrypt._get_bound_table",
+                       f"Failed to resolve reference {ref_name}: {e}")
     return None
 
 
