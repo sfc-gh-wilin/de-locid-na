@@ -16,11 +16,11 @@
 --
 --   APP_CONFIG (non-sensitive fields only):
 --     license_id_ref     — masked hint: first-4-chars + "****"
---     cached_license     — JSON with only the 'secrets' field removed.
---                          api_key values are kept intact so LOCID_SET_API_KEY
---                          (Setup Wizard Screen H) can write them to the
---                          LOCID_API_KEY secret. LOCID_SET_API_KEY replaces
---                          api_key with api_key_hint after selection.
+--     cached_license     — JSON with 'secrets' removed, license_key masked to
+--                          first-4-chars + "-****", and api_key values kept
+--                          intact for LOCID_SET_API_KEY (Screen H) plus
+--                          api_key_hint (first-8-chars) added for display.
+--                          LOCID_SET_API_KEY scrubs api_key after selection.
 --
 --   This procedure exists because Snowflake Native Apps do not support
 --   EXTERNAL_ACCESS_INTEGRATIONS on Streamlit objects (error 092839). All
@@ -98,11 +98,31 @@ def _urlopen_with_retry(req: urllib.request.Request, timeout: int):
 def _strip_sensitive(data: dict) -> dict:
     """
     Return a copy of the LocID Central response safe to cache in APP_CONFIG:
-      - Remove the 'secrets' key entirely (base_locid_secret, scheme_secret)
-      - Keep api_key values intact — LOCID_SET_API_KEY reads them from here
-        during Setup Wizard Screen H and scrubs them after writing to the secret.
+      - Remove 'secrets' entirely (base_locid_secret, scheme_secret)
+      - Mask license.license_key → first-4-chars + '-****'
+      - Keep access[].api_key intact for LOCID_SET_API_KEY (Setup Wizard Screen H)
+      - Add access[].api_key_hint (first 8 chars) for display
+      LOCID_SET_API_KEY scrubs api_key → api_key_hint after key selection.
     """
-    return {k: v for k, v in data.items() if k != 'secrets'}
+    stripped = {k: v for k, v in data.items() if k != 'secrets'}
+
+    # Mask license_key inside the license sub-object
+    lic = dict(stripped.get('license', {}))
+    raw_lic_key = lic.get('license_key', '')
+    if raw_lic_key:
+        lic['license_key'] = raw_lic_key[:4] + '-****'
+    stripped['license'] = lic
+
+    # Add api_key_hint for display; keep api_key for LOCID_SET_API_KEY
+    clean_access = []
+    for entry in stripped.get('access', []):
+        e = dict(entry)
+        if 'api_key' in e and 'api_key_hint' not in e:
+            e['api_key_hint'] = e['api_key'][:8]
+        clean_access.append(e)
+    stripped['access'] = clean_access
+
+    return stripped
 
 
 def fetch_license_handler(session: snowpark.Session, license_id: str) -> dict:
