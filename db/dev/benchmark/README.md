@@ -26,19 +26,37 @@ Performance Estimates`.
 | **B — Python scalar proxy** | `LOCID_DEV.BENCHMARK.PROXY_SCALAR` | Python 3.11 | Per-row |
 | **C — Python vectorized proxy** | `LOCID_DEV.BENCHMARK.PROXY_VECTORIZED` | Python 3.11 | Batch (1K–8K rows/batch) |
 
-### Important caveat
+### Compute proxy
 
-Approaches B and C use `hashlib.HMAC-SHA256` as a **compute proxy** because the actual
-`locid.py` Python source (which would call the same crypto as `encode-lib`) has not yet
-been provided by LocID. The proxy has a similar per-row computational profile to AES-128
-ECB, but the two should not be treated as producing byte-compatible output.
+Approaches B and C use `hashlib.SHA256` as a compute proxy because `locid.py` (the Python
+implementation of `encode-lib` operations) has not yet been provided by LocID.
 
-What the results *do* measure validly:
-- **A vs B**: Scala-JVM scalar dispatch overhead vs Python scalar dispatch overhead.
-- **B vs C**: Python-to-Python dispatch overhead gain from batching (`@vectorized`).
-- **A vs C**: Combined picture — Scala scalar vs Python vectorized, noting the crypto
-  difference. Once `locid.py` is available, replace the proxy body with the real
-  implementation to get production-accurate numbers.
+### Actual results — XS warehouse, 5M rows (2026-04-28/29)
+
+| Approach | Elapsed (s) | Throughput (krows/s) | Speedup vs A |
+|----------|:-----------:|:--------------------:|:------------:|
+| A — Scala scalar (JAR) | 0.316 | 15,823 | 1.0× |
+| B — Python scalar proxy | 0.051 | 98,039 | 6.2× |
+| C — Python vectorized proxy | 0.064 | 78,125 | 4.9× |
+
+### Why C (vectorized) is slower than B (scalar)
+
+Two compounding reasons:
+
+1. **`Series.apply()` is still a Python for-loop.** The handler calls `df.iloc[:, 0].apply(lambda ...)`,
+   which iterates element-by-element in Python at the pandas level — it is **not** a SIMD or
+   numpy-native path. Per-element Python calls still occur inside each batch; the `@vectorized`
+   decorator only reduces the number of Python↔SQL boundary crossings (from 5M to ~600–5000),
+   not the number of Python function calls within each batch.
+
+2. **The proxy operation is too cheap to expose the gain.** HMAC-SHA256 runs at ~10 ns/row.
+   At that speed the boundary-crossing savings are negligible, and the pandas batch-management
+   overhead (DataFrame construction, index alignment) outweighs them slightly.
+
+The **3–5× improvement** estimate in the architecture doc applies to the actual `locid.py`
+workload where AES-128 key derivation costs ~100–1000× more per row than SHA256, making key
+amortisation and reduced crossings meaningful. Results will be re-run once `locid.py` is
+available.
 
 ---
 
@@ -66,7 +84,7 @@ What the results *do* measure validly:
 
 ## Interpreting Results
 
-After `04_run_timing.sql`, query the `BENCHMARK_RESULTS` table:
+Query the `BENCHMARK_RESULTS` table for a summary:
 
 ```sql
 SELECT approach, rows_processed, elapsed_s,
@@ -75,6 +93,7 @@ FROM   LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
 ORDER  BY approach;
 ```
 
-The ratio `elapsed_s(A) / elapsed_s(C)` gives the overall speedup estimate for the
-Scala-scalar → Python-vectorized migration at the UDF phase. Record this ratio in the
-`### Performance Estimates` table in the architecture doc.
+The A/C ratio gives the Scala-scalar → Python-vectorized speedup estimate at the UDF phase.
+The B/C ratio isolates the `@vectorized` batch-dispatch gain from the operation cost.
+With the current SHA256 proxy, B ≈ C (both ~10 ns/row — too fast for batching savings to
+dominate). Re-run with `locid.py` for production-accurate numbers.

@@ -682,15 +682,15 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
 
-**Sandbox benchmark results — XS warehouse, 5M rows (2026-04-28)**
+**Sandbox benchmark results — XS warehouse, 5M rows (2026-04-28/29)**
 
 | Approach | UDF | Elapsed (s) | Throughput (krows/s) | Notes |
 |----------|-----|:-----------:|:--------------------:|-------|
 | A — Scala scalar (JAR) | `LOCID_BASE_ENCRYPT` | 0.316 | 15,823 | Actual AES-128 ECB via encode-lib |
 | B — Python scalar proxy | `PROXY_SCALAR` | 0.051 | 98,039 | HMAC-SHA256 proxy (locid.py not yet available) |
-| C — Python vectorized proxy | `PROXY_VECTORIZED` | — | — | Pending re-run after import fix |
+| C — Python vectorized proxy | `PROXY_VECTORIZED` | 0.064 | 78,125 | HMAC-SHA256 proxy, @vectorized |
 
-> **Interpretation:** A and B use different operations (AES-128 vs HMAC-SHA256 proxy) so the B/A ratio (~6.2×) reflects both operation complexity and dispatch overhead differences — not a clean vectorization gain. The C/B ratio (once available) will isolate the `@vectorized` batch-dispatch gain independent of operation type. Once `locid.py` is provided by LocID, all three approaches will use the same crypto operation, making the A/C comparison production-accurate.
+> **Interpretation:** C is marginally slower than B because (a) the proxy uses `Series.apply()` — a Python-level loop, not a SIMD/numpy path — so per-element Python calls still occur inside each batch, and (b) HMAC-SHA256 is too fast (~10 ns/row) for the Python↔SQL boundary-crossing savings to outweigh pandas batch overhead. The 3–5× improvement estimate applies to the actual AES-128 workload of `locid.py` on a larger warehouse, where key derivation is compute-heavy and worker-level parallelism multiplies the benefit. A and B are not directly comparable — A runs real AES-128 ECB (encode-lib JAR), B/C use an HMAC-SHA256 proxy.
 
 ### What LocID Needs to Provide
 
