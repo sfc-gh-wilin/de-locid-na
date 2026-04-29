@@ -37,9 +37,16 @@ CREATE NETWORK RULE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_CENTRAL_RULE
 --         References the network rule created above.
 -- ---------------------------------------------------------------------------
 CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS LOCID_CENTRAL_EAI
-    ALLOWED_NETWORK_RULES = (LOCID_DEV.STAGING.LOCID_CENTRAL_RULE)
+    ALLOWED_NETWORK_RULES          = (LOCID_DEV.STAGING.LOCID_CENTRAL_RULE)
+    ALLOWED_AUTHENTICATION_SECRETS = (ALL)
     ENABLED               = TRUE
     COMMENT               = 'LocID Central: license validation, secret retrieval, usage reporting';
+
+
+-- If the EAI already existed (IF NOT EXISTS skipped the CREATE), update it
+-- to include ALLOWED_AUTHENTICATION_SECRETS:
+ALTER EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
+    SET ALLOWED_AUTHENTICATION_SECRETS = (ALL);
 
 
 -- ---------------------------------------------------------------------------
