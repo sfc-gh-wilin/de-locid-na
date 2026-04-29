@@ -199,8 +199,8 @@ BEGIN
         FROM APP_SCHEMA.APP_CONFIG
         WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1;
     IF (v_cache IS NOT NULL) THEN
-        LET v_base_val   VARCHAR := v_cache:secrets:base_locid_secret::VARCHAR;
-        LET v_scheme_val VARCHAR := v_cache:secrets:scheme_secret::VARCHAR;
+        LET v_base_val   VARCHAR := :v_cache:secrets:base_locid_secret::VARCHAR;
+        LET v_scheme_val VARCHAR := :v_cache:secrets:scheme_secret::VARCHAR;
         IF (v_base_val IS NOT NULL AND LENGTH(:v_base_val) > 0) THEN
             ALTER SECRET APP_SCHEMA.LOCID_BASE_SECRET   SET SECRET_STRING = :v_base_val;
         END IF;
@@ -211,7 +211,7 @@ BEGIN
         UPDATE APP_SCHEMA.APP_CONFIG
             SET config_value = (
                 SELECT OBJECT_CONSTRUCT_KEEP_NULL(
-                    'license',  v_cache:license,
+                    'license',  :v_cache:license,
                     'access',   (
                         SELECT ARRAY_AGG(
                             CASE WHEN a.value:api_key IS NOT NULL
@@ -224,7 +224,7 @@ BEGIN
                                  ELSE a.value::OBJECT
                             END
                         )
-                        FROM TABLE(FLATTEN(v_cache:access)) a
+                        FROM TABLE(FLATTEN(:v_cache:access)) a
                     )
                 )::VARCHAR
             )
