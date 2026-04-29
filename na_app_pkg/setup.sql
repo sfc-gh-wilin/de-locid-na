@@ -362,23 +362,27 @@ GRANT USAGE ON FUNCTION APP_SCHEMA.HTTP_PING()
 -- 7b. LOCID_SET_API_KEY Procedure  (Python, inline)
 --
 --   Called from Setup Wizard Screen H when the consumer selects an API key.
---   Reads the full api_key from the cached_license JSON in APP_CONFIG (where it
---   is stored temporarily after LOCID_FETCH_LICENSE runs in Screen D), writes it
---   to the LOCID_API_KEY secret, stores a masked hint in APP_CONFIG, and scrubs
---   all full api_key values from cached_license.
+--   Receives the full api_key value directly from the caller (Streamlit session
+--   state) — the key is never read from APP_CONFIG, so it is never stored in
+--   plain text in any table.
+--
+--   Writes the api_key to the LOCID_API_KEY Snowflake SECRET, stores a masked
+--   hint in APP_CONFIG, and removes any legacy plain-text 'api_key' row.
 --
 --   Runs EXECUTE AS OWNER (default) — required because APP_ADMIN cannot ALTER
 --   a Snowflake SECRET directly (WRITE privilege is not grantable to APPLICATION
 --   ROLEs). The proc's OWNER context has OWNERSHIP on all app-created objects.
 -- =============================================================================
-CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(API_KEY_ID INTEGER)
+CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(
+    API_KEY_ID    INTEGER,
+    API_KEY_VALUE VARCHAR
+)
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
 PACKAGES = ('snowflake-snowpark-python')
 HANDLER = 'set_api_key_handler'
 AS $$
-import json
 import snowflake.snowpark as snowpark
 
 _UPSERT_SQL = (
@@ -393,51 +397,21 @@ _UPSERT_SQL = (
 )
 
 
-def set_api_key_handler(session: snowpark.Session, api_key_id: int) -> str:
-    # Read cached_license — still has full api_key values at this stage
-    rows = session.sql(
-        "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
-        "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
-    ).collect()
-    if not rows or not rows[0][0]:
-        raise RuntimeError(
-            "No cached license found. Complete license validation (Screen D) first."
-        )
+def set_api_key_handler(session: snowpark.Session,
+                        api_key_id: int, api_key_value: str) -> str:
+    if not api_key_value:
+        raise RuntimeError("API key value is required.")
 
-    data = json.loads(rows[0][0])
-    entry = next(
-        (e for e in data.get('access', [])
-         if e.get('status') == 'ACTIVE' and e.get('api_key_id') == api_key_id),
-        None
-    )
-    if not entry:
-        raise RuntimeError(
-            f"API key ID {api_key_id} not found or is not ACTIVE in cached license."
-        )
-    full_key = entry.get('api_key', '')
-    if not full_key:
-        raise RuntimeError(
-            f"API key ID {api_key_id} has no key value in cached license."
-        )
-
-    # Write full key to secret
+    # Write full key directly to secret — never touches APP_CONFIG
     session.sql(
         "ALTER SECRET APP_SCHEMA.LOCID_API_KEY SET SECRET_STRING = ?",
-        params=[full_key]
+        params=[api_key_value]
     ).collect()
 
     # Write masked hint to APP_CONFIG
-    session.sql(_UPSERT_SQL, params=['api_key_hint', full_key[:8]]).collect()
+    session.sql(_UPSERT_SQL, params=['api_key_hint', api_key_value[:8]]).collect()
 
-    # Scrub full api_key values from cached_license; replace with api_key_hint
-    for e in data.get('access', []):
-        if 'api_key' in e:
-            e['api_key_hint'] = e['api_key'][:8]
-            del e['api_key']
-
-    session.sql(_UPSERT_SQL, params=['cached_license', json.dumps(data)]).collect()
-
-    # Remove old 'api_key' row from APP_CONFIG if it exists
+    # Remove legacy plain-text 'api_key' row if it exists from older versions
     session.sql(
         "DELETE FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key'"
     ).collect()
@@ -445,7 +419,7 @@ def set_api_key_handler(session: snowpark.Session, api_key_id: int) -> str:
     return f"API key {api_key_id} stored in LOCID_API_KEY secret."
 $$;
 
-GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER)
+GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR)
     TO APPLICATION ROLE APP_ADMIN;
 
 

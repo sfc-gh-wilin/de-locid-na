@@ -100,9 +100,10 @@ def _strip_sensitive(data: dict) -> dict:
     Return a copy of the LocID Central response safe to cache in APP_CONFIG:
       - Remove 'secrets' entirely (base_locid_secret, scheme_secret)
       - Mask license.license_key → first-4-chars + '-****'
-      - Keep access[].api_key intact for LOCID_SET_API_KEY (Setup Wizard Screen H)
+      - Strip access[].api_key entirely — the full key is never stored in
+        APP_CONFIG. LOCID_SET_API_KEY receives the key directly from Streamlit
+        session state and writes it to the LOCID_API_KEY Snowflake SECRET.
       - Add access[].api_key_hint (first 8 chars) for display
-      LOCID_SET_API_KEY scrubs api_key → api_key_hint after key selection.
     """
     stripped = {k: v for k, v in data.items() if k != 'secrets'}
 
@@ -113,12 +114,14 @@ def _strip_sensitive(data: dict) -> dict:
         lic['license_key'] = raw_lic_key[:4] + '-****'
     stripped['license'] = lic
 
-    # Add api_key_hint for display; keep api_key for LOCID_SET_API_KEY
+    # Strip api_key; add api_key_hint for display
     clean_access = []
     for entry in stripped.get('access', []):
         e = dict(entry)
-        if 'api_key' in e and 'api_key_hint' not in e:
-            e['api_key_hint'] = e['api_key'][:8]
+        if 'api_key' in e:
+            if 'api_key_hint' not in e:
+                e['api_key_hint'] = e['api_key'][:8]
+            del e['api_key']
         clean_access.append(e)
     stripped['access'] = clean_access
 

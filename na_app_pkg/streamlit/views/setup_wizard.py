@@ -14,8 +14,6 @@ LocID Native App — Setup Wizard (View 2)
   I. Setup Complete
 """
 
-import json
-
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.locid_central import fetch_license
@@ -244,26 +242,34 @@ elif step == "H":
         "Snowflake account should use for LocID lookups."
     )
 
-    cached_rows = session.sql(
-        "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
-        "WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1"
-    ).collect()
+    # api_key values are kept only in session state (in-memory) — never written
+    # to APP_CONFIG. If this session was restarted after Screen D, the user must
+    # re-validate the license to repopulate session state.
+    lic_data = st.session_state.get("license_data")
 
     active_entries: list = []
     client_id = 0
-    if cached_rows and cached_rows[0][0]:
+
+    if not lic_data:
+        st.error(
+            "License data is no longer available in this session. "
+            "Please go back to **Enter License Key** and re-validate."
+        )
+        if st.button("← Back to License Key"):
+            st.session_state.wizard_step = "D"
+            st.rerun()
+    else:
         try:
-            lic_data       = json.loads(cached_rows[0][0])
-            client_id      = int(lic_data.get("license", {}).get("client_id", 0))
+            client_id = int(lic_data.get("license", {}).get("client_id", 0))
             active_entries = [
                 e for e in lic_data.get("access", [])
                 if e.get("status") == "ACTIVE"
             ]
         except Exception as e:
             logger.error(session, "setup_wizard.api_key",
-                         "Failed to parse cached license", exc=e)
+                         "Failed to parse license data", exc=e)
 
-    if not active_entries:
+    if lic_data and not active_entries:
         st.error(
             "No active API keys found in your license response. "
             "Go back and re-validate your license key, or contact LocID."
@@ -271,9 +277,9 @@ elif step == "H":
         if st.button("← Back"):
             st.session_state.wizard_step = "G"
             st.rerun()
-    else:
+    elif active_entries:
         labels = [
-            f"API Key #{e.get('api_key_id')} — {e.get('api_key_hint', '????') + '****'}"
+            f"API Key #{e.get('api_key_id')} — {e.get('api_key', '')[:8] or e.get('api_key_hint', '????')}****"
             for e in active_entries
         ]
 
@@ -291,17 +297,25 @@ elif step == "H":
                 st.rerun()
         with col2:
             if st.button("Confirm Selection", type="primary"):
-                entry = active_entries[chosen_idx]
-                api_key_id = int(entry.get("api_key_id", 0))
-                session.call("APP_SCHEMA.LOCID_SET_API_KEY", api_key_id)
-                _upsert_config("api_key_id",         str(api_key_id))
-                _upsert_config("namespace_guid",     entry.get("namespace_guid", ""))
-                _upsert_config("client_id",          str(client_id))
-                _upsert_config("onboarding_complete", "true")
-                logger.info(session, "setup_wizard.api_key",
-                            f"API key selected: {api_key_id}")
-                st.session_state.wizard_step = "I"
-                st.rerun()
+                entry       = active_entries[chosen_idx]
+                api_key_id  = int(entry.get("api_key_id", 0))
+                api_key_val = entry.get("api_key", "")
+                if not api_key_val:
+                    st.error(
+                        "API key value missing from session data. "
+                        "Re-validate your license key and try again."
+                    )
+                else:
+                    session.call("APP_SCHEMA.LOCID_SET_API_KEY",
+                                 api_key_id, api_key_val)
+                    _upsert_config("api_key_id",          str(api_key_id))
+                    _upsert_config("namespace_guid",      entry.get("namespace_guid", ""))
+                    _upsert_config("client_id",           str(client_id))
+                    _upsert_config("onboarding_complete", "true")
+                    logger.info(session, "setup_wizard.api_key",
+                                f"API key selected: {api_key_id}")
+                    st.session_state.wizard_step = "I"
+                    st.rerun()
 
 # ---------------------------------------------------------------------------
 # Screen I — Setup Complete
