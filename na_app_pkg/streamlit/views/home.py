@@ -116,8 +116,10 @@ def _parse_license(raw: str | None) -> tuple[str, str, str]:
     if not raw:
         return "NOT CONFIGURED", "—", "—"
     try:
-        lic     = json.loads(raw).get("license", {})
-        status  = lic.get("status", "UNKNOWN")
+        data    = json.loads(raw)
+        lic     = data.get("license", {})
+        access  = data.get("access", [])
+        status  = access[0].get("status", "UNKNOWN") if access else "UNKNOWN"
         client  = lic.get("client_name", "—")
         expiry  = lic.get("expiration_date", "")
         exp_str = expiry[:10] if expiry else "—"
