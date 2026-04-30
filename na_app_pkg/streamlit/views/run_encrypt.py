@@ -84,6 +84,25 @@ def _get_ref_columns(ref_name: str) -> list[str]:
         return []
 
 
+def _best_match(columns: list[str], hints: list[str]) -> int:
+    """Return the selectbox index of the best-matching column, or 0 if none found.
+
+    Priority:
+      1. Exact case-insensitive match.
+      2. Column name contains a hint, or hint contains the column name.
+    """
+    lower = [c.lower() for c in columns]
+    for hint in hints:                          # exact pass
+        for i, col in enumerate(lower):
+            if col == hint:
+                return i
+    for hint in hints:                          # substring pass
+        for i, col in enumerate(lower):
+            if hint in col or col in hint:
+                return i
+    return 0
+
+
 def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
     """
     Advisory pre-flight checks on the mapped columns.
@@ -256,9 +275,18 @@ elif step == 2:
     if not columns:
         st.error("Column list is empty — go back and re-enter the table name.")
     else:
-        col_id = st.selectbox("Unique Row ID", columns)
-        col_ip = st.selectbox("IP Address",    columns)
-        col_ts = st.selectbox("Timestamp",     columns)
+        col_id = st.selectbox("Unique Row ID", columns,
+                              index=_best_match(columns,
+                                  ['id', 'row_id', 'unique_id', 'uid',
+                                   'customer_id', 'user_id', 'record_id', 'key']))
+        col_ip = st.selectbox("IP Address",    columns,
+                              index=_best_match(columns,
+                                  ['ip_address', 'ip_addr', 'ip',
+                                   'client_ip', 'source_ip']))
+        col_ts = st.selectbox("Timestamp",     columns,
+                              index=_best_match(columns,
+                                  ['ts', 'timestamp', 'event_ts', 'event_time',
+                                   'time', 'datetime']))
         ts_fmt = st.selectbox("Timestamp Format",
                               ["epoch_sec", "epoch_ms", "timestamp"],
                               help=(

@@ -83,6 +83,25 @@ def _get_ref_columns(ref_name: str) -> list[str]:
         return []
 
 
+def _best_match(columns: list[str], hints: list[str]) -> int:
+    """Return the selectbox index of the best-matching column, or 0 if none found.
+
+    Priority:
+      1. Exact case-insensitive match.
+      2. Column name contains a hint, or hint contains the column name.
+    """
+    lower = [c.lower() for c in columns]
+    for hint in hints:                          # exact pass
+        for i, col in enumerate(lower):
+            if col == hint:
+                return i
+    for hint in hints:                          # substring pass
+        for i, col in enumerate(lower):
+            if hint in col or col in hint:
+                return i
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Step state
 # ---------------------------------------------------------------------------
@@ -145,8 +164,13 @@ elif step == 2:
     if not columns:
         st.error("Column list is empty — go back and re-enter the table name.")
     else:
-        col_id    = st.selectbox("Unique Row ID", columns)
-        col_txclo = st.selectbox("TX_CLOC",       columns)
+        col_id    = st.selectbox("Unique Row ID", columns,
+                                  index=_best_match(columns,
+                                      ['id', 'row_id', 'unique_id', 'uid',
+                                       'customer_id', 'user_id', 'record_id', 'key']))
+        col_txclo = st.selectbox("TX_CLOC",       columns,
+                                  index=_best_match(columns,
+                                      ['tx_cloc', 'txcloc', 'cloc', 'tx_loc']))
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
