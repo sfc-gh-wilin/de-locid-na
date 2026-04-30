@@ -44,20 +44,26 @@ st.divider()
 # Helpers
 # ---------------------------------------------------------------------------
 def _get_bound_table(ref_name: str) -> str | None:
-    """Return FQN of the currently bound table for ref_name, or None."""
+    """Return FQN of the currently bound table for ref_name, or None.
+
+    SYSTEM$GET_ALL_REFERENCES(name, TRUE) returns a JSON array of
+    {alias, database, schema, name} objects for each association.
+    """
     try:
-        rows = session.sql("SELECT SYSTEM$GET_ALL_REFERENCES()").collect()
+        rows = session.sql(
+            "SELECT SYSTEM$GET_ALL_REFERENCES(?, TRUE)", params=[ref_name]
+        ).collect()
         if not rows or not rows[0][0]:
             return None
-        for ref in json.loads(rows[0][0]):
-            if ref.get('name', '').upper() == ref_name.upper():
-                bindings = ref.get('bindings', [])
-                if bindings:
-                    b = bindings[0]
-                    # Snowflake returns the FQN under 'name' or 'objectName'
-                    # depending on object type and platform version
-                    fqn = b.get('name') or b.get('objectName') or b.get('object_name')
-                    return fqn or None
+        bindings = json.loads(rows[0][0])
+        if not bindings:
+            return None
+        b      = bindings[0]
+        db     = b.get('database', '')
+        schema = b.get('schema', '')
+        name   = b.get('name', '')
+        if db and schema and name:
+            return f"{db}.{schema}.{name}"
     except Exception as e:
         logger.warning(session, "run_encrypt._get_bound_table",
                        f"Failed to resolve reference {ref_name}: {e}")
