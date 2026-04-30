@@ -148,7 +148,18 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
 
 def _show_validation(v: dict) -> None:
     """Render advisory validation results."""
-    if v.get("cnt_v4") is not None:
+    ip_ok = v.get("cnt_v4") is not None
+    ts_ok = v.get("stale_count") is not None
+
+    if not ip_ok and not ts_ok:
+        st.error(
+            "Validation could not run — unable to access the input table. "
+            "Ensure the table is bound via **⚙ Settings → Permissions**.",
+            icon="❌",
+        )
+        return
+
+    if ip_ok:
         v4, v6, bad, nul = v["cnt_v4"], v["cnt_v6"], v["bad_ip"], v["null_ip"]
         ip_parts = []
         if v4: ip_parts.append(f"IPv4: {v4:,}")
@@ -248,7 +259,7 @@ elif step == 2:
         if st.button("✅ Run Input Validation"):
             with st.spinner("Checking IP format and timestamp range…"):
                 v = _validate_inputs(
-                    st.session_state.enc_input_table, col_ip, col_ts, ts_fmt
+                    "reference('ENCRYPT_INPUT_TABLE')", col_ip, col_ts, ts_fmt
                 )
                 st.session_state.enc_validation      = v
                 st.session_state.enc_validation_cols = (col_ip, col_ts, ts_fmt)

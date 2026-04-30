@@ -291,7 +291,7 @@ def encrypt_handler(
         # Step 0: Set job warehouse from bound APP_WAREHOUSE reference
         # ------------------------------------------------------------------
         session.sql("USE WAREHOUSE reference('APP_WAREHOUSE')").collect()
-        cur_wh = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
+        cur_wh = 'APP_WAREHOUSE'   # CURRENT_WAREHOUSE() is not permitted in Native App procs
         phases['warehouse_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
