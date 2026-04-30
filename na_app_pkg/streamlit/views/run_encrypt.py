@@ -10,7 +10,6 @@ LocID Native App — Run Encrypt (View 3)
 """
 
 import json
-import re
 from datetime import datetime, timedelta, timezone
 
 import streamlit as st
@@ -82,27 +81,6 @@ def _get_ref_columns(ref_name: str) -> list[str]:
     except Exception as e:
         logger.warning(session, "run_encrypt._get_ref_columns",
                        f"Failed to describe reference {ref_name}: {e}")
-        return []
-
-
-def _load_columns(table_fqn: str) -> list[str]:
-    """Return ordered column names for a manually entered fully qualified table."""
-    parts = [p.strip().strip('"') for p in table_fqn.strip().split(".")]
-    if len(parts) != 3:
-        return []
-    db, schema_name, table_name = parts
-    if not re.match(r'^[A-Za-z0-9_$]+$', db):
-        return []
-    try:
-        rows = session.sql(
-            f"SELECT COLUMN_NAME FROM {db}.INFORMATION_SCHEMA.COLUMNS "
-            "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION",
-            params=[schema_name.upper(), table_name.upper()]
-        ).collect()
-        return [r[0] for r in rows]
-    except Exception as e:
-        logger.warning(session, "run_encrypt._load_columns",
-                       f"Failed to load columns for {table_fqn}: {e}")
         return []
 
 
@@ -222,8 +200,8 @@ if step == 1:
     if bound:
         st.info(f"Using pre-configured input table: `{bound}`", icon="✅")
         st.caption(
-            "To use a different table, go to Snowsight → Catalog → Apps → "
-            "this app → Settings → Permissions, then re-bind **Input Table for Encrypt**."
+            "To use a different table, click the **⚙ Settings** icon (top right) "
+            "→ **Permissions** → re-bind **Input Table for Encrypt**."
         )
         st.caption("Preview (first 5 rows):")
         try:
@@ -245,48 +223,11 @@ if step == 1:
                 st.rerun()
     else:
         st.warning(
-            "No input table is configured yet. Enter the table name below, "
-            "grant the app SELECT access, then bind it in Snowsight.",
+            "No input table is configured yet. "
+            "Click the **⚙ Settings** icon (top right) → **Permissions** → "
+            "grant and bind **Input Table for Encrypt**.",
             icon="⚠️",
         )
-        try:
-            _app_name = session.sql("SELECT CURRENT_DATABASE()").collect()[0][0]
-        except Exception:
-            _app_name = "<app_name>"
-
-        input_table = st.text_input(
-            "Input table (fully qualified)",
-            placeholder="MY_DB.MY_SCHEMA.MY_TABLE",
-            key="enc_input_table_input",
-        )
-        if input_table:
-            st.markdown("**Step 1 — Grant SELECT access:**")
-            st.code(
-                f"GRANT SELECT ON TABLE {input_table}\n"
-                f"    TO APPLICATION {_app_name};",
-                language="sql",
-            )
-            st.markdown(
-                "**Step 2 — Bind the table:** go to Snowsight → Catalog → Apps → "
-                f"this app → Settings → Permissions → **Input Table for Encrypt** → "
-                f"select `{input_table}`."
-            )
-            st.caption("Preview (first 5 rows):")
-            try:
-                preview = session.sql(f"SELECT * FROM {input_table} LIMIT 5").to_pandas()
-                st.dataframe(preview, use_container_width=True)
-                del preview
-            except Exception as e:
-                st.warning(f"Could not load preview: {e}")
-        if st.button("Next →", disabled=not input_table):
-            cols = _load_columns(input_table)
-            if not cols:
-                st.error("Could not read columns. Check the table name and your SELECT privilege.")
-            else:
-                st.session_state.enc_input_table   = input_table
-                st.session_state.enc_input_columns = cols
-                st.session_state.enc_step          = 2
-                st.rerun()
 
 # ---------------------------------------------------------------------------
 # Step 2 — Map Columns
