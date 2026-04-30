@@ -70,8 +70,23 @@ def _get_bound_table(ref_name: str) -> str | None:
     return None
 
 
+def _get_ref_columns(ref_name: str) -> list[str]:
+    """Return ordered column names for a table bound via reference.
+
+    Uses DESCRIBE TABLE reference(...) — the only authorized path inside a
+    Native App for consumer tables accessed through a reference binding.
+    """
+    try:
+        rows = session.sql(f"DESCRIBE TABLE reference('{ref_name}')").collect()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.warning(session, "run_encrypt._get_ref_columns",
+                       f"Failed to describe reference {ref_name}: {e}")
+        return []
+
+
 def _load_columns(table_fqn: str) -> list[str]:
-    """Return ordered column names for a fully qualified table."""
+    """Return ordered column names for a manually entered fully qualified table."""
     parts = [p.strip().strip('"') for p in table_fqn.strip().split(".")]
     if len(parts) != 3:
         return []
@@ -212,13 +227,15 @@ if step == 1:
         )
         st.caption("Preview (first 5 rows):")
         try:
-            preview = session.sql(f"SELECT * FROM {bound} LIMIT 5").to_pandas()
+            preview = session.sql(
+                "SELECT * FROM reference('ENCRYPT_INPUT_TABLE') LIMIT 5"
+            ).to_pandas()
             st.dataframe(preview, use_container_width=True)
             del preview
         except Exception as e:
             st.warning(f"Could not load preview: {e}")
         if st.button("Next →", type="primary"):
-            cols = _load_columns(bound)
+            cols = _get_ref_columns('ENCRYPT_INPUT_TABLE')
             if not cols:
                 st.error("Could not read columns. Check that the table exists and the app has SELECT access.")
             else:
