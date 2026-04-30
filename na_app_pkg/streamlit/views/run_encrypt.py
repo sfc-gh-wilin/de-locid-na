@@ -117,9 +117,9 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
     try:
         if ts_fmt == "epoch_ms":
             ts_expr = f"FLOOR({ts_col}::DOUBLE / 1000.0)::BIGINT"
-        elif ts_fmt == "timestamp_string":
-            ts_expr = f"DATE_PART(epoch_second, TRY_TO_TIMESTAMP({ts_col}))::BIGINT"
-        else:
+        elif ts_fmt == "timestamp":
+            ts_expr = f"DATE_PART(epoch_second, {ts_col}::TIMESTAMP_NTZ)::BIGINT"
+        else:   # epoch_sec (default)
             ts_expr = f"{ts_col}::BIGINT"
 
         # UTC cutoff — 52 weeks back from now
@@ -171,6 +171,13 @@ def _show_validation(v: dict) -> None:
                        icon="⚠️")
         if nul:
             st.warning(f"{nul:,} NULL IP value(s) — will be skipped.", icon="⚠️")
+
+    if not ts_ok:
+        st.warning(
+            "Timestamp validation failed — check that the correct **Timestamp Format** "
+            "is selected for this column.",
+            icon="⚠️",
+        )
 
     if v.get("stale_count") is not None:
         if v["stale_count"]:
@@ -253,7 +260,12 @@ elif step == 2:
         col_ip = st.selectbox("IP Address",    columns)
         col_ts = st.selectbox("Timestamp",     columns)
         ts_fmt = st.selectbox("Timestamp Format",
-                              ["epoch_sec", "epoch_ms", "timestamp_string"])
+                              ["epoch_sec", "epoch_ms", "timestamp"],
+                              help=(
+                                  "**epoch_sec** — integer Unix seconds  \n"
+                                  "**epoch_ms** — integer Unix milliseconds  \n"
+                                  "**timestamp** — Snowflake TIMESTAMP_NTZ column"
+                              ))
         st.divider()
 
         if st.button("✅ Run Input Validation"):

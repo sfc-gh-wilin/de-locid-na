@@ -265,7 +265,7 @@ FROM gen;
 --   Date 2025-01-10 falls within build_dt 2025-01-08 range (2025-01-08 → 2025-01-14).
 --   Timestamps span ~16.5 hours — all on 2025-01-10 for clarity.
 --
--- For the Native App Encrypt proc, select timestamp format: 'datetime' (not epoch_ms).
+-- For the Native App Encrypt proc, select timestamp format: 'timestamp' (Snowflake TIMESTAMP_NTZ column).
 -- ---------------------------------------------------------------------------
 INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
 WITH gen AS (
