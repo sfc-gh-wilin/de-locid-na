@@ -18,8 +18,8 @@
 -- GENERATED DATA SCHEMA:
 --   IPv4: 10.0.0.0 – 10.9.9.0 (/24 subnets, 100 blocks)
 --   IPv6: 2001:DB8:1:1:: – 2001:DB8:1:10:: (/64 subnets, 10 blocks, RFC 3849 documentation prefix)
---   Build date:         2025-01-08
---   Customer event ts:  2025-01-10 (falls within the 2025-01-08 build range)
+--   Build date:         CURRENT_DATE - 14  (dynamic — always within 52-week freshness window)
+--   Customer event ts:  CURRENT_DATE - 12  (2 days into the build week; never triggers stale warning)
 --   All rows produce valid LOCID_TXCLOC_ENCRYPT / LOCID_STABLE_CLOC output
 --   when $base_locid_secret matches the secret registered with LocID Central.
 --
@@ -39,6 +39,12 @@ USE SCHEMA   LOCID_DEV.STAGING;
 --   (secrets.base_locid_secret — NOT the License Key).
 --   Format: Base64-URL encoded AES key string with ~ as alternate padding.
 SET base_locid_secret = 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET';
+
+-- Dynamic test dates — recomputed on every run so timestamps never go stale.
+--   test_build_dt : 14 days ago  → used as build_dt in LOCID_BUILDS / LOCID_BUILD_DATES
+--   test_event_dt : 12 days ago  → 2 days into the build week; always < 52 weeks old
+SET test_build_dt = DATEADD('day', -14, CURRENT_DATE);
+SET test_event_dt = DATEADD('day', -12, CURRENT_DATE);
 
 
 -- ---------------------------------------------------------------------------
@@ -95,16 +101,20 @@ TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
 -- ---------------------------------------------------------------------------
 -- STEP 4: LOCID_BUILD_DATES (5 rows)
 --
--- Each entry defines the date range during which a given weekly build applies.
--- A customer event timestamped 2025-01-10 falls in the 2025-01-08 build range.
+-- Five consecutive weekly ranges centred on $test_build_dt (CURRENT_DATE - 14).
+-- A customer event timestamped $test_event_dt (CURRENT_DATE - 12) falls in the
+-- w=2 range: [$test_build_dt, $test_build_dt + 6].
 -- ---------------------------------------------------------------------------
 INSERT INTO LOCID_DEV.STAGING.LOCID_BUILD_DATES (build_dt, start_dt, end_dt)
-VALUES
-    ('2025-01-01'::DATE, '2025-01-01'::DATE, '2025-01-07'::DATE),
-    ('2025-01-08'::DATE, '2025-01-08'::DATE, '2025-01-14'::DATE),
-    ('2025-01-15'::DATE, '2025-01-15'::DATE, '2025-01-21'::DATE),
-    ('2025-01-22'::DATE, '2025-01-22'::DATE, '2025-01-28'::DATE),
-    ('2025-01-29'::DATE, '2025-01-29'::DATE, '2025-02-04'::DATE);
+WITH weeks AS (
+    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS w
+    FROM TABLE(GENERATOR(rowcount => 5))
+)
+SELECT
+    DATEADD('day', (w - 2) * 7, $test_build_dt)       AS build_dt,
+    DATEADD('day', (w - 2) * 7, $test_build_dt)       AS start_dt,
+    DATEADD('day', (w - 2) * 7 + 6, $test_build_dt)   AS end_dt
+FROM weeks;
 
 
 -- ---------------------------------------------------------------------------
@@ -116,7 +126,7 @@ VALUES
 --   ...
 --   rn 90-99: 10.0.9.0/24  →  10.9.9.0/24
 --
--- All rows use build_dt = 2025-01-08 (matches the LOCID_BUILD_DATES entry above).
+-- All rows use build_dt = $test_build_dt (matches the LOCID_BUILD_DATES entry above).
 -- start_ip_int_hex / end_ip_int_hex are NULL — not used for IPv4 range matching.
 -- locid_horizontal_accuracy rotates through four representative values (meters).
 -- ---------------------------------------------------------------------------
@@ -132,7 +142,7 @@ WITH gen AS (
     FROM TABLE(GENERATOR(rowcount => 100))
 )
 SELECT
-    '2025-01-08'::DATE AS build_dt,
+    $test_build_dt::DATE AS build_dt,
     '10.' || (rn % 10)::VARCHAR || '.' || (rn / 10 % 10)::VARCHAR || '.0'   AS start_ip,
     '10.' || (rn % 10)::VARCHAR || '.' || (rn / 10 % 10)::VARCHAR || '.255' AS end_ip,
     NULL AS start_ip_int_hex,
@@ -193,7 +203,7 @@ WITH gen AS (
     FROM TABLE(GENERATOR(rowcount => 10))
 )
 SELECT
-    '2025-01-08'::DATE                                                                AS build_dt,
+    $test_build_dt::DATE                                                                AS build_dt,
     '2001:DB8:1:' || rn::VARCHAR || '::'                                              AS start_ip,
     '2001:DB8:1:' || rn::VARCHAR || ':FFFF:FFFF:FFFF:FFFF'                            AS end_ip,
     GET_PATH(PARSE_IP('2001:DB8:1:' || rn::VARCHAR || '::', 'INET'), 'hex_ipv6')
@@ -248,7 +258,7 @@ WITH gen AS (
     FROM TABLE(GENERATOR(rowcount => 100))
 )
 SELECT
-    '2025-01-08'::DATE AS build_dt,
+    $test_build_dt::DATE AS build_dt,
     '10.' || (rn % 10)::VARCHAR || '.' || (rn / 10 % 10)::VARCHAR || '.1'   AS ip_address,
     '10.' || (rn % 10)::VARCHAR || '.' || (rn / 10 % 10)::VARCHAR || '.0'   AS start_ip,
     '10.' || (rn % 10)::VARCHAR || '.' || (rn / 10 % 10)::VARCHAR || '.255' AS end_ip
@@ -261,9 +271,9 @@ FROM gen;
 -- Each row uses the .1 host from a generated /24 subnet so that it matches
 -- exactly one LOCID_BUILDS_IPV4_EXPLODED entry (and therefore one LOCID_BUILDS row).
 --
--- Timestamps: 2025-01-10 08:00:00 + (rn × 10 minutes)
---   Date 2025-01-10 falls within build_dt 2025-01-08 range (2025-01-08 → 2025-01-14).
---   Timestamps span ~16.5 hours — all on 2025-01-10 for clarity.
+-- Timestamps: $test_event_dt 08:00:00 + (rn × 10 minutes)  (dynamic: CURRENT_DATE - 12)
+--   Date $test_event_dt falls within build_dt $test_build_dt range (+0 → +6 days).
+--   Timestamps span ~16.5 hours — all on $test_event_dt for clarity.
 --
 -- For the Native App Encrypt proc, select timestamp format: 'timestamp' (Snowflake TIMESTAMP_NTZ column).
 -- ---------------------------------------------------------------------------
@@ -275,7 +285,7 @@ WITH gen AS (
 SELECT
     'GEN_' || LPAD(rn::VARCHAR, 4, '0')                                       AS id,
     '10.' || (rn % 10)::VARCHAR || '.' || (rn / 10 % 10)::VARCHAR || '.1'    AS ip_address,
-    DATEADD('minute', rn * 10, '2025-01-10 08:00:00'::TIMESTAMP_NTZ)         AS ts
+    DATEADD('minute', rn * 10, DATEADD('hour', 8, $test_event_dt::TIMESTAMP_NTZ))  AS ts
 FROM gen;
 
 
@@ -283,8 +293,8 @@ FROM gen;
 -- STEP 7b: CUSTOMER_TEST_INPUT — IPv6 rows (10 rows)
 --
 -- One ::1 host per generated /64 subnet, matching the LOCID_BUILDS IPv6 rows
--- inserted in STEP 5b. Timestamps start at 18:00:00 on 2025-01-10 to avoid
--- overlap with IPv4 rows while staying within the same 2025-01-08 build range.
+-- inserted in STEP 5b. Timestamps start at 18:00:00 on $test_event_dt to avoid
+-- overlap with IPv4 rows while staying within the same $test_build_dt build range.
 -- ---------------------------------------------------------------------------
 INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
 WITH gen AS (
@@ -294,7 +304,7 @@ WITH gen AS (
 SELECT
     'GEN_V6_' || LPAD(rn::VARCHAR, 4, '0')                                    AS id,
     '2001:DB8:1:' || rn::VARCHAR || '::1'                                      AS ip_address,
-    DATEADD('minute', rn * 10, '2025-01-10 18:00:00'::TIMESTAMP_NTZ)          AS ts
+    DATEADD('minute', rn * 10, DATEADD('hour', 18, $test_event_dt::TIMESTAMP_NTZ)) AS ts
 FROM gen;
 
 
@@ -324,7 +334,7 @@ WITH gen AS (
 SELECT
     'GEN_' || LPAD(rn::VARCHAR, 4, '0')                                       AS row_id,
     '10.' || (rn % 10)::VARCHAR || '.' || (rn / 10 % 10)::VARCHAR || '.1'    AS ip_addr,
-    DATEADD('minute', rn * 10, '2025-01-10 08:00:00'::TIMESTAMP_NTZ)         AS event_ts
+    DATEADD('minute', rn * 10, DATEADD('hour', 8, $test_event_dt::TIMESTAMP_NTZ))  AS event_ts
 FROM gen;
 
 -- IPv6 consumer input (10 rows) — mirrors CUSTOMER_TEST_INPUT IPv6 rows (STEP 7b)
@@ -336,7 +346,7 @@ WITH gen AS (
 SELECT
     'GEN_V6_' || LPAD(rn::VARCHAR, 4, '0')                                    AS row_id,
     '2001:DB8:1:' || rn::VARCHAR || '::1'                                      AS ip_addr,
-    DATEADD('minute', rn * 10, '2025-01-10 18:00:00'::TIMESTAMP_NTZ)          AS event_ts
+    DATEADD('minute', rn * 10, DATEADD('hour', 18, $test_event_dt::TIMESTAMP_NTZ)) AS event_ts
 FROM gen;
 
 
