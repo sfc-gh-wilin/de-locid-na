@@ -115,7 +115,7 @@ else:
                 st.metric("Rows in",  f"{rows_in:,}")
                 st.metric("Rows out", f"{rows_out:,}")
                 st.metric("Runtime",  f"{runtime_s}s")
-            if error_msg:
+            if error_msg and error_msg != 'None':
                 st.error(f"Error: {error_msg}", icon="❌")
             if st.button(":material/replay: Re-run with same settings",
                          key=f"rerun_{job_id}"):
