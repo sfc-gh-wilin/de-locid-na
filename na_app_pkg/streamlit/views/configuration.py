@@ -177,16 +177,7 @@ else:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Section 4 — Advanced
-# ---------------------------------------------------------------------------
-st.subheader(":material/settings: Advanced")
-if st.button(":material/restart_alt: Re-run Setup Wizard"):
-    st.switch_page("views/setup_wizard.py")
-
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Section 5 — Log Retention
+# Section 4 — Log Retention
 # ---------------------------------------------------------------------------
 st.subheader(":material/delete_sweep: Log Retention")
 st.caption(
@@ -235,3 +226,12 @@ if purge_clicked:
     except Exception as e:
         logger.error(session, "configuration.purge_logs", "Purge failed", exc=e)
         st.error(str(e), icon="❌")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Section 5 — Advanced
+# ---------------------------------------------------------------------------
+st.subheader(":material/settings: Advanced")
+if st.button(":material/restart_alt: Re-run Setup Wizard"):
+    st.switch_page("views/setup_wizard.py")
