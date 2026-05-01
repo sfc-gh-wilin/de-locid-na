@@ -521,14 +521,14 @@ DECLARE
 BEGIN
     -- Read retention setting from APP_CONFIG (fall back to 30 if missing)
     LET cfg RESULTSET := (
-        SELECT TRY_TO_NUMBER(config_value)
+        SELECT TRY_TO_NUMBER(config_value) AS retention_val
         FROM APP_SCHEMA.APP_CONFIG
         WHERE config_key = 'log_retention_days' AND is_active = TRUE
         LIMIT 1
     );
-    FOR row IN cfg DO
-        IF (row.TRY_TO_NUMBER(config_value) IS NOT NULL AND row.TRY_TO_NUMBER(config_value) >= 1) THEN
-            retention_days := row.TRY_TO_NUMBER(config_value);
+    FOR rec IN cfg DO
+        IF (rec.retention_val IS NOT NULL AND rec.retention_val >= 1) THEN
+            retention_days := rec.retention_val;
         END IF;
     END FOR;
 
