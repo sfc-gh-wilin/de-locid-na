@@ -1,6 +1,6 @@
 """
 streamlit/views/sql_guide.py
-LocID Native App — SQL Guide (View 7)
+LocID Native App — SQL Guide (View 6)
 
 Step-by-step guide for running Encrypt and Decrypt jobs via SQL stored
 procedures, for consumers who need to call the procedures from pipelines,
@@ -40,29 +40,9 @@ st.info(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Step 1 — Grant SELECT on input table
+# Step 1 — Bind the input table and warehouse
 # ---------------------------------------------------------------------------
-st.subheader("Step 1 — Grant SELECT on your input table to the app")
-st.markdown(
-    "Before binding the table, the app needs SELECT access on it. "
-    "Run this as the role that **owns** the table (or has `SELECT WITH GRANT OPTION`):"
-)
-st.code(
-    f"-- For Encrypt jobs:\n"
-    f"GRANT SELECT ON TABLE <your_db>.<your_schema>.<encrypt_input_table>\n"
-    f"    TO APPLICATION {_app_name};\n\n"
-    f"-- For Decrypt jobs:\n"
-    f"GRANT SELECT ON TABLE <your_db>.<your_schema>.<decrypt_input_table>\n"
-    f"    TO APPLICATION {_app_name};",
-    language="sql",
-)
-
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Step 2 — Bind references (Snowsight UI or SQL)
-# ---------------------------------------------------------------------------
-st.subheader("Step 2 — Bind the input table and warehouse")
+st.subheader("Step 1 — Bind the input table and warehouse")
 
 tab_ui, tab_sql = st.tabs(["Snowsight UI (recommended)", "SQL (alternative)"])
 
@@ -81,10 +61,20 @@ with tab_ui:
 
 with tab_sql:
     st.markdown(
-        "Alternatively, bind each reference by calling the app's registration "
-        "procedure. Run as a role with USAGE on the app and ownership/grant "
-        "option on the objects:"
+        "When binding via SQL, you must first grant the app SELECT access on "
+        "your input table(s). Run as the role that **owns** the table (or has "
+        "`SELECT WITH GRANT OPTION`):"
     )
+    st.code(
+        f"-- For Encrypt jobs:\n"
+        f"GRANT SELECT ON TABLE <your_db>.<your_schema>.<encrypt_input_table>\n"
+        f"    TO APPLICATION {_app_name};\n\n"
+        f"-- For Decrypt jobs:\n"
+        f"GRANT SELECT ON TABLE <your_db>.<your_schema>.<decrypt_input_table>\n"
+        f"    TO APPLICATION {_app_name};",
+        language="sql",
+    )
+    st.markdown("Then bind each reference by calling the app's registration procedure:")
     st.code(
         f"-- Bind Encrypt input table:\n"
         f"CALL {_app_name}.APP_SCHEMA.register_single_callback(\n"
@@ -111,9 +101,9 @@ with tab_sql:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Step 3 — Run Encrypt
+# Step 2 — Run Encrypt
 # ---------------------------------------------------------------------------
-st.subheader("Step 3 — Run an Encrypt job")
+st.subheader("Step 2 — Run an Encrypt job")
 st.markdown(
     "Call `LOCID_ENCRYPT` with your column names and timestamp format. "
     "The procedure reads from the bound `ENCRYPT_INPUT_TABLE` reference."
@@ -127,21 +117,46 @@ with st.expander("Parameter reference", expanded=False):
         "| `IP_COL` | VARCHAR | Column name for the IP address |\n"
         "| `TS_COL` | VARCHAR | Column name for the timestamp |\n"
         "| `TS_FORMAT` | VARCHAR | `'epoch_sec'`, `'epoch_ms'`, or `'timestamp'` |\n"
-        "| `OUTPUT_COLS` | ARRAY | Columns to include in output (empty array = all entitled) |"
+        "| `OUTPUT_COLS` | ARRAY | Columns to include in output — see valid values below. "
+        "Empty array `ARRAY_CONSTRUCT()` returns all entitled columns. |"
     )
     st.caption(
         "Use `'epoch_sec'` for Unix timestamps in seconds, `'epoch_ms'` for "
         "milliseconds, or `'timestamp'` for a `TIMESTAMP_NTZ` column."
     )
+    st.markdown("**Valid `OUTPUT_COLS` values (Encrypt):**")
+    st.code(
+        "ARRAY_CONSTRUCT(\n"
+        "    'tx_cloc',            -- TX_CLOC identifier  (requires allow_tx)\n"
+        "    'stable_cloc',        -- STABLE_CLOC UUID    (requires allow_stable)\n"
+        "    'locid_country',      -- Country name        (requires allow_geo_context)\n"
+        "    'locid_country_code', -- ISO country code    (requires allow_geo_context)\n"
+        "    'locid_region',       -- Region / state name (requires allow_geo_context)\n"
+        "    'locid_region_code',  -- Region code         (requires allow_geo_context)\n"
+        "    'locid_city',         -- City name           (requires allow_geo_context)\n"
+        "    'locid_city_code',    -- City code           (requires allow_geo_context)\n"
+        "    'locid_postal_code'   -- Postal / ZIP code   (requires allow_geo_context)\n"
+        ")",
+        language="sql",
+    )
+    st.caption(
+        "Columns your license is not entitled to are silently excluded even if listed. "
+        "Unrecognised column names are ignored."
+    )
 
 st.code(
-    f"-- Run the Encrypt job and capture the result:\n"
+    f"-- All entitled columns (recommended default):\n"
     f"CALL {_app_name}.APP_SCHEMA.LOCID_ENCRYPT(\n"
-    f"    'MY_ID',         -- ID_COL:     your unique row identifier column\n"
-    f"    'IP_ADDRESS',    -- IP_COL:     your IP address column\n"
-    f"    'EVENT_TS',      -- TS_COL:     your timestamp column\n"
-    f"    'epoch_sec',     -- TS_FORMAT:  epoch_sec | epoch_ms | timestamp\n"
+    f"    'MY_ID',           -- ID_COL:     your unique row identifier column\n"
+    f"    'IP_ADDRESS',      -- IP_COL:     your IP address column\n"
+    f"    'EVENT_TS',        -- TS_COL:     your timestamp column\n"
+    f"    'epoch_sec',       -- TS_FORMAT:  epoch_sec | epoch_ms | timestamp\n"
     f"    ARRAY_CONSTRUCT()  -- OUTPUT_COLS: empty = all entitled columns\n"
+    f");\n\n"
+    f"-- Specific columns only (e.g. TX_CLOC + country):\n"
+    f"CALL {_app_name}.APP_SCHEMA.LOCID_ENCRYPT(\n"
+    f"    'MY_ID', 'IP_ADDRESS', 'EVENT_TS', 'epoch_sec',\n"
+    f"    ARRAY_CONSTRUCT('tx_cloc', 'locid_country', 'locid_country_code')\n"
     f");",
     language="sql",
 )
@@ -169,9 +184,9 @@ st.code(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Step 4 — Run Decrypt
+# Step 3 — Run Decrypt
 # ---------------------------------------------------------------------------
-st.subheader("Step 4 — Run a Decrypt job")
+st.subheader("Step 3 — Run a Decrypt job")
 st.markdown(
     "Call `LOCID_DECRYPT` with your column names. "
     "The procedure reads from the bound `DECRYPT_INPUT_TABLE` reference."
@@ -183,15 +198,33 @@ with st.expander("Parameter reference", expanded=False):
         "|-----------|------|-------------|\n"
         "| `ID_COL` | VARCHAR | Column name for unique row identifier |\n"
         "| `TXCLOC_COL` | VARCHAR | Column name for the TX_CLOC values |\n"
-        "| `OUTPUT_COLS` | ARRAY | Columns to include in output (empty array = all entitled) |"
+        "| `OUTPUT_COLS` | ARRAY | Columns to include in output — see valid values below. "
+        "Empty array `ARRAY_CONSTRUCT()` returns all entitled columns. |"
+    )
+    st.markdown("**Valid `OUTPUT_COLS` values (Decrypt):**")
+    st.code(
+        "ARRAY_CONSTRUCT(\n"
+        "    'stable_cloc'         -- STABLE_CLOC UUID (requires allow_stable)\n"
+        "    -- Geo context columns are not available in v1 of the Decrypt path\n"
+        ")",
+        language="sql",
+    )
+    st.caption(
+        "Columns your license is not entitled to are silently excluded even if listed. "
+        "Unrecognised column names are ignored."
     )
 
 st.code(
-    f"-- Run the Decrypt job:\n"
+    f"-- All entitled columns (recommended default):\n"
     f"CALL {_app_name}.APP_SCHEMA.LOCID_DECRYPT(\n"
-    f"    'MY_ID',         -- ID_COL:      your unique row identifier column\n"
-    f"    'TX_CLOC',       -- TXCLOC_COL:  your TX_CLOC column\n"
+    f"    'MY_ID',           -- ID_COL:      your unique row identifier column\n"
+    f"    'TX_CLOC',         -- TXCLOC_COL:  your TX_CLOC column\n"
     f"    ARRAY_CONSTRUCT()  -- OUTPUT_COLS: empty = all entitled columns\n"
+    f");\n\n"
+    f"-- STABLE_CLOC only:\n"
+    f"CALL {_app_name}.APP_SCHEMA.LOCID_DECRYPT(\n"
+    f"    'MY_ID', 'TX_CLOC',\n"
+    f"    ARRAY_CONSTRUCT('stable_cloc')\n"
     f");",
     language="sql",
 )
@@ -207,9 +240,9 @@ st.code(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Step 5 — Check job history
+# Step 4 — Check job history
 # ---------------------------------------------------------------------------
-st.subheader("Step 5 — Check job history")
+st.subheader("Step 4 — Check job history")
 st.markdown(
     "All job runs are recorded in the `JOB_LOG` table. "
     "Use it to audit results or find the output table name from a previous run:"
