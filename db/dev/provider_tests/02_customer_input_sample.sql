@@ -59,7 +59,7 @@ FROM   LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
 -- STEP 4: Verify
 -- ---------------------------------------------------------------------------
 SELECT COUNT(*) AS rows_loaded FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT;
--- Expected: 100
+-- Expected: 110 (100 IPv4 + 10 IPv6 rows)
 
 -- Preview first 5 rows
 SELECT * FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT LIMIT 5;

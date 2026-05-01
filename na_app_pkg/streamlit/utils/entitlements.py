@@ -29,7 +29,7 @@ KNOWN_FLAGS = {
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _get_active_entitlements(_session_id: int) -> frozenset[str]:
+def get_active_entitlements(_session_id: int) -> frozenset[str]:
     """
     Return the frozenset of active entitlement flag names for the selected
     API key. Cached for 5 minutes per session.
@@ -82,7 +82,7 @@ def check_entitlement(session: snowpark.Session, flag: str, sid: int) -> None:
     Raise PermissionError if the active API key does not include flag.
     sid  — Snowflake session ID integer, used as cache key.
     """
-    active = _get_active_entitlements(sid)
+    active = get_active_entitlements(sid)
     if flag not in active:
         msg = (
             f"Your LocID license does not include '{flag}'. "
@@ -112,7 +112,7 @@ def get_active_output_cols(_session_id: int, operation: str) -> list[dict[str, A
         "WHERE config_key LIKE 'output_col.%' AND is_active = TRUE"
     ).collect()
 
-    active_flags = _get_active_entitlements(_session_id)
+    active_flags = get_active_entitlements(_session_id)
     result = []
 
     for row in rows:

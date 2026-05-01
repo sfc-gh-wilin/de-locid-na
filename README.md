@@ -129,6 +129,7 @@ APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)     -- Python stored procedure — fetch
 APP_SCHEMA.register_single_callback(...)    -- Callback proc for INPUT_TABLE and APP_WAREHOUSE references
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
+APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Scala UDFs — required by Snowflake for UDFs with JAR IMPORTS
@@ -154,9 +155,12 @@ Key functions:
 
 | UDF | Inputs | Output | Notes |
 |-----|--------|--------|-------|
-| `locid_encrypt` | `encrypted_locid`, `timestamp`, `scheme_key`, `base_locid_key`, `client_id` | `tx_cloc` | Decrypts base LocID from build table, re-encrypts as TX_CLOC |
-| `locid_stable` | `encrypted_locid`, `namespace_guid`, `client_id`, `tier` | `stable_cloc` | Produces stable UUID-format CLOC |
-| `locid_decrypt` | `tx_cloc`, `scheme_key` | `VARIANT` (locid, timestamp, enc_client_id) | Decrypts TX_CLOC |
+| `LOCID_BASE_ENCRYPT` | `locid`, `base_locid_key` | `encrypted_locid` | AES-encrypts plain base LocID for storage |
+| `LOCID_BASE_DECRYPT` | `encrypted_locid`, `base_locid_key` | `locid` | Decrypts stored base LocID to plain form |
+| `LOCID_TXCLOC_ENCRYPT` | `encrypted_locid`, `base_locid_key`, `scheme_key`, `timestamp`, `client_id` | `tx_cloc` | Decrypts base LocID, re-encrypts as TX_CLOC |
+| `LOCID_TXCLOC_DECRYPT` | `tx_cloc`, `scheme_key` | `VARIANT` (locid, timestamp, enc_client_id) | Decodes TX_CLOC → base LocID + metadata |
+| `LOCID_STABLE_CLOC` | `encrypted_locid`, `base_locid_key`, `namespace_guid`, `dec_client_id`, `enc_client_id`, `tier` | `stable_cloc` | Produces stable UUID-format CLOC from stored encrypted LocID |
+| `LOCID_STABLE_CLOC_FROM_PLAIN` | `locid`, `base_locid_key`, `namespace_guid`, `dec_client_id`, `enc_client_id`, `tier` | `stable_cloc` | As above, accepts plain (unencrypted) base LocID |
 
 Crypto keys (`scheme_key`, `base_locid_key`) are retrieved from LocID Central at job start, passed into UDFs — never stored in plaintext in tables.
 
@@ -378,6 +382,7 @@ APP_CONFIG (
 --   'scheme_version'           → crypto scheme version           (secrets.scheme_version)
 --   'license_last_verified_at' → ISO timestamp of last successful LocID Central fetch
 --   'cached_license'           → stripped license JSON (no secrets field; api_key replaced by api_key_hint)
+--   'log_retention_days'       → number of days to retain JOB_LOG / APP_LOGS rows (default: 30)
 
 -- Snowflake SECRET objects (written only by stored procs; not accessible via SELECT):
 --   APP_SCHEMA.LOCID_LICENSE_KEY   — full LocID license key
@@ -396,7 +401,7 @@ This allows the stored procedure to dynamically build the SELECT list and gate c
 
 ## Streamlit Views
 
-The app has six views accessible from a left-side navigation bar. All views run entirely within the customer's Snowflake account — no data leaves their environment.
+The app has seven views accessible from a left-side navigation bar. All views run entirely within the customer's Snowflake account — no data leaves their environment.
 
 ---
 
@@ -577,7 +582,23 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
-### View 6 — Configuration
+### View 6 — SQL Guide
+
+**Purpose:** Reference guide for consumers who want to run Encrypt and Decrypt jobs via SQL stored procedure calls instead of the Streamlit UI. All jobs submitted via SQL are tracked in Job History the same way as UI jobs.
+
+**Sections:**
+
+- **Role note** — shows `GRANT APPLICATION ROLE <app>.APP_ADMIN TO ROLE <your_role>` with the live app name pre-filled
+- **Step 1** — `GRANT SELECT ON TABLE ... TO APPLICATION ...` for the input table
+- **Step 2** — Reference binding via Snowsight UI tab (screenshots) and SQL tab (`CALL register_single_callback(...)`)
+- **Step 3** — `CALL LOCID_ENCRYPT(...)` with expandable parameter reference
+- **Step 4** — `CALL LOCID_DECRYPT(...)` with expandable parameter reference
+- **Step 5** — Query `APP_SCHEMA.JOB_LOG` to monitor job status
+- **Scheduling example** — Snowflake Task snippet for automated daily encrypt jobs
+
+---
+
+### View 7 — Configuration
 
 **Purpose:** Manage license credentials, view current entitlements, and review the output column registry.
 
@@ -624,6 +645,11 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 **Advanced**
 - "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting EAI connectivity
+
+**Log Retention**
+- Number input (1–365 days) for how long `JOB_LOG` and `APP_LOGS` rows are kept (default: 30 days)
+- Saved to `APP_CONFIG` key `log_retention_days`; applied opportunistically at the start of each job via `LOCID_PURGE_LOGS()`
+- **Purge Now** button — runs `CALL APP_SCHEMA.LOCID_PURGE_LOGS()` immediately and shows rows deleted
 
 ---
 
@@ -702,8 +728,8 @@ Python source implementing the same encoding operations currently provided by `e
 
 | Option | What LocID provides | How it's used in the UDF |
 |--------|-----------------|--------------------------|
-| **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')` |
-| **Wheel file** | A `.whl` built from the source | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid-x.y.z-py3-none-any.whl')` |
+| **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('/src/lib/locid.py')` |
+| **Wheel file** | A `.whl` built from the source | `IMPORTS = ('/src/lib/locid-x.y.z-py3-none-any.whl')` |
 | **pip package** | Published to Anaconda or private PyPI | `PACKAGES = ('locid-python==x.y.z')` |
 | **Scala/Java source** | Share the relevant encoding source files | We port the logic to Python on our side |
 
@@ -728,7 +754,7 @@ CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')   -- LocID-provided source file
+IMPORTS = ('/src/lib/locid.py')   -- LocID-provided source file (relative path in app stage)
 HANDLER = 'decrypt_batch'
 AS $$
 import pandas as pd
@@ -915,11 +941,13 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | Telemetry payload examples from existing real-time services | David to provide |
 | Reference Docker container for encrypt/decrypt validation | David to investigate |
 | V6 data confirmation in sandbox account | David to chase down |
-| Multiple API keys per license key | ✓ Spec'd (2026-04-16). `access[]` array confirmed via live API: each entry has its own `api_key`, `api_key_id`, `namespace_guid`, `provider_id`, `status`, and per-key entitlements. `secrets` are license-level (shared). Architecture updated: APP_CONFIG now stores selected key fields; onboarding wizard (Screen H) presents ACTIVE API keys for selection; View 6 Configuration provides a key-switcher table. |
+| Multiple API keys per license key | ✓ Spec'd (2026-04-16). `access[]` array confirmed via live API: each entry has its own `api_key`, `api_key_id`, `namespace_guid`, `provider_id`, `status`, and per-key entitlements. `secrets` are license-level (shared). Architecture updated: APP_CONFIG now stores selected key fields; onboarding wizard (Screen H) presents ACTIVE API keys for selection; View 7 Configuration provides a key-switcher table. |
 | Consumer/provider deployment role | ✓ Resolved. Custom roles defined — see [Role Setup for App Package & App Deployment](#role-setup-for-app-package--app-deployment). Provider: `LOCID_APP_ADMIN` with `CREATE APPLICATION PACKAGE`, `CREATE DATABASE`, `CREATE SHARE`, `CREATE LISTING`. Consumer: `LOCID_APP_INSTALLER` with `CREATE APPLICATION`, `CREATE DATABASE`. One-time grants require `ACCOUNTADMIN`; all routine operations use the custom role. |
 | UAT test account strategy | Separate Snowflake accounts required for UAT to surface multi-account permission issues. Coordinate with Alyssa for throwaway account creation and Snowflake credits. William's sandbox available as fallback. |
 | Key status / expiry handling | License keys in LocID Central have status and expiry date fields. Implement configurable handling — surface warnings when key is nearing expiry or inactive; optionally gate job execution if key is expired. |
 | Step-by-step deployment guides | Provide guides for deploying the native app to multiple environments (dev, UAT, prod), including config changes required per environment. |
 | Python package for vectorized UDFs | **v2 roadmap item.** Request LocID to publish `locid-python` (pip-installable) implementing the five encoding operations in `encode-lib`. Enables `LANGUAGE PYTHON @vectorized` UDFs — 5–10× throughput improvement for large batches; also eliminates JVM version compatibility concerns. Distribution can be private (`.whl`, private PyPI, or Snowflake Anaconda channel). No stored procedure changes required. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
+| SQL-only workflow for consumers | ✓ Implemented (2026-04-28). SQL Guide view (View 6) added to Streamlit app — step-by-step instructions for running `LOCID_ENCRYPT` / `LOCID_DECRYPT` via SQL with live app name. Jobs submitted via SQL are tracked in Job History identically to UI jobs. |
+| Log retention for JOB_LOG / APP_LOGS | ✓ Implemented (2026-04-28). `LOCID_PURGE_LOGS()` stored procedure reads `log_retention_days` from APP_CONFIG (default 30 days) and deletes old rows. Called opportunistically at the start of each job and available on-demand via the Log Retention section in Configuration (View 7). |
 
 

@@ -17,7 +17,7 @@ import pandas as pd
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.locid_central import get_secrets
-from utils.entitlements import _get_active_entitlements
+from utils.entitlements import get_active_entitlements
 from utils import logger
 
 session = get_active_session()
@@ -125,7 +125,7 @@ ALL_FLAGS = [
     "allow_geo_context",
 ]
 
-active_flags = _get_active_entitlements(sid)
+active_flags = get_active_entitlements(sid)
 
 badge_cols = st.columns(3)
 for i, flag in enumerate(ALL_FLAGS):

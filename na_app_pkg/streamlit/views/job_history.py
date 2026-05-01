@@ -55,25 +55,26 @@ def _fetch_jobs(_session_id: int, op: str, status: str,
     from snowflake.snowpark.context import get_active_session as _gas
     _session = _gas()
 
-    where_parts = []
+    conditions = ["TRUE"]
+    params = []
     if op != "All":
-        where_parts.append(f"operation = '{op}'")
+        conditions.append("operation = ?")
+        params.append(op)
     if status != "All":
-        where_parts.append(f"status = '{status}'")
+        conditions.append("status = ?")
+        params.append(status)
     if dr_start and dr_end:
-        where_parts.append(
-            f"run_dt::DATE BETWEEN '{dr_start}' AND '{dr_end}'"
-        )
-    where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+        conditions.append("run_dt::DATE BETWEEN ? AND ?")
+        params.extend([dr_start, dr_end])
 
-    rows = _session.sql(f"""
-        SELECT job_id, operation, run_dt, rows_in, rows_out,
-               runtime_s, status, error_msg, input_table, output_table
-        FROM APP_SCHEMA.JOB_LOG
-        {where_sql}
-        ORDER BY run_dt DESC
-        LIMIT 200
-    """).collect()
+    sql = (
+        "SELECT job_id, operation, run_dt, rows_in, rows_out, "
+        "runtime_s, status, error_msg, input_table, output_table "
+        "FROM APP_SCHEMA.JOB_LOG "
+        f"WHERE {' AND '.join(conditions)} "
+        "ORDER BY run_dt DESC LIMIT 200"
+    )
+    rows = _session.sql(sql, params=params).collect()
     return [tuple(r) for r in rows]
 
 

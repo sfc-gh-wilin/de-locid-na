@@ -1,5 +1,8 @@
 # LocID Native App — Sandbox
 
+> **Connection note:** All commands below use `-c wl_sandbox_dcr`. Replace with your own
+> Snowflake CLI connection name if different.
+
 ## Repository
 
 ```bash
@@ -29,11 +32,36 @@ snow sql --connection wl_sandbox_dcr -f "db/dev/provider/03_locid_builds.sql"
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/04_locid_builds_ipv4_exploded.sql"
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/05_stage_setup.sql"
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider/06_udfs.sql"
+snow sql --connection wl_sandbox_dcr -f "db/dev/provider/07_eai_setup.sql"
 ```
 
 ## Phase 2 — Load Test Data
 
-Set `$base_locid_secret` at the top, then run:
+`$base_locid_secret` is the AES key used to store LocID location codes in
+`LOCID_BUILDS`. Retrieve it from the LocID Central license response:
+
+```
+GET https://central.locid.com/api/0/location_id/license/<your-license-id>
+```
+
+The response JSON contains a `secrets` object:
+
+```json
+{
+  "secrets": {
+    "base_locid_secret": "<Base64-URL string, ~ as padding>",
+    "scheme_secret":     "<Base64-URL string, ~ as padding>"
+  }
+}
+```
+
+Open `db/dev/provider_tests/00_generate_test_data.sql` and set:
+
+```sql
+SET base_locid_secret = '<value from secrets.base_locid_secret>';
+```
+
+Then run:
 
 ```bash
 snow sql --connection wl_sandbox_dcr -f "db/dev/provider_tests/00_generate_test_data.sql"
@@ -103,7 +131,45 @@ snow app run --version v1_0 --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 
 ### 3.7 Bind references
 
-Streamlit setup wizard.
+Three references must be bound before the app can run jobs:
+`APP_WAREHOUSE`, `ENCRYPT_INPUT_TABLE`, and `DECRYPT_INPUT_TABLE`.
+
+**Option A — Streamlit Setup Wizard (recommended)**
+
+Open the app in Snowsight → navigate to **Setup Wizard**. The wizard walks
+through each reference step-by-step with inline instructions.
+
+**Option B — SQL (Snowsight worksheet)**
+
+```sql
+-- 1. Bind the warehouse reference
+CALL LOCID_DEV_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
+    'APP_WAREHOUSE', 'ADD', SYSTEM$REFERENCE('WAREHOUSE', 'DEV_WH', 'SESSION', 'USAGE')
+);
+
+-- 2. Bind the encrypt input table
+--    (must be granted SELECT by consumer first — see 02_customer_input_sample.sql)
+CALL LOCID_DEV_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
+    'ENCRYPT_INPUT_TABLE', 'ADD',
+    SYSTEM$REFERENCE('TABLE', 'LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT',
+                     'SESSION', 'SELECT')
+);
+
+-- 3. Bind the decrypt input table (can reuse the same table or a different one)
+CALL LOCID_DEV_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
+    'DECRYPT_INPUT_TABLE', 'ADD',
+    SYSTEM$REFERENCE('TABLE', 'LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT',
+                     'SESSION', 'SELECT')
+);
+```
+
+Verify:
+
+```sql
+SELECT * FROM LOCID_DEV_APP.APP_SCHEMA.APP_CONFIG
+WHERE config_key LIKE 'ref.%';
+-- Expected: 3 rows with non-null config_value
+```
 
 ### Re-deploying after code changes
 

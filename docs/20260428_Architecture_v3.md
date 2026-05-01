@@ -76,12 +76,14 @@ na_app_pkg/
     ├── logo.svg                  # App logo
     ├── .streamlit/
     │   └── config.toml           # Streamlit theme config
-    ├── pages/
-    │   ├── 01_Setup_Wizard.py
-    │   ├── 02_Run_Encrypt.py
-    │   ├── 03_Run_Decrypt.py
-    │   ├── 04_Job_History.py
-    │   └── 05_Configuration.py
+    ├── views/
+    │   ├── home.py
+    │   ├── run_encrypt.py
+    │   ├── run_decrypt.py
+    │   ├── job_history.py
+    │   ├── sql_guide.py
+    │   ├── configuration.py
+    │   └── setup_wizard.py
     └── utils/
         ├── locid_central.py      # LocID Central client — delegates HTTP to LOCID_FETCH_LICENSE stored procedure (Streamlit cannot make direct HTTP calls in Native Apps)
         ├── entitlements.py       # Entitlement check helpers
@@ -105,6 +107,7 @@ APP_SCHEMA.LOCID_SET_API_KEY(INTEGER)       -- Python stored procedure — write
 APP_SCHEMA.register_single_callback(...)    -- Callback proc for INPUT_TABLE and APP_WAREHOUSE references
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
+APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Scala UDFs — required by Snowflake for UDFs with JAR IMPORTS
@@ -130,16 +133,25 @@ customer_input.ip_address = locid_builds_ipv4_exploded.ip_address
 joined back to locid_builds on (build_dt, start_ip, end_ip)
 ```
 
-**IPv6** — Reference implementation: cascading 6-pass hex-prefix range join:
+**IPv6** — Optimised 6-pass cascading hex-prefix range join:
 ```
-Pass 1: hex prefix[0:12] match + range join
-Pass 2: prefix[0:10], excluding Pass 1 hits
-  ...
-Pass 6: full range join on remaining rows
-UNION ALL all results
+Pre-step: materialise IPv6 input rows once (ip_hex pre-computed)
+          materialise relevant IPv6 build rows once (date-filtered)
+          pre-join each input row to its build_dt (avoids 6× DATES range join)
+
+Pass 1: hex prefix[0:12] match + range join  → matched rows accumulated
+Pass 2: prefix[0:10], exclude matched IPs    → (single accumulator anti-join)
+Pass 3: prefix[0:8],  exclude matched IPs    → (single accumulator anti-join)
+Pass 4: prefix[0:6],  exclude matched IPs    → (single accumulator anti-join)
+Pass 5: prefix[0:4],  exclude matched IPs    → (single accumulator anti-join)
+Pass 6: full range join on remaining rows    → (single accumulator anti-join)
 ```
 
-> **Implementation note:** The 6-pass cascading approach above is the reference implementation LocID provided as one efficient strategy for IPv6 range joins in Snowflake. It is not prescribed — alternative strategies (e.g. a single full range join, a different prefix-length sequence, or Snowflake's native `ASOF JOIN`) are valid approaches. The right choice depends on data distribution and performance testing; LocID is open to alternatives.
+Key optimisations vs. the original LocID reference POC:
+- `PARSE_IP` / `ip_hex` computed once per row (not 6×)
+- `LOCID_BUILDS` scanned once (not 6×), pre-filtered to relevant build dates
+- Prefix filter applied **before** the range join on the builds side
+- Single accumulator anti-join per pass (O(1)) vs. growing exclusion chain
 
 Both strategies filter to relevant build dates covering the input timestamp.
 
@@ -280,6 +292,7 @@ Entitlements are fetched from LocID Central and cached in `APP_CONFIG`. They con
 | `allow_tx` | TX_CLOC column included in output |
 | `allow_stable` | STABLE_CLOC column included in output |
 | `allow_geo_context` | Geo context fields included in output |
+| *(future — de-scoped from v1)* `allow_homebiz` | HomeBiz_Type field included in output |
 
 Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so new entitlements and fields can be added by LocID without app code changes — only a config update and, if the schema changes, a new app version release.
 
@@ -287,7 +300,7 @@ Output columns are **not hardcoded**. They are driven by `APP_CONFIG` rows, so n
 
 ## Streamlit Views
 
-The app has six views accessible from a left-side navigation bar. All views run entirely within the customer's Snowflake account.
+The app has seven views accessible from a left-side navigation bar. All views run entirely within the customer's Snowflake account.
 
 ---
 
@@ -320,7 +333,7 @@ The app has six views accessible from a left-side navigation bar. All views run 
 
 **Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in approximately 5 minutes.
 
-See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow. The wizard is re-accessible from the Configuration view if credentials need to be updated.
+See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 9-screen flow. The wizard is re-accessible from the Configuration view if credentials need to be updated.
 
 ---
 
@@ -453,15 +466,40 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 
 ---
 
-### View 6 — Configuration
+### View 6 — SQL Guide
+
+**Purpose:** Reference guide for consumers who want to run Encrypt and Decrypt jobs via SQL stored procedure calls instead of the Streamlit UI. All jobs submitted via SQL are tracked in Job History identically to UI jobs.
+
+**Sections:**
+- **Role note** — `GRANT APPLICATION ROLE <app>.APP_ADMIN TO ROLE <your_role>` with live app name pre-filled
+- **Step 1** — Grant `SELECT` on input table to the application
+- **Step 2** — Reference binding: Snowsight UI tab + SQL tab (`CALL register_single_callback(...)`)
+- **Step 3** — `CALL LOCID_ENCRYPT(...)` with expandable parameter reference
+- **Step 4** — `CALL LOCID_DECRYPT(...)` with expandable parameter reference
+- **Step 5** — Query `APP_SCHEMA.JOB_LOG` to monitor job status
+- **Scheduling example** — Snowflake Task snippet for automated jobs
+
+---
+
+### View 7 — Configuration
 
 **Purpose:** Manage license credentials, view current entitlements, and review the output column registry.
 
 **License & Credentials**
 - License key: shown masked (`1569-****-****-****`), with "Update" button that re-triggers the Enter Key screen
 - Client name and expiration date (read-only, from LocID Central)
-- API key: shown masked, used for usage stats reporting only
-- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements
+- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; daily auto-refresh also runs at app launch
+
+**API Key Selection**
+- Table of all `access[]` entries from the last LocID Central fetch:
+
+  | API Key | Key ID | Provider ID | Namespace GUID | Status | Use |
+  |---------|--------|-------------|----------------|--------|-----|
+  | `2c7c****` | 4 | 2844 | `fb71a5a0-…` | ACTIVE | ◉ |
+  | `dbf4****` | 3 | 2844 | `044a471b-…` | INACTIVE | — |
+
+- Only ACTIVE entries are selectable. Changing the key updates `api_key_id`, `namespace_guid`, `provider_id` in `APP_CONFIG` and takes effect on the next job run.
+- Each API key has its own `namespace_guid` — switching keys changes the STABLE_CLOC output for new jobs.
 
 **Current Entitlements**
 
@@ -481,6 +519,11 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 | … | … | … | … |
 
 Read-only for customers. Updated by LocID via app version releases when new fields are added.
+
+**Log Retention**
+- Number input (1–365 days) for how long `JOB_LOG` and `APP_LOGS` rows are kept (default: 30 days)
+- Saved to `APP_CONFIG` key `log_retention_days`; applied opportunistically at the start of each job via `LOCID_PURGE_LOGS()`
+- **Purge Now** button — runs `CALL APP_SCHEMA.LOCID_PURGE_LOGS()` immediately and displays rows deleted
 
 **Advanced**
 - "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting connectivity
@@ -643,7 +686,7 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
 
-**Sandbox benchmark results — XS warehouse, 5M rows**
+**Sandbox benchmark results — XS warehouse, 5M rows (2026-04-28/29)**
 
 | Approach | UDF | Elapsed (s) | Throughput (krows/s) | Speedup vs A | Notes |
 |----------|-----|:-----------:|:--------------------:|:------------:|-------|
@@ -663,8 +706,8 @@ Python source implementing the same encoding operations currently provided by `e
 
 | Option | What LocID provides | How it's used in the UDF |
 |--------|-----------------|--------------------------|
-| **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')` |
-| **Wheel file** | A `.whl` built from the source | `IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid-x.y.z-py3-none-any.whl')` |
+| **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('/src/lib/locid.py')` |
+| **Wheel file** | A `.whl` built from the source | `IMPORTS = ('/src/lib/locid-x.y.z-py3-none-any.whl')` |
 | **pip package** | Published to Anaconda or private PyPI | `PACKAGES = ('locid-python==x.y.z')` |
 | **Scala/Java source** | Share the relevant encoding source files | We port the logic to Python on our side |
 
@@ -689,7 +732,7 @@ CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('@APP_SCHEMA.APP_STAGE/src/lib/locid.py')   -- LocID-provided source file
+IMPORTS = ('/src/lib/locid.py')   -- LocID-provided source file (relative path in app stage)
 HANDLER = 'decrypt_batch'
 AS $$
 import pandas as pd
@@ -774,7 +817,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | | LocID Central integration (fetch/cache secrets, report usage stats) |
 | **3 — Processing** | Encrypt stored procedure (IPv4 + IPv6 matching → UDF → output table) |
 | | Decrypt stored procedure (TX_CLOC decode → STABLE_CLOC + geo context) |
-| **4 — UI** | Streamlit onboarding wizard (8-screen setup flow) |
-| | Streamlit main views (Home, Run Encrypt, Run Decrypt, History, Config) |
+| **4 — UI** | Streamlit onboarding wizard (9-screen setup flow) |
+| | Streamlit main views (Home, Run Encrypt, Run Decrypt, History, SQL Guide, Config) |
 | **5 — Polish** | Performance tuning (clustering keys, Search Optimization Service evaluation) |
 | | End-to-end testing (encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates) |
