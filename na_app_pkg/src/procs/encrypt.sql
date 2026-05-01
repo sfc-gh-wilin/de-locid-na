@@ -486,8 +486,8 @@ def encrypt_handler(
             # Prefix pre-filter on BUILDS — applied before the range join
             if prefix > 0:
                 pfx_build_filter = (
-                    f"AND SUBSTR(l.start_ip_int_hex, 1, {prefix}) = "
-                    f"    SUBSTR(l.end_ip_int_hex,   1, {prefix})"
+                    f"AND SUBSTR(start_ip_int_hex, 1, {prefix}) = "
+                    f"    SUBSTR(end_ip_int_hex,   1, {prefix})"
                 )
                 pfx_inp_cond = (
                     f"AND SUBSTR(i.ip_hex, 1, {prefix}) = "
