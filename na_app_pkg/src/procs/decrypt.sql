@@ -262,6 +262,10 @@ def decrypt_handler(
     start_ts = time.time()
     rows_in = rows_matched = rows_out = 0
 
+    job_sfx     = job_id.replace('-', '')[:12].upper()
+    TBL_DECODED = f'APP_SCHEMA._LOCID_DECODED_{job_sfx}'
+    _interim_tbls = [TBL_DECODED]
+
     # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
     output_table = f"LOCID_DECRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}"
 
@@ -322,7 +326,7 @@ def decrypt_handler(
         # three times (once per extracted field).
         # ------------------------------------------------------------------
         session.sql(f"""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_decoded AS
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_DECODED} AS
             SELECT
                 {id_col}       AS _id,
                 {txcloc_col}   AS _txcloc,
@@ -334,7 +338,7 @@ def decrypt_handler(
         """).collect()
 
         rows_matched = session.sql(
-            "SELECT COUNT(*) FROM _locid_decoded"
+            f"SELECT COUNT(*) FROM {TBL_DECODED}"
         ).collect()[0][0]
         phases['decode_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
@@ -378,7 +382,7 @@ def decrypt_handler(
         session.sql(f"""
             CREATE OR REPLACE TABLE APP_SCHEMA.{output_table} AS
             SELECT {', '.join(select_exprs)}
-            FROM _locid_decoded
+            FROM {TBL_DECODED}
         """).collect()
 
         session.sql(
@@ -430,6 +434,14 @@ def decrypt_handler(
             cur_wh, [],
         )
         raise RuntimeError(f'LOCID_DECRYPT failed: {exc}') from exc
+
+    finally:
+        # Drop all interim work tables unconditionally (success or failure).
+        for _t in _interim_tbls:
+            try:
+                session.sql(f"DROP TABLE IF EXISTS {_t}").collect()
+            except Exception:
+                pass
 $$;
 
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_DECRYPT(

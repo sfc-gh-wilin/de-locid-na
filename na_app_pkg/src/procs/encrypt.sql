@@ -273,6 +273,22 @@ def encrypt_handler(
     # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
     output_table = f"LOCID_ENCRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}"
 
+    # Interim work tables — job-scoped TRANSIENT in APP_SCHEMA.
+    # Native Apps prohibit TEMPORARY TABLE (session-scoped), so we use TRANSIENT
+    # tables with a unique suffix derived from job_id, dropped in the finally block.
+    job_sfx       = job_id.replace('-', '')[:12].upper()
+    TBL_IPV4      = f'APP_SCHEMA._LOCID_IPV4_{job_sfx}'
+    TBL_V6_INP    = f'APP_SCHEMA._LOCID_V6_INP_{job_sfx}'
+    TBL_V6_BUILDS = f'APP_SCHEMA._LOCID_V6_BLDS_{job_sfx}'
+    TBL_V6_DATED  = f'APP_SCHEMA._LOCID_V6_DATD_{job_sfx}'
+    TBL_IPV6      = f'APP_SCHEMA._LOCID_IPV6_{job_sfx}'
+    TBL_V6_SEEN   = f'APP_SCHEMA._LOCID_V6_SEEN_{job_sfx}'
+    TBL_MATCHED   = f'APP_SCHEMA._LOCID_MTCHD_{job_sfx}'
+    _interim_tbls = [
+        TBL_IPV4, TBL_V6_INP, TBL_V6_BUILDS, TBL_V6_DATED,
+        TBL_IPV6, TBL_V6_SEEN, TBL_MATCHED,
+    ]
+
     # Validate caller-supplied identifiers before embedding in SQL
     for name in (id_col, ip_col, ts_col):
         _validate_id(name)
@@ -344,7 +360,7 @@ def encrypt_handler(
         # Step 3: IPv4 matching — equi-join via LOCID_BUILDS_IPV4_EXPLODED
         # ------------------------------------------------------------------
         session.sql(f"""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_ipv4 AS
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_IPV4} AS
             WITH inp AS (
                 SELECT {id_col} AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
                 FROM reference('ENCRYPT_INPUT_TABLE')
@@ -407,7 +423,7 @@ def encrypt_handler(
 
         # 4-a: IPv6 input with ip_hex pre-computed
         session.sql(f"""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_v6_inp AS
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_INP} AS
             SELECT
                 {id_col}  AS _id,
                 {ip_col}  AS _ip,
@@ -419,13 +435,13 @@ def encrypt_handler(
 
         # 4-b: Relevant IPv6 build rows, pre-filtered to date range of this job
         session.sql(f"""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_v6_builds AS
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_BUILDS} AS
             SELECT l.*
             FROM {BUILDS} l
             JOIN (
                 SELECT DISTINCT bd.build_dt
                 FROM {DATES} bd
-                JOIN _locid_v6_inp i
+                JOIN {TBL_V6_INP} i
                     ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
             ) rel_dates ON l.build_dt = rel_dates.build_dt
             WHERE l.start_ip LIKE '%:%'
@@ -433,16 +449,16 @@ def encrypt_handler(
 
         # 4-c: Pre-join each input row to its matching build_dt
         session.sql(f"""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_v6_inp_dated AS
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_DATED} AS
             SELECT i._id, i._ip, i._ts, i.ip_hex, bd.build_dt
-            FROM _locid_v6_inp i
+            FROM {TBL_V6_INP} i
             JOIN {DATES} bd
                 ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
         """).collect()
 
         # 4-d / 4-e / 4-f: 6-pass loop with pre-filtered builds and O(1) anti-join
-        session.sql("""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_ipv6 (
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_IPV6} (
                 _id VARCHAR, _ip VARCHAR, _ts BIGINT,
                 encrypted_locid VARCHAR, tier VARCHAR,
                 locid_country VARCHAR,      locid_country_code VARCHAR,
@@ -453,15 +469,15 @@ def encrypt_handler(
         """).collect()
 
         # Accumulator: IPs already matched — single anti-join target per pass
-        session.sql("""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_v6_seen (_ip VARCHAR)
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_SEEN} (_ip VARCHAR)
         """).collect()
 
         for pass_num, prefix in enumerate([12, 10, 8, 6, 4, 0]):
 
             # Single anti-join against the accumulator (constant cost per pass)
             if pass_num > 0:
-                excl_join  = "LEFT JOIN _locid_v6_seen xs ON i._ip = xs._ip"
+                excl_join  = f"LEFT JOIN {TBL_V6_SEEN} xs ON i._ip = xs._ip"
                 excl_where = "AND xs._ip IS NULL"
             else:
                 excl_join  = ""
@@ -482,16 +498,16 @@ def encrypt_handler(
                 pfx_inp_cond     = ""
 
             session.sql(f"""
-                INSERT INTO _locid_ipv6
+                INSERT INTO {TBL_IPV6}
                 WITH inp AS (
                     SELECT i._id, i._ip, i._ts, i.ip_hex, i.build_dt
-                    FROM _locid_v6_inp_dated i
+                    FROM {TBL_V6_DATED} i
                     {excl_join}
                     WHERE TRUE {excl_where}
                 ),
                 builds AS (
                     SELECT *
-                    FROM _locid_v6_builds
+                    FROM {TBL_V6_BUILDS}
                     WHERE TRUE {pfx_build_filter}
                 )
                 SELECT
@@ -509,22 +525,22 @@ def encrypt_handler(
             """).collect()
 
             # Update accumulator with IPs matched so far (for next pass anti-join)
-            session.sql("""
-                INSERT INTO _locid_v6_seen
-                SELECT DISTINCT _ip FROM _locid_ipv6
-                EXCEPT SELECT _ip FROM _locid_v6_seen
+            session.sql(f"""
+                INSERT INTO {TBL_V6_SEEN}
+                SELECT DISTINCT _ip FROM {TBL_IPV6}
+                EXCEPT SELECT _ip FROM {TBL_V6_SEEN}
             """).collect()
 
         # Combine IPv4 and IPv6 results
-        session.sql("""
-            CREATE OR REPLACE TEMPORARY TABLE _locid_matched AS
-            SELECT * FROM _locid_ipv4
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_MATCHED} AS
+            SELECT * FROM {TBL_IPV4}
             UNION ALL
-            SELECT * FROM _locid_ipv6
+            SELECT * FROM {TBL_IPV6}
         """).collect()
 
         rows_matched = session.sql(
-            "SELECT COUNT(*) FROM _locid_matched"
+            f"SELECT COUNT(*) FROM {TBL_MATCHED}"
         ).collect()[0][0]
         phases['ipv6_match_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
@@ -568,7 +584,7 @@ def encrypt_handler(
         session.sql(f"""
             CREATE OR REPLACE TABLE APP_SCHEMA.{output_table} AS
             SELECT {', '.join(select_exprs)}
-            FROM _locid_matched
+            FROM {TBL_MATCHED}
         """).collect()
 
         session.sql(
@@ -620,6 +636,13 @@ def encrypt_handler(
             cur_wh, [],
         )
         raise RuntimeError(f'LOCID_ENCRYPT failed: {exc}') from exc
+    finally:
+        # Drop all interim work tables unconditionally (success or failure).
+        for _t in _interim_tbls:
+            try:
+                session.sql(f"DROP TABLE IF EXISTS {_t}").collect()
+            except Exception:
+                pass
 $$;
 
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
