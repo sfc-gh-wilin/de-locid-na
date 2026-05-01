@@ -17,6 +17,7 @@ pg = st.navigation([
     st.Page("views/run_encrypt.py",   title="Run Encrypt",   icon=":material/lock:"),
     st.Page("views/run_decrypt.py",   title="Run Decrypt",   icon=":material/lock_open:"),
     st.Page("views/job_history.py",   title="Job History",   icon=":material/history:"),
+    st.Page("views/sql_guide.py",     title="SQL Guide",     icon=":material/terminal:"),
     st.Page("views/configuration.py", title="Configuration", icon=":material/tune:"),
     st.Page("views/setup_wizard.py", title="Setup Wizard", icon=":material/settings:"),
 ])
