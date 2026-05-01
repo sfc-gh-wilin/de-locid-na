@@ -115,15 +115,14 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
     try:
         ip_rows = session.sql(f"""
             SELECT
-                SUM(IFF({ip_col} IS NULL, 1, 0))                          AS null_ip,
+                SUM(IFF({ip_col} IS NULL, 1, 0))                           AS null_ip,
                 SUM(IFF({ip_col} IS NOT NULL
-                        AND REGEXP_LIKE({ip_col},
-                            '^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$'), 1, 0)) AS cnt_v4,
+                        AND NOT {ip_col} LIKE '%:%'
+                        AND {ip_col} LIKE '%.%.%.%', 1, 0))                AS cnt_v4,
                 SUM(IFF({ip_col} LIKE '%:%', 1, 0))                        AS cnt_v6,
                 SUM(IFF({ip_col} IS NOT NULL
                         AND NOT {ip_col} LIKE '%:%'
-                        AND NOT REGEXP_LIKE({ip_col},
-                            '^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$'), 1, 0)) AS cnt_bad
+                        AND NOT {ip_col} LIKE '%.%.%.%', 1, 0))            AS cnt_bad
             FROM (SELECT {ip_col} FROM {table} LIMIT 1000)
         """).collect()[0]
         result["null_ip"] = int(ip_rows[0] or 0)
