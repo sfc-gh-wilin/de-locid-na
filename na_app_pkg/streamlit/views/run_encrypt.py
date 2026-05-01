@@ -69,19 +69,22 @@ def _get_bound_table(ref_name: str) -> str | None:
     return None
 
 
-def _get_ref_columns(ref_name: str) -> list[str]:
-    """Return ordered column names for a table bound via reference.
+def _get_ref_col_info(ref_name: str) -> tuple[list[str], dict[str, str]]:
+    """Return (ordered names, {name: data_type_str}) from DESCRIBE TABLE reference.
 
-    Uses DESCRIBE TABLE reference(...) — the only authorized path inside a
-    Native App for consumer tables accessed through a reference binding.
+    Data type is the second column returned by DESCRIBE, e.g.:
+      'TIMESTAMP_NTZ(9)', 'NUMBER(38,0)', 'VARCHAR(16777216)', etc.
+    Used to auto-select the correct Timestamp Format in Step 2.
     """
     try:
         rows = session.sql(f"DESCRIBE TABLE reference('{ref_name}')").collect()
-        return [r[0] for r in rows]
+        names = [r[0] for r in rows]
+        types = {r[0]: r[1] for r in rows}
+        return names, types
     except Exception as e:
-        logger.warning(session, "run_encrypt._get_ref_columns",
+        logger.warning(session, "run_encrypt._get_ref_col_info",
                        f"Failed to describe reference {ref_name}: {e}")
-        return []
+        return [], {}
 
 
 def _best_match(columns: list[str], hints: list[str]) -> int:
@@ -250,13 +253,14 @@ if step == 1:
         except Exception as e:
             st.warning(f"Could not load preview: {e}")
         if st.button("Next →", type="primary"):
-            cols = _get_ref_columns('ENCRYPT_INPUT_TABLE')
+            cols, col_types = _get_ref_col_info('ENCRYPT_INPUT_TABLE')
             if not cols:
                 st.error("Could not read columns. Check that the table exists and the app has SELECT access.")
             else:
-                st.session_state.enc_input_table   = bound
-                st.session_state.enc_input_columns = cols
-                st.session_state.enc_step          = 2
+                st.session_state.enc_input_table    = bound
+                st.session_state.enc_input_columns  = cols
+                st.session_state.enc_col_types      = col_types
+                st.session_state.enc_step           = 2
                 st.rerun()
     else:
         st.warning(
@@ -287,8 +291,16 @@ elif step == 2:
                               index=_best_match(columns,
                                   ['ts', 'timestamp', 'event_ts', 'event_time',
                                    'time', 'datetime']))
+
+        # Auto-detect timestamp column type → pre-select the right format.
+        # TIMESTAMP_NTZ / TIMESTAMP_LTZ / TIMESTAMP_TZ → "timestamp"
+        # All numeric types (NUMBER, INT, BIGINT, …)    → "epoch_sec" (default)
+        col_types     = st.session_state.get("enc_col_types", {})
+        ts_type       = col_types.get(col_ts, '').upper()
+        default_fmt   = 2 if 'TIMESTAMP' in ts_type else 0   # index in list below
         ts_fmt = st.selectbox("Timestamp Format",
                               ["epoch_sec", "epoch_ms", "timestamp"],
+                              index=default_fmt,
                               help=(
                                   "**epoch_sec** — integer Unix seconds  \n"
                                   "**epoch_ms** — integer Unix milliseconds  \n"
