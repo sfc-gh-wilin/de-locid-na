@@ -42,7 +42,7 @@ st.divider()
 
 
 # ---------------------------------------------------------------------------
-# Batched config fetch — all four keys in one round-trip
+# Batched config fetch — all keys in one round-trip
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=120, show_spinner=False)
 def _load_config(_session_id: int) -> dict[str, str | None]:
@@ -50,7 +50,7 @@ def _load_config(_session_id: int) -> dict[str, str | None]:
     _session = _gas()
     rows = _session.sql(
         "SELECT config_key, config_value FROM APP_SCHEMA.APP_CONFIG "
-        "WHERE config_key IN ('license_id_ref', 'api_key_hint', 'cached_license', 'api_key_id') "
+        "WHERE config_key IN ('license_id_ref', 'api_key_hint', 'cached_license', 'api_key_id', 'log_retention_days') "
         "AND is_active = TRUE"
     ).collect()
     return {r[0]: r[1] for r in rows}
@@ -182,3 +182,56 @@ st.divider()
 st.subheader(":material/settings: Advanced")
 if st.button(":material/restart_alt: Re-run Setup Wizard"):
     st.switch_page("views/setup_wizard.py")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Section 5 — Log Retention
+# ---------------------------------------------------------------------------
+st.subheader(":material/delete_sweep: Log Retention")
+st.caption(
+    "Controls how long job history and application logs are kept. "
+    "Cleanup runs automatically at the start of each Encrypt / Decrypt job."
+)
+
+_current_retention = int(config.get("log_retention_days") or 30)
+
+with st.form("log_retention_form"):
+    new_days = st.number_input(
+        "Retention period (days)",
+        min_value=1, max_value=365,
+        value=_current_retention,
+        step=1,
+        help="Records older than this many days are deleted from Job History and App Logs.",
+    )
+    col_save, col_purge = st.columns(2)
+    save_clicked  = col_save.form_submit_button(":material/save: Save", type="primary")
+    purge_clicked = col_purge.form_submit_button(":material/delete_forever: Purge Now")
+
+if save_clicked:
+    try:
+        session.sql(
+            "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
+            "USING (SELECT 'log_retention_days' AS k, ? AS v) AS s ON t.config_key = s.k "
+            "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
+            "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
+            params=[str(new_days)],
+        ).collect()
+        _load_config.clear()
+        logger.info(session, "configuration.log_retention",
+                    f"log_retention_days updated to {new_days}")
+        st.success(f"Retention period saved: {new_days} day(s).", icon="✅")
+        st.rerun()
+    except Exception as e:
+        logger.error(session, "configuration.log_retention", "Save failed", exc=e)
+        st.error(str(e), icon="❌")
+
+if purge_clicked:
+    try:
+        result = session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()
+        msg = result[0][0] if result else "Purge complete."
+        logger.info(session, "configuration.purge_logs", msg)
+        st.success(msg, icon="✅")
+    except Exception as e:
+        logger.error(session, "configuration.purge_logs", "Purge failed", exc=e)
+        st.error(str(e), icon="❌")

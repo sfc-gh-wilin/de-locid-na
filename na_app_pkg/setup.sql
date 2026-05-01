@@ -75,8 +75,9 @@ GRANT SELECT ON TABLE APP_SCHEMA.APP_CONFIG
 -- Seed initial state (idempotent — skips rows that already exist)
 INSERT INTO APP_SCHEMA.APP_CONFIG (config_key, config_value, is_active)
 SELECT col, val, active FROM (VALUES
-    ('onboarding_complete', 'false',    TRUE),
-    ('scheme_version',      '0',        TRUE)
+    ('onboarding_complete',  'false', TRUE),
+    ('scheme_version',       '0',     TRUE),
+    ('log_retention_days',   '30',    TRUE)
 ) AS t(col, val, active)
 WHERE NOT EXISTS (
     SELECT 1 FROM APP_SCHEMA.APP_CONFIG WHERE config_key = t.col
@@ -498,7 +499,57 @@ GRANT USAGE ON STREAMLIT APP_SCHEMA.LOCID_APP TO APPLICATION ROLE APP_VIEWER;
 
 
 -- =============================================================================
--- 12. Final Grants
+-- 12. Log Cleanup Procedure
+--     Deletes JOB_LOG and APP_LOGS rows older than log_retention_days
+--     (default 30). Called opportunistically at the start of every Encrypt /
+--     Decrypt job so logs self-trim without requiring a scheduled Task or any
+--     additional consumer-approved privilege.
+--
+--     log_retention_days is stored in APP_CONFIG and is consumer-updatable
+--     from the Configuration view (minimum 1, maximum 365).
+-- =============================================================================
+CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_PURGE_LOGS()
+RETURNS VARCHAR
+LANGUAGE SQL
+AS
+$$
+DECLARE
+    retention_days NUMBER DEFAULT 30;
+    cutoff         TIMESTAMP_NTZ;
+    job_deleted    NUMBER DEFAULT 0;
+    app_deleted    NUMBER DEFAULT 0;
+BEGIN
+    -- Read retention setting from APP_CONFIG (fall back to 30 if missing)
+    LET cfg RESULTSET := (
+        SELECT TRY_TO_NUMBER(config_value)
+        FROM APP_SCHEMA.APP_CONFIG
+        WHERE config_key = 'log_retention_days' AND is_active = TRUE
+        LIMIT 1
+    );
+    FOR row IN cfg DO
+        IF (row.TRY_TO_NUMBER(config_value) IS NOT NULL AND row.TRY_TO_NUMBER(config_value) >= 1) THEN
+            retention_days := row.TRY_TO_NUMBER(config_value);
+        END IF;
+    END FOR;
+
+    cutoff := DATEADD('day', -:retention_days, CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ);
+
+    DELETE FROM APP_SCHEMA.JOB_LOG WHERE run_dt < :cutoff;
+    job_deleted := SQLROWCOUNT;
+
+    DELETE FROM APP_SCHEMA.APP_LOGS WHERE logged_at < :cutoff;
+    app_deleted := SQLROWCOUNT;
+
+    RETURN 'Purged ' || :job_deleted || ' job log row(s) and ' || :app_deleted || ' app log row(s) older than ' || :retention_days || ' day(s).';
+END;
+$$;
+
+GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_PURGE_LOGS()
+    TO APPLICATION ROLE APP_ADMIN;
+
+
+-- =============================================================================
+-- 13. Final Grants
 -- =============================================================================
 GRANT USAGE ON ALL FUNCTIONS  IN SCHEMA APP_SCHEMA TO APPLICATION ROLE APP_ADMIN;
 GRANT USAGE ON ALL PROCEDURES IN SCHEMA APP_SCHEMA TO APPLICATION ROLE APP_ADMIN;

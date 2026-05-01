@@ -310,6 +310,12 @@ def encrypt_handler(
         cur_wh = 'APP_WAREHOUSE'   # CURRENT_WAREHOUSE() is not permitted in Native App procs
         phases['warehouse_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
+        # Opportunistic log cleanup — non-fatal; runs quickly before main work
+        try:
+            session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()
+        except Exception:
+            pass
+
         # ------------------------------------------------------------------
         # Step 1: Entitlement check
         # ------------------------------------------------------------------
