@@ -1,6 +1,5 @@
 # LocID for Snowflake — Native App
 
-**Provider:** LocID  
 **Version:** 1.0
 
 Enrich your IP + timestamp data with LocID location identifiers — TX_CLOC and STABLE_CLOC — entirely within your Snowflake account. No data leaves your environment.
@@ -14,14 +13,14 @@ Enrich your IP + timestamp data with LocID location identifiers — TX_CLOC and 
 | **Encrypt** | Table of `(unique_id, ip_address, timestamp)` | TX_CLOC, STABLE_CLOC, geo context |
 | **Decrypt** | Table of `(unique_id, tx_cloc)` | STABLE_CLOC, geo context |
 
-Results are written to a table you specify. All processing happens inside your Snowflake account using LocID's shared LocID data lake.
+Results are written to a table in your app database. All processing happens inside your Snowflake account using LocID's shared data lake.
 
 ---
 
 ## Prerequisites
 
 - Snowflake account (Business Critical edition recommended for SECRET object support)
-- A valid LocID license key from LocID
+- A valid LocID license key
 - ACCOUNTADMIN role (required to approve permissions during installation)
 - A warehouse the app can use to run enrichment jobs
 
@@ -33,9 +32,9 @@ Results are written to a table you specify. All processing happens inside your S
 2. Choose the database name for the app (e.g. `LOCID_APP`).
 3. Review and approve the **Required Permissions** shown during installation:
 
-   | Permission | Why |
-   |-----------|-----|
-   | External access to `central.locid.com` | Required for license validation and usage reporting |
+| Permission | Why |
+|------------|-----|
+| External access to `central.locid.com` | Required for license validation and usage reporting |
 
 4. Click **Activate**.
 
@@ -81,9 +80,8 @@ The following objects are created in your app database:
 
 | Object | Type | Purpose |
 |--------|------|---------|
-| `APP_SCHEMA.APP_CONFIG` | Table | License metadata, entitlements, output column registry |
-| `APP_SCHEMA.JOB_LOG` | Table | Full audit trail of all Encrypt and Decrypt jobs |
-| `APP_SCHEMA.HTTP_PING()` | UDF | Connectivity test used by the Setup Wizard |
+| `APP_SCHEMA.APP_CONFIG` | Table | License metadata and entitlements |
+| `APP_SCHEMA.JOB_LOG` | Table | Audit trail of all Encrypt and Decrypt jobs |
 | `APP_SCHEMA.LOCID_ENCRYPT(...)` | Stored Procedure | Batch Encrypt workflow |
 | `APP_SCHEMA.LOCID_DECRYPT(...)` | Stored Procedure | Batch Decrypt workflow |
 
@@ -133,34 +131,3 @@ Contact LocID for:
 - License key issues or entitlement changes
 - Questions about TX_CLOC / STABLE_CLOC output
 - App version upgrades
-
----
-
-## Package Structure (for reference)
-
-```
-na_app_pkg/
-├── manifest.yml              # App manifest: privileges, EAI, artifacts
-├── setup.sql                 # Setup script: schemas, tables, UDF, network rule
-├── src/
-│   ├── udfs/
-│   │   └── locid_udf.sql     # Scala UDFs wrapping encode-lib JAR
-│   ├── procs/
-│   │   ├── encrypt.sql       # Encrypt stored procedure
-│   │   └── decrypt.sql       # Decrypt stored procedure
-│   └── lib/
-│       └── encode-lib-*.jar  # Bundled Scala JAR
-└── streamlit/
-    ├── app.py                # Home dashboard
-    ├── pages/
-    │   ├── 01_setup_wizard.py
-    │   ├── 02_run_encrypt.py
-    │   ├── 03_run_decrypt.py
-    │   ├── 04_job_history.py
-    │   └── 05_configuration.py
-    └── utils/
-        ├── locid_central.py  # LocID Central API client
-        └── entitlements.py   # Entitlement helpers
-```
-
-
