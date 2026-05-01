@@ -115,16 +115,15 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
     try:
         ip_rows = session.sql(f"""
             SELECT
-                SUM(IFF({ip_col} IS NULL, 1, 0))                        AS null_ip,
+                SUM(IFF({ip_col} IS NULL, 1, 0))                          AS null_ip,
                 SUM(IFF({ip_col} IS NOT NULL
-                        AND {ip_col} NOT LIKE '%:%'
-                        AND TRY_CAST(SPLIT_PART({ip_col}, '.', 1) AS INT) IS NOT NULL
-                        AND ARRAY_SIZE(SPLIT({ip_col}, '.')) = 4, 1, 0)) AS cnt_v4,
-                SUM(IFF({ip_col} LIKE '%:%', 1, 0))                      AS cnt_v6,
+                        AND REGEXP_LIKE({ip_col},
+                            '^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$'), 1, 0)) AS cnt_v4,
+                SUM(IFF({ip_col} LIKE '%:%', 1, 0))                        AS cnt_v6,
                 SUM(IFF({ip_col} IS NOT NULL
-                        AND {ip_col} NOT LIKE '%:%'
-                        AND NOT (TRY_CAST(SPLIT_PART({ip_col}, '.', 1) AS INT) IS NOT NULL
-                                 AND ARRAY_SIZE(SPLIT({ip_col}, '.')) = 4), 1, 0)) AS cnt_bad
+                        AND NOT {ip_col} LIKE '%:%'
+                        AND NOT REGEXP_LIKE({ip_col},
+                            '^[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+$'), 1, 0)) AS cnt_bad
             FROM (SELECT {ip_col} FROM {table} LIMIT 1000)
         """).collect()[0]
         result["null_ip"] = int(ip_rows[0] or 0)
@@ -317,6 +316,11 @@ elif step == 2:
                 st.session_state.enc_validation_cols = (col_ip, col_ts, ts_fmt)
 
         if "enc_validation" in st.session_state:
+            vcols = st.session_state.get("enc_validation_cols", ())
+            if vcols:
+                st.caption(
+                    f"Last validated — IP: `{vcols[0]}` · TS: `{vcols[1]}` · Format: `{vcols[2]}`"
+                )
             _show_validation(st.session_state.enc_validation)
 
     col1, col2 = st.columns(2)
