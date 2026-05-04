@@ -52,6 +52,15 @@ PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
 HANDLER = 'encode_batch'
 COMMENT = 'Approach D: Python vectorized, actual mb-locid-encoding wheel — locid_sf.encode_stable_cloc on MOCKUP_5M'
 AS $$
+import os, sys, glob
+
+# Promote any .whl files staged via IMPORTS onto sys.path so zipimport can find them.
+for _dir in list(sys.path):
+    if _dir and os.path.isdir(_dir):
+        for _whl in glob.glob(os.path.join(_dir, '*.whl')):
+            if _whl not in sys.path:
+                sys.path.insert(0, _whl)
+
 import pandas as pd
 from _snowflake import vectorized
 from locid import snowflake as locid_sf
