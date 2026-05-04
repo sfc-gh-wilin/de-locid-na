@@ -89,13 +89,7 @@ The following objects are created in your app database:
 
 ## Required Grants (post-installation)
 
-Before running a job, bind your input table reference via the Snowsight **App Permissions** screen or SQL. The role used must own the table or have `SELECT WITH GRANT OPTION`:
-
-```sql
--- Run as the role that owns the input table (or ACCOUNTADMIN):
-GRANT SELECT ON TABLE <your_db>.<your_schema>.<your_table>
-    TO APPLICATION <app_name>;
-```
+Before running a job, bind your input table reference via the Snowsight **App Permissions** screen or SQL. The role used must own the table or have `SELECT WITH GRANT OPTION`
 
 The input table can be in any database in your account — it does not need to be in the app database.
 
