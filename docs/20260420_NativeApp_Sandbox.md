@@ -131,8 +131,8 @@ snow app run --version v1_0 --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 
 ### 3.7 Bind references
 
-Three references must be bound before the app can run jobs:
-`APP_WAREHOUSE`, `ENCRYPT_INPUT_TABLE`, and `DECRYPT_INPUT_TABLE`.
+Two references must be bound before the app can run jobs:
+`ENCRYPT_INPUT_TABLE` and `DECRYPT_INPUT_TABLE`.
 
 **Option A — Streamlit Setup Wizard (recommended)**
 
@@ -142,12 +142,7 @@ through each reference step-by-step with inline instructions.
 **Option B — SQL (Snowsight worksheet)**
 
 ```sql
--- 1. Bind the warehouse reference
-CALL LOCID_DEV_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
-    'APP_WAREHOUSE', 'ADD', SYSTEM$REFERENCE('WAREHOUSE', 'DEV_WH', 'SESSION', 'USAGE')
-);
-
--- 2. Bind the encrypt input table
+-- 1. Bind the encrypt input table
 --    (must be granted SELECT by consumer first — see 02_customer_input_sample.sql)
 CALL LOCID_DEV_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
     'ENCRYPT_INPUT_TABLE', 'ADD',
@@ -155,7 +150,7 @@ CALL LOCID_DEV_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
                      'SESSION', 'SELECT')
 );
 
--- 3. Bind the decrypt input table (can reuse the same table or a different one)
+-- 2. Bind the decrypt input table (can reuse the same table or a different one)
 CALL LOCID_DEV_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
     'DECRYPT_INPUT_TABLE', 'ADD',
     SYSTEM$REFERENCE('TABLE', 'LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT',
@@ -168,7 +163,7 @@ Verify:
 ```sql
 SELECT * FROM LOCID_DEV_APP.APP_SCHEMA.APP_CONFIG
 WHERE config_key LIKE 'ref.%';
--- Expected: 3 rows with non-null config_value
+-- Expected: 2 rows with non-null config_value
 ```
 
 ### Re-deploying after code changes

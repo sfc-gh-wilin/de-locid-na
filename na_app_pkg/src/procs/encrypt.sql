@@ -24,8 +24,6 @@
 
 -- Consumer references used by this procedure (declared in manifest.yml):
 --   ENCRYPT_INPUT_TABLE — consumer input table; read via reference('ENCRYPT_INPUT_TABLE')
---   APP_WAREHOUSE       — warehouse for job execution; set via
---                         USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
 --
 -- Output table: auto-generated in APP_SCHEMA as LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS.
 -- The app owns APP_SCHEMA — no consumer GRANT needed.
@@ -293,7 +291,9 @@ def encrypt_handler(
     for name in (id_col, ip_col, ts_col):
         _validate_id(name)
 
-    cur_wh = None  # resolved after APP_WAREHOUSE reference is set (Step 0)
+    # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
+    # from the caller's session and cannot be queried or changed within the proc.
+    cur_wh = None
 
     BUILDS    = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS'
     BUILDS_V4 = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS_IPV4_EXPLODED'
@@ -303,13 +303,6 @@ def encrypt_handler(
     _pt = time.perf_counter()
 
     try:
-        # ------------------------------------------------------------------
-        # Step 0: Set job warehouse from bound APP_WAREHOUSE reference
-        # ------------------------------------------------------------------
-        session.sql("USE WAREHOUSE reference('APP_WAREHOUSE')").collect()
-        cur_wh = 'APP_WAREHOUSE'   # CURRENT_WAREHOUSE() is not permitted in Native App procs
-        phases['warehouse_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
-
         # Opportunistic log cleanup — non-fatal; runs quickly before main work
         try:
             session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()

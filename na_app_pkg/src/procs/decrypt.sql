@@ -29,8 +29,6 @@
 
 -- Consumer references used by this procedure (declared in manifest.yml):
 --   DECRYPT_INPUT_TABLE — consumer input table; read via reference('DECRYPT_INPUT_TABLE')
---   APP_WAREHOUSE       — warehouse for job execution; set via
---                         USE WAREHOUSE reference('APP_WAREHOUSE') at proc start.
 --
 -- Output table: auto-generated in APP_SCHEMA as LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS.
 -- The app owns APP_SCHEMA — no consumer GRANT needed.
@@ -272,19 +270,14 @@ def decrypt_handler(
     for name in (id_col, txcloc_col):
         _validate_id(name)
 
-    cur_wh = None  # resolved after APP_WAREHOUSE reference is set (Step 0)
+    # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
+    # from the caller's session and cannot be queried or changed within the proc.
+    cur_wh = None
 
     phases: dict = {}
     _pt = time.perf_counter()
 
     try:
-        # ------------------------------------------------------------------
-        # Step 0: Set job warehouse from bound APP_WAREHOUSE reference
-        # ------------------------------------------------------------------
-        session.sql("USE WAREHOUSE reference('APP_WAREHOUSE')").collect()
-        cur_wh = 'APP_WAREHOUSE'   # CURRENT_WAREHOUSE() is not permitted in Native App procs
-        phases['warehouse_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
-
         # Opportunistic log cleanup — non-fatal; runs quickly before main work
         try:
             session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()

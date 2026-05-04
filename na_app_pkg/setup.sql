@@ -455,7 +455,6 @@ EXECUTE IMMEDIATE FROM 'src/procs/fetch_license.sql';
 --     References declared in manifest.yml:
 --       ENCRYPT_INPUT_TABLE — consumer input table for Encrypt jobs (SELECT)
 --       DECRYPT_INPUT_TABLE — consumer input table for Decrypt jobs (SELECT)
---       APP_WAREHOUSE       — warehouse for job runs                (USAGE)
 -- =============================================================================
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.register_single_callback(
     ref_name     STRING,

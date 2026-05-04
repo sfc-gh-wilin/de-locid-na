@@ -47,16 +47,6 @@ references:
       multi_valued: false
       register_callback: APP_SCHEMA.register_single_callback
 
-  # APP_WAREHOUSE — warehouse used to execute Encrypt and Decrypt jobs
-  - APP_WAREHOUSE:
-      label: "Job Warehouse"
-      description: "Warehouse for Encrypt/Decrypt jobs. X-Small or Small is sufficient. Use a role owning this warehouse or with USAGE WITH GRANT OPTION."
-      privileges:
-        - USAGE
-      object_type: WAREHOUSE
-      multi_valued: false
-      register_callback: APP_SCHEMA.register_single_callback
-
 configuration:
   log_level:   INFO
   trace_level: ALWAYS

@@ -40,9 +40,9 @@ st.info(
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Step 1 — Bind the input table and warehouse
+# Step 1 — Bind the input tables
 # ---------------------------------------------------------------------------
-st.subheader("Step 1 — Bind the input table and warehouse")
+st.subheader("Step 1 — Bind the input tables")
 
 tab_ui, tab_sql = st.tabs(["Snowsight UI (recommended)", "SQL (alternative)"])
 
@@ -53,7 +53,6 @@ with tab_ui:
         "3. Under **Object access privileges**, bind:\n"
         "   - **Input Table for Encrypt** → select your encrypt input table\n"
         "   - **Input Table for Decrypt** → select your decrypt input table\n"
-        "   - **Job Warehouse** → select the warehouse to use for jobs\n"
         "4. Click **Save**.\n\n"
         "> If the permissions page appeared when the app was first launched, "
         "these bindings may already be set."
@@ -85,11 +84,6 @@ with tab_sql:
         f"CALL {_app_name}.APP_SCHEMA.register_single_callback(\n"
         f"    'DECRYPT_INPUT_TABLE', 'ADD',\n"
         f"    '<your_db>.<your_schema>.<decrypt_input_table>'\n"
-        f");\n\n"
-        f"-- Bind job warehouse:\n"
-        f"CALL {_app_name}.APP_SCHEMA.register_single_callback(\n"
-        f"    'APP_WAREHOUSE', 'ADD',\n"
-        f"    '<your_warehouse>'\n"
         f");",
         language="sql",
     )

@@ -126,7 +126,7 @@ APP_SCHEMA.LOCID_CENTRAL_EAI                -- External Access Integration (crea
 LOCID_CENTRAL_EAI_SPEC                      -- App specification (consumer must approve before EAI is usable; see Setup Wizard Screen E)
 APP_SCHEMA.HTTP_PING()                      -- Python UDF to verify EAI connectivity during setup
 APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)     -- Python stored procedure — fetches/caches license from LocID Central via EAI; called by Streamlit via session.call()
-APP_SCHEMA.register_single_callback(...)    -- Callback proc for INPUT_TABLE and APP_WAREHOUSE references
+APP_SCHEMA.register_single_callback(...)    -- Callback proc for input table references
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
 APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days

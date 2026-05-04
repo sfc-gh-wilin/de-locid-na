@@ -104,7 +104,7 @@ LOCID_CENTRAL_EAI_SPEC                      -- App specification (consumer must 
 APP_SCHEMA.HTTP_PING()                      -- Python UDF to verify EAI connectivity during setup
 APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)     -- Python stored procedure — fetches license from LocID Central; writes crypto keys to GENERIC_STRING SECRETs; stores stripped cache in APP_CONFIG
 APP_SCHEMA.LOCID_SET_API_KEY(INTEGER)       -- Python stored procedure — writes selected API key to LOCID_API_KEY SECRET; stores api_key_hint in APP_CONFIG; scrubs full key from cached_license
-APP_SCHEMA.register_single_callback(...)    -- Callback proc for INPUT_TABLE and APP_WAREHOUSE references
+APP_SCHEMA.register_single_callback(...)    -- Callback proc for input table references
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
 APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
