@@ -8,12 +8,11 @@ Enrich your IP + timestamp data with LocID location identifiers — TX_CLOC and 
 
 ## What This App Does
 
-| Operation | You Provide | App Returns |
-|-----------|-------------|-------------|
-| **Encrypt** | Table of `(unique_id, ip_address, timestamp)` | TX_CLOC, STABLE_CLOC, geo context |
-| **Decrypt** | Table of `(unique_id, tx_cloc)` | STABLE_CLOC, geo context |
+**Encrypt** — Provide a table of `(unique_id, ip_address, timestamp)` and the app returns TX_CLOC, STABLE_CLOC, and geo context columns appended to each row.
 
-Results are written to a table in your app database. All processing happens inside your Snowflake account using LocID's shared data lake.
+**Decrypt** — Provide a table of `(unique_id, tx_cloc)` and the app returns STABLE_CLOC and geo context columns.
+
+Results are written to a new table in your app database. All processing happens inside your Snowflake account using LocID's shared data lake.
 
 ---
 
@@ -22,7 +21,6 @@ Results are written to a table in your app database. All processing happens insi
 - Snowflake account (Business Critical edition recommended for SECRET object support)
 - A valid LocID license key
 - ACCOUNTADMIN role (required to approve permissions during installation)
-- A warehouse the app can use to run enrichment jobs
 
 ---
 
@@ -30,12 +28,7 @@ Results are written to a table in your app database. All processing happens insi
 
 1. Find **LocID for Snowflake** in the Snowflake Marketplace and click **Get**.
 2. Choose the database name for the app (e.g. `LOCID_APP`).
-3. Review and approve the **Required Permissions** shown during installation:
-
-| Permission | Why |
-|------------|-----|
-| External access to `central.locid.com` | Required for license validation and usage reporting |
-
+3. Review and approve the **Required Permissions** shown during installation. The app requests access to `central.locid.com` for license validation and usage reporting.
 4. Click **Activate**.
 
 ---
@@ -78,12 +71,10 @@ It can be re-accessed from the **Configuration** view if you need to update your
 
 The following objects are created in your app database:
 
-| Object | Type | Purpose |
-|--------|------|---------|
-| `APP_SCHEMA.APP_CONFIG` | Table | License metadata and entitlements |
-| `APP_SCHEMA.JOB_LOG` | Table | Audit trail of all Encrypt and Decrypt jobs |
-| `APP_SCHEMA.LOCID_ENCRYPT(...)` | Stored Procedure | Batch Encrypt workflow |
-| `APP_SCHEMA.LOCID_DECRYPT(...)` | Stored Procedure | Batch Decrypt workflow |
+- `APP_SCHEMA.APP_CONFIG` — License metadata and entitlements
+- `APP_SCHEMA.JOB_LOG` — Audit trail of all Encrypt and Decrypt jobs
+- `APP_SCHEMA.LOCID_ENCRYPT(...)` — Stored procedure for batch Encrypt
+- `APP_SCHEMA.LOCID_DECRYPT(...)` — Stored procedure for batch Decrypt
 
 ---
 
@@ -98,30 +89,15 @@ The following objects are created in your app database:
 
 ## Required Grants (post-installation)
 
-The Snowsight **App Permissions** screen prompts you to configure the warehouse and
-input table bindings. Each action requires a specific role:
-
-| Action | Role needed |
-|--------|-------------|
-| Approve `CREATE EXTERNAL ACCESS INTEGRATION` | ACCOUNTADMIN or role with `MANAGE APPLICATION SPECIFICATIONS` |
-| Bind the Job Warehouse | Role that **owns** the warehouse, or has `USAGE WITH GRANT OPTION` |
-| Bind the Input Table | Role that **owns** the table, or has `SELECT WITH GRANT OPTION` |
-
-These may require you to switch roles in Snowsight if your warehouse and input table
-are owned by different roles. You can also run the grants manually in SQL:
+Before running a job, bind your input table reference via the Snowsight **App Permissions** screen or SQL. The role used must own the table or have `SELECT WITH GRANT OPTION`:
 
 ```sql
--- Run as the role that owns the warehouse (or ACCOUNTADMIN):
-GRANT USAGE ON WAREHOUSE <your_warehouse>
-    TO APPLICATION <app_name>;
-
 -- Run as the role that owns the input table (or ACCOUNTADMIN):
 GRANT SELECT ON TABLE <your_db>.<your_schema>.<your_table>
     TO APPLICATION <app_name>;
 ```
 
-The input table can be in any database in your account — it does not need to be
-in the app database.
+The input table can be in any database in your account — it does not need to be in the app database.
 
 ---
 
