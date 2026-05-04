@@ -18,6 +18,7 @@ import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.locid_central import fetch_license
 from utils import logger
+from utils.errors import show_error
 
 session = get_active_session()
 
@@ -127,7 +128,7 @@ elif step == "D":
                     except Exception as e:
                         logger.error(session, "setup_wizard.validate",
                                      "License validation failed", exc=e)
-                        st.error(f"License validation failed: {e}")
+                        show_error("License validation failed.", detail=e)
 
 # ---------------------------------------------------------------------------
 # Screen E — Review Privileges
@@ -208,7 +209,7 @@ elif step == "G":
             logger.info(session, "setup_wizard.connectivity", f"Connectivity OK: {result}")
             st.session_state.connectivity_ok = True
         else:
-            st.error(f"Connection failed — {result}", icon="❌")
+            show_error("LocID Central connection failed.", detail=result)
             logger.error(session, "setup_wizard.connectivity",
                          f"Connectivity failed: {result}")
             st.session_state.connectivity_ok = False

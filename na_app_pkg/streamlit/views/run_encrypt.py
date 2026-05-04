@@ -16,6 +16,7 @@ import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.entitlements import get_active_output_cols
 from utils import logger
+from utils.errors import show_error
 
 session = get_active_session()
 
@@ -415,13 +416,13 @@ elif step == 4:
                                     f"matched={result.get('rows_matched')}")
                     else:
                         err = result.get("error", status)
-                        st.error(f"Job failed — {err}", icon="❌")
+                        show_error(f"Job failed — {err}")
                         logger.error(session, "run_encrypt.run_job",
                                      f"Job FAILED: {err}")
                 except Exception as e:
                     logger.error(session, "run_encrypt.run_job",
                                  "Job threw an exception", exc=e)
-                    st.error(f"Error running encrypt job: {e}", icon="❌")
+                    show_error("Encrypt job failed unexpectedly.", detail=e)
 
             # Reset wizard for next run; discard heavy state
             for key in ("enc_input_columns", "enc_validation", "enc_validation_cols"):

@@ -15,6 +15,7 @@ import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.entitlements import get_active_output_cols
 from utils import logger
+from utils.errors import show_error
 
 session = get_active_session()
 
@@ -258,13 +259,13 @@ elif step == 4:
                                     f"rows_out={result.get('rows_out')}")
                     else:
                         err = result.get("error", status)
-                        st.error(f"Job failed — {err}", icon="❌")
+                        show_error(f"Job failed — {err}")
                         logger.error(session, "run_decrypt.run_job",
                                      f"Job FAILED: {err}")
                 except Exception as e:
                     logger.error(session, "run_decrypt.run_job",
                                  "Job threw an exception", exc=e)
-                    st.error(f"Error running decrypt job: {e}", icon="❌")
+                    show_error("Decrypt job failed unexpectedly.", detail=e)
 
             # Reset for next run; discard heavy state
             for key in ("dec_input_columns",):

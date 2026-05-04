@@ -19,6 +19,7 @@ from snowflake.snowpark.context import get_active_session
 from utils.locid_central import get_secrets
 from utils.entitlements import get_active_entitlements
 from utils import logger
+from utils.errors import show_error
 
 session = get_active_session()
 
@@ -110,7 +111,7 @@ with colB:
             except Exception as e:
                 logger.error(session, "configuration.refresh",
                              "Refresh failed", exc=e)
-                st.error(str(e), icon="❌")
+                show_error("Refresh failed.", detail=e)
 
 st.divider()
 
@@ -215,7 +216,7 @@ if save_clicked:
         st.rerun()
     except Exception as e:
         logger.error(session, "configuration.log_retention", "Save failed", exc=e)
-        st.error(str(e), icon="❌")
+        show_error("Save failed.", detail=e)
 
 if purge_clicked:
     try:
@@ -225,7 +226,7 @@ if purge_clicked:
         st.success(msg, icon="✅")
     except Exception as e:
         logger.error(session, "configuration.purge_logs", "Purge failed", exc=e)
-        st.error(str(e), icon="❌")
+        show_error("Purge failed.", detail=e)
 
 st.divider()
 
