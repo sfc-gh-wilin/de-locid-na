@@ -30,10 +30,8 @@ st.caption(
 # Role note
 # ---------------------------------------------------------------------------
 st.info(
-    "**Required role:** Your Snowflake role must have been granted the app's "
-    "`APP_ADMIN` application role by an ACCOUNTADMIN.  \n"
-    "If not yet granted, an ACCOUNTADMIN should run:  \n"
-    f"```sql\nGRANT APPLICATION ROLE {_app_name}.APP_ADMIN TO ROLE <your_role>;\n```",
+    "**Required role:** Use the role that installed this app (e.g. `LOCID_APP_INSTALLER`). "
+    "That role already has the `APP_ADMIN` application role granted automatically at install time.",
     icon="ℹ️",
 )
 
