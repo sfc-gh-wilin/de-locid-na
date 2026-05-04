@@ -20,7 +20,33 @@ Results are written to a new table in your app database. All processing happens 
 
 - Snowflake account (Business Critical edition recommended for SECRET object support)
 - A valid LocID license key
-- ACCOUNTADMIN role (required to approve permissions during installation)
+- ACCOUNTADMIN role **or** a dedicated installer role with `CREATE APPLICATION` and `CREATE DATABASE` privileges (see Installation Role below)
+
+---
+
+## Installation Role
+
+You can install this app as ACCOUNTADMIN, or use a dedicated least-privilege role. Using a custom role is recommended for teams and production environments.
+
+Run the following **once** as ACCOUNTADMIN to create the installer role:
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+CREATE ROLE IF NOT EXISTS LOCID_APP_INSTALLER;
+
+GRANT CREATE APPLICATION ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
+GRANT CREATE DATABASE    ON ACCOUNT TO ROLE LOCID_APP_INSTALLER;
+GRANT USAGE ON WAREHOUSE <your_warehouse> TO ROLE LOCID_APP_INSTALLER;
+
+GRANT ROLE LOCID_APP_INSTALLER TO USER <your_username>;
+```
+
+After this one-time setup, all installation and day-to-day operations use `LOCID_APP_INSTALLER` — ACCOUNTADMIN is not needed again. If your account uses a standard role hierarchy, you can also grant the installer role to `SYSADMIN`:
+
+```sql
+GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
+```
 
 ---
 
@@ -89,7 +115,7 @@ The following objects are created in your app database:
 
 ## Required Grants (post-installation)
 
-Before running a job, bind your input table reference via the Snowsight **App Permissions** screen or SQL. The role used must own the table or have `SELECT WITH GRANT OPTION`
+Before running a job, bind your input table reference via the Snowsight **App Permissions** screen or SQL. The role used must own the table or have `SELECT WITH GRANT OPTION`:
 
 The input table can be in any database in your account — it does not need to be in the app database.
 

@@ -205,7 +205,7 @@ elif step == "G":
                 logger.error(session, "setup_wizard.connectivity", "HTTP_PING failed", exc=e)
                 result = f"FAILED: {e}"
         if result.startswith("OK"):
-            st.success(f"LocID Central is reachable — {result}", icon="✅")
+            st.success(f"LocID Central is reachable", icon="✅")
             logger.info(session, "setup_wizard.connectivity", f"Connectivity OK: {result}")
             st.session_state.connectivity_ok = True
         else:
