@@ -47,8 +47,8 @@ CREATE OR REPLACE FUNCTION LOCID_DEV.BENCHMARK.PROXY_WHL(
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/wheels/<WHEEL_FILE>')
-PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7')
+IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/mb_locid_encoding-0.0.0-py3-none-any.whl')
+PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
 HANDLER = 'encode_batch'
 COMMENT = 'Approach D: Python vectorized, actual mb-locid-encoding wheel — locid_sf.encode_stable_cloc on MOCKUP_5M'
 AS $$
