@@ -1,7 +1,7 @@
 # UDF Throughput Benchmark — Scala Scalar vs Python Vectorized
 
 **Purpose:** Measure the per-row throughput difference between the existing Scala scalar
-UDFs (JAR-based) and Python `@vectorized` UDFs when applied to a 5-million-row dataset.
+UDFs (JAR-based) and Python `@vectorized` UDFs when applied to a 100-million-row dataset.
 Results feed the performance estimates table in `docs/20260428_Architecture_v3.md §
 Performance Estimates`.
 
@@ -11,10 +11,10 @@ Performance Estimates`.
 
 | File | Description |
 |------|-------------|
-| `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 5M mockup row table, and results table |
+| `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 100M mockup row table, and results table |
 | `02_proxy_scalar_python.sql` | Register Python **scalar** UDF `PROXY_SCALAR` — per-row dispatch |
 | `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch, numpy proxy |
-| `04_run_timing.sql` | Time all four approaches on 5M rows; insert results into `BENCHMARK_RESULTS` |
+| `04_run_timing.sql` | Time all four approaches on 100M rows; insert results into `BENCHMARK_RESULTS` |
 | `05_whl_vectorized.sql` | Register Python **vectorized** UDF `PROXY_WHL` — batch dispatch, actual `mb-locid-encoding` WHL |
 
 ---
@@ -44,32 +44,22 @@ from the operation cost.
 SHA-1 UUID5 via the production library). This is the definitive Python vectorized measurement:
 real production code, real cryptographic primitives, `@vectorized` batch dispatch.
 
-### Results — XS warehouse, 5M rows (2026-04-29)
+### Results — 100M rows
 
-Approaches A–C (proxy baseline):
-
-| Approach | Handler | Elapsed (s) | Throughput (krows/s) | vs A warm | Notes |
-|----------|---------|:-----------:|:--------------------:|:---------:|-------|
-| A — Scala scalar, **cold JVM** | AES-128 ECB via encode-lib | 0.316 | 15,823 | — | First call after warehouse resume; JVM init + JAR load |
-| A — Scala scalar, **warm JVM** | AES-128 ECB via encode-lib | 0.111 | 45,045 | 1.0× | Steady state; JVM warm, JAR in local disk cache |
-| B — Python scalar proxy | SHA-256 per row | 0.050 | 100,000 | 2.2× | Final |
-| C — Python vectorized proxy | numpy BLAS polynomial hash | 0.055 | 90,909 | 2.0× | Final |
-
-> **A cold vs warm:** The 0.316 s run was the first call in a fresh warehouse session — JVM
-> initialisation, JAR loading from stage, and JIT compilation all occur on first invocation.
-> Subsequent calls in the same session use a warm JVM with the JAR in local disk cache (0.111 s).
-> The warm number is the steady-state figure.
-
-> **C ≈ B (proxy):** The numpy BLAS rewrite removed the Python-level loop, but the proxy
-> compute (polynomial hash on 21-byte strings) is too fast (~10–50 ns/row) for the `@vectorized`
-> batching overhead (~5 ms/batch for DataFrame construction) to be outweighed. D/A is the
-> definitive comparison for production-representative work.
-
-Approach D (actual WHL) — populate by running `05_whl_vectorized.sql` + `04_run_timing.sql`:
+> Run all four approaches and populate this table from `BENCHMARK_RESULTS`:
+> ```sql
+> SELECT approach, warehouse_size, elapsed_s, krows_per_s, run_at
+> FROM   LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
+> ORDER  BY approach, run_at DESC;
+> ```
 
 | Approach | Handler | Elapsed (s) | Throughput (krows/s) | vs A warm | Notes |
 |----------|---------|:-----------:|:--------------------:|:---------:|-------|
-| D — Python vectorized (WHL) | `locid_sf.encode_stable_cloc` | — | — | — | Run `05_whl_vectorized.sql` then `04_run_timing.sql` |
+| A — Scala scalar, cold JVM | AES-128 ECB via encode-lib | — | — | — | |
+| A — Scala scalar, warm JVM | AES-128 ECB via encode-lib | — | — | 1.0× | Steady state |
+| B — Python scalar proxy | SHA-256 per row | — | — | — | |
+| C — Python vectorized proxy | numpy BLAS polynomial hash | — | — | — | |
+| D — Python vectorized (WHL) | `locid_sf.encode_stable_cloc` | — | — | — | |
 
 ### Warm-up for Scala UDFs
 
@@ -92,45 +82,40 @@ crossings impactful.
 
 1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (`LOCID_DEV.STAGING` schema
    and `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
-2. Warehouse `WLIN_WH_XS` (or equivalent) available.
+2. Warehouse available (XS minimum; larger warehouse recommended for faster 100M setup).
 3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
    Approach A only. Set as `$base_locid_secret` in `04_run_timing.sql` before running.
 4. **For Approach D only:** Upload the `mb-locid-encoding` wheel to the stage before running
-   `05_whl_vectorized.sql`. Replace `<WHEEL_FILE>` in that file with the actual filename:
-   ```sql
-   PUT file:///path/to/dist/<WHEEL_FILE>
-       @LOCID_DEV.STAGING.LOCID_STAGE/wheels/
-       AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+   `05_whl_vectorized.sql`. Replace the wheel filename in the IMPORTS path if needed:
+   ```bash
+   snow stage copy /path/to/dist/mb_locid_encoding-0.0.0-py3-none-any.whl \
+       @LOCID_DEV.STAGING.LOCID_STAGE --connection <your_connection> --overwrite
    ```
-   Verify with: `LIST @LOCID_DEV.STAGING.LOCID_STAGE/wheels/;`
+   Verify: `LIST @LOCID_DEV.STAGING.LOCID_STAGE;`
 
-> **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_5M`
-> is recreated with the same deterministic data (identical SQL + identical rows), the result
-> fingerprint matches the cache and all approaches return in ~60–70 ms regardless of true UDF
-> cost. `04_run_timing.sql` includes `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
+> **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_100M`
+> is recreated with the same deterministic data, the result fingerprint matches the cache and all
+> approaches return in ~60–70 ms regardless of true UDF cost. `04_run_timing.sql` includes
+> `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
+
+> **Setup runtime.** Generating 100M rows in `01_setup.sql` takes ~10–20 minutes on an XS
+> warehouse. Run on a larger warehouse to reduce setup time if needed.
 
 ---
 
 ## Run Order
 
-**Full clean run** (use after cleanup or first time):
+**Full clean run** (first time or after cleanup):
 
 ```
-01_setup.sql                   -- once; ~30–60 s on XS to generate 5M rows
+01_setup.sql                   -- once; ~10–20 min on XS to generate 100M rows
 02_proxy_scalar_python.sql     -- register PROXY_SCALAR
 03_proxy_vectorized_python.sql -- register PROXY_VECTORIZED (numpy BLAS proxy)
-05_whl_vectorized.sql          -- register PROXY_WHL (actual mb-locid-encoding WHL); set <WHEEL_FILE> first
+05_whl_vectorized.sql          -- register PROXY_WHL (actual mb-locid-encoding WHL); stage wheel first
 04_run_timing.sql              -- set $base_locid_secret first, then run all four timings
 ```
 
-**Re-run Approach D only** (e.g. after updating the WHL):
-
-```
-05_whl_vectorized.sql          -- re-registers PROXY_WHL
-04_run_timing.sql              -- run Approach D block only; insert result
-```
-
-**Before re-running all approaches**, truncate old results to keep the table clean:
+**Before re-running timings**, truncate old results to keep the table clean:
 
 ```sql
 TRUNCATE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
@@ -158,8 +143,8 @@ ORDER  BY approach, run_at DESC;
 
 ## Cleanup
 
-Run the following to drop all benchmark objects and the schema. This is safe to run at any
-time; `01_setup.sql` is idempotent and will recreate everything from scratch.
+Run the following to drop all benchmark objects and the schema. `01_setup.sql` is idempotent
+and will recreate everything from scratch.
 
 ```sql
 USE ROLE LOCID_APP_ADMIN;
@@ -170,16 +155,9 @@ DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(VARCHAR, VARCHAR);
 DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_WHL(VARCHAR, VARCHAR);
 
 -- Drop tables
-DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.MOCKUP_5M;
+DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.MOCKUP_100M;
 DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
 
--- Drop schema (only after objects above are dropped, or use CASCADE)
+-- Drop schema
 DROP SCHEMA IF EXISTS LOCID_DEV.BENCHMARK CASCADE;
-```
-
-> After cleanup, restart from `01_setup.sql` to rebuild.
-
-If you just need to re-run timings:
-```sql
-TRUNCATE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
 ```

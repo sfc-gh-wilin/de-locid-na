@@ -1,8 +1,8 @@
 -- =============================================================================
 -- db/dev/benchmark/01_setup.sql
--- LocID Dev: Benchmark schema + 5M mockup row table
+-- LocID Dev: Benchmark schema + 100M mockup row table
 --
--- Creates LOCID_DEV.BENCHMARK schema and a 5-million-row table of synthetic
+-- Creates LOCID_DEV.BENCHMARK schema and a 100-million-row table of synthetic
 -- LocID-like strings used to compare UDF throughput across four approaches:
 --   A. Existing Scala scalar UDF (LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT)
 --   B. Python scalar proxy UDF  (LOCID_DEV.BENCHMARK.PROXY_SCALAR)
@@ -11,7 +11,7 @@
 --
 -- Run order: after db/dev/provider/01_setup.sql (LOCID_DEV database must exist).
 -- Idempotent: CREATE OR REPLACE on all objects.
--- Expected runtime: ~30–60 s on an XS warehouse for the 5M INSERT.
+-- Expected runtime: ~10–20 min on an XS warehouse for the 100M INSERT.
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
@@ -28,7 +28,7 @@ USE SCHEMA LOCID_DEV.BENCHMARK;
 
 
 -- ---------------------------------------------------------------------------
--- STEP 2: 5M mockup row table
+-- STEP 2: 100M mockup row table
 --
 -- loc_id   — synthetic 21-char uppercase alphanumeric string, unique per row.
 --            Derived from MD5 of row number so generation is deterministic.
@@ -37,18 +37,18 @@ USE SCHEMA LOCID_DEV.BENCHMARK;
 -- key_str  — constant placeholder key for all rows.
 --            For Approach A (Scala/JAR), replace with actual $base_locid_secret
 --            in 04_run_timing.sql — the value here is not used by that query.
---            For Approaches B/C (Python proxy), any non-empty string is valid.
+--            For Approaches B/C/D (Python), any non-empty string is valid.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.MOCKUP_5M (
-    row_id   BIGINT        NOT NULL COMMENT 'Sequential row identifier (1–5,000,000)',
+CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.MOCKUP_100M (
+    row_id   BIGINT        NOT NULL COMMENT 'Sequential row identifier (1–100,000,000)',
     loc_id   VARCHAR(21)   NOT NULL COMMENT 'Synthetic 21-char LocID-like string',
     key_str  VARCHAR       NOT NULL COMMENT 'Constant key placeholder; overridden per approach in 04_run_timing.sql'
 )
-COMMENT = 'Benchmark input: 5M synthetic rows for UDF throughput testing'
+COMMENT = 'Benchmark input: 100M synthetic rows for UDF throughput testing'
 AS
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ8()) AS rn
-    FROM TABLE(GENERATOR(ROWCOUNT => 5000000))
+    FROM TABLE(GENERATOR(ROWCOUNT => 100000000))
 )
 SELECT
     rn                                                              AS row_id,
@@ -79,9 +79,9 @@ COMMENT = 'Benchmark timing results — insert one row per run via 04_run_timing
 -- ---------------------------------------------------------------------------
 -- STEP 4: Verify
 -- ---------------------------------------------------------------------------
-SELECT COUNT(*) AS row_count FROM LOCID_DEV.BENCHMARK.MOCKUP_5M;
--- Expected: 5,000,000
+SELECT COUNT(*) AS row_count FROM LOCID_DEV.BENCHMARK.MOCKUP_100M;
+-- Expected: 100,000,000
 
 -- Spot-check first 5 rows
-SELECT * FROM LOCID_DEV.BENCHMARK.MOCKUP_5M LIMIT 5;
+SELECT * FROM LOCID_DEV.BENCHMARK.MOCKUP_100M LIMIT 5;
 -- Expected: row_id 1–5, loc_id = 21-char uppercase hex, key_str = placeholder

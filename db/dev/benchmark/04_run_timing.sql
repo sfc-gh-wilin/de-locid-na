@@ -10,7 +10,7 @@
 -- and prints a comparison summary.
 --
 -- Prerequisites:
---   1. 01_setup.sql has been run (MOCKUP_5M + BENCHMARK_RESULTS tables exist)
+--   1. 01_setup.sql has been run (MOCKUP_100M + BENCHMARK_RESULTS tables exist)
 --   2. 02_proxy_scalar_python.sql has been run (PROXY_SCALAR UDF exists)
 --   3. 03_proxy_vectorized_python.sql has been run (PROXY_VECTORIZED UDF exists)
 --   4. 05_whl_vectorized.sql has been run (PROXY_WHL UDF exists — requires WHL staged)
@@ -30,7 +30,7 @@ USE SCHEMA   LOCID_DEV.BENCHMARK;
 --   Use the base_locid_secret value from the LocID Central license response
 --   (secrets.base_locid_secret — NOT the License Key).
 --   Approaches B, C, and D ignore this variable (they use the placeholder key
---   stored in MOCKUP_5M.key_str).
+--   stored in MOCKUP_100M.key_str).
 -- ---------------------------------------------------------------------------
 SET base_locid_secret = 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET';
 
@@ -61,7 +61,7 @@ SELECT
     SUM(LENGTH(result_col))                                                 AS total_output_len  -- prevent result caching
 FROM (
     SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT(loc_id, $base_locid_secret) AS result_col
-    FROM   LOCID_DEV.BENCHMARK.MOCKUP_5M
+    FROM   LOCID_DEV.BENCHMARK.MOCKUP_100M
 );
 
 ALTER SESSION UNSET QUERY_TAG;
@@ -70,7 +70,7 @@ ALTER SESSION UNSET QUERY_TAG;
 -- =============================================================================
 -- APPROACH B — Python scalar UDF (per-row dispatch proxy)
 --   LOCID_DEV.BENCHMARK.PROXY_SCALAR(loc_id, key_str)
---   Uses the placeholder key_str from MOCKUP_5M (proxy; key value ignored).
+--   Uses the placeholder key_str from MOCKUP_100M (proxy; key value ignored).
 -- =============================================================================
 ALTER SESSION SET QUERY_TAG = 'locid_bench_B_python_scalar';
 
@@ -79,7 +79,7 @@ SELECT
     SUM(LENGTH(result_col))                                                 AS total_output_len
 FROM (
     SELECT LOCID_DEV.BENCHMARK.PROXY_SCALAR(loc_id, key_str)               AS result_col
-    FROM   LOCID_DEV.BENCHMARK.MOCKUP_5M
+    FROM   LOCID_DEV.BENCHMARK.MOCKUP_100M
 );
 
 ALTER SESSION UNSET QUERY_TAG;
@@ -97,7 +97,7 @@ SELECT
     SUM(LENGTH(result_col))                                                 AS total_output_len
 FROM (
     SELECT LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(loc_id, key_str)           AS result_col
-    FROM   LOCID_DEV.BENCHMARK.MOCKUP_5M
+    FROM   LOCID_DEV.BENCHMARK.MOCKUP_100M
 );
 
 ALTER SESSION UNSET QUERY_TAG;
@@ -116,7 +116,7 @@ SELECT
     SUM(LENGTH(result_col))                                                 AS total_output_len
 FROM (
     SELECT LOCID_DEV.BENCHMARK.PROXY_WHL(loc_id, key_str)                  AS result_col
-    FROM   LOCID_DEV.BENCHMARK.MOCKUP_5M
+    FROM   LOCID_DEV.BENCHMARK.MOCKUP_100M
 );
 
 ALTER SESSION UNSET QUERY_TAG;
@@ -134,7 +134,7 @@ SELECT
     query_tag,
     total_elapsed_time / 1000.0                               AS elapsed_s,
     rows_produced,
-    ROUND(5000000.0 / (total_elapsed_time / 1000.0) / 1000, 1) AS krows_per_s
+    ROUND(100000000.0 / (total_elapsed_time / 1000.0) / 1000, 1) AS krows_per_s
 FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY(
     END_TIME_RANGE_START => DATEADD('minute', -30, CURRENT_TIMESTAMP()),
     END_TIME_RANGE_END   => DATEADD('minute',   1, CURRENT_TIMESTAMP())
@@ -161,9 +161,9 @@ SELECT
         WHEN 'locid_bench_D_whl_vectorized'       THEN 'D_whl_vectorized'
     END                                                           AS approach,
     $warehouse_size                                               AS warehouse_size,
-    5000000                                                       AS rows_processed,
+    100000000                                                       AS rows_processed,
     total_elapsed_time / 1000.0                                   AS elapsed_s,
-    ROUND(5000000.0 / (total_elapsed_time / 1000.0) / 1000, 1)   AS krows_per_s,
+    ROUND(100000000.0 / (total_elapsed_time / 1000.0) / 1000, 1)   AS krows_per_s,
     'Initial benchmark run — see README for interpretation'  AS notes
 FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY(
     END_TIME_RANGE_START => DATEADD('minute', -30, CURRENT_TIMESTAMP()),
