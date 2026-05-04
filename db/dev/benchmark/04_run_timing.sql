@@ -1,20 +1,21 @@
 -- =============================================================================
 -- db/dev/benchmark/04_run_timing.sql
--- LocID Dev: UDF throughput benchmark — timing queries for all three approaches
+-- LocID Dev: UDF throughput benchmark — timing queries for all four approaches
 --
 -- Need replace: 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET'
 --
--- Runs three SELECT statements (one per approach) with QUERY_TAG set so that
+-- Runs four SELECT statements (one per approach) with QUERY_TAG set so that
 -- INFORMATION_SCHEMA.QUERY_HISTORY can retrieve the elapsed time for each.
--- After all three runs, inserts results into LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
+-- After all runs, inserts results into LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
 -- and prints a comparison summary.
 --
 -- Prerequisites:
 --   1. 01_setup.sql has been run (MOCKUP_5M + BENCHMARK_RESULTS tables exist)
 --   2. 02_proxy_scalar_python.sql has been run (PROXY_SCALAR UDF exists)
 --   3. 03_proxy_vectorized_python.sql has been run (PROXY_VECTORIZED UDF exists)
---   4. db/dev/provider/06_udfs.sql has been run (LOCID_BASE_ENCRYPT UDF exists)
---   5. $base_locid_secret is set below (required for Approach A only)
+--   4. 05_whl_vectorized.sql has been run (PROXY_WHL UDF exists — requires WHL staged)
+--   5. db/dev/provider/06_udfs.sql has been run (LOCID_BASE_ENCRYPT UDF exists)
+--   6. $base_locid_secret is set below (required for Approach A only)
 --
 -- Run on at least an XS warehouse. For more realistic production numbers, run
 -- on the same warehouse size used in production encrypt/decrypt jobs.
@@ -28,7 +29,7 @@ USE SCHEMA   LOCID_DEV.BENCHMARK;
 -- ⚠ Set $base_locid_secret for Approach A (Scala/JAR).
 --   Use the base_locid_secret value from the LocID Central license response
 --   (secrets.base_locid_secret — NOT the License Key).
---   Approaches B and C ignore this variable (they use the placeholder key
+--   Approaches B, C, and D ignore this variable (they use the placeholder key
 --   stored in MOCKUP_5M.key_str).
 -- ---------------------------------------------------------------------------
 SET base_locid_secret = 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET';
@@ -103,6 +104,25 @@ ALTER SESSION UNSET QUERY_TAG;
 
 
 -- =============================================================================
+-- APPROACH D — Python vectorized UDF (actual mb-locid-encoding wheel)
+--   LOCID_DEV.BENCHMARK.PROXY_WHL(loc_id, key_str)
+--   Uses locid_sf.encode_stable_cloc from the production WHL.
+--   ⚠ Requires 05_whl_vectorized.sql to have been run with <WHEEL_FILE> set.
+-- =============================================================================
+ALTER SESSION SET QUERY_TAG = 'locid_bench_D_whl_vectorized';
+
+SELECT
+    COUNT(*)                                                                AS rows_processed,
+    SUM(LENGTH(result_col))                                                 AS total_output_len
+FROM (
+    SELECT LOCID_DEV.BENCHMARK.PROXY_WHL(loc_id, key_str)                  AS result_col
+    FROM   LOCID_DEV.BENCHMARK.MOCKUP_5M
+);
+
+ALTER SESSION UNSET QUERY_TAG;
+
+
+-- =============================================================================
 -- RESULTS: Pull elapsed time from QUERY_HISTORY and insert into results table
 --
 -- Wait a few seconds after the queries above complete before running this block,
@@ -122,7 +142,8 @@ FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY(
 WHERE query_tag IN (
     'locid_bench_A_scala_scalar',
     'locid_bench_B_python_scalar',
-    'locid_bench_C_python_vectorized'
+    'locid_bench_C_python_vectorized',
+    'locid_bench_D_whl_vectorized'
 )
   AND execution_status = 'SUCCESS'
 ORDER BY start_time;
@@ -137,12 +158,13 @@ SELECT
         WHEN 'locid_bench_A_scala_scalar'        THEN 'A_scala_scalar'
         WHEN 'locid_bench_B_python_scalar'        THEN 'B_python_scalar'
         WHEN 'locid_bench_C_python_vectorized'    THEN 'C_python_vectorized'
+        WHEN 'locid_bench_D_whl_vectorized'       THEN 'D_whl_vectorized'
     END                                                           AS approach,
     $warehouse_size                                               AS warehouse_size,
     5000000                                                       AS rows_processed,
     total_elapsed_time / 1000.0                                   AS elapsed_s,
     ROUND(5000000.0 / (total_elapsed_time / 1000.0) / 1000, 1)   AS krows_per_s,
-    'Initial benchmark run — proxy UDFs; see README for interpretation'  AS notes
+    'Initial benchmark run — see README for interpretation'  AS notes
 FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY(
     END_TIME_RANGE_START => DATEADD('minute', -30, CURRENT_TIMESTAMP()),
     END_TIME_RANGE_END   => DATEADD('minute',   1, CURRENT_TIMESTAMP())
@@ -150,7 +172,8 @@ FROM TABLE(INFORMATION_SCHEMA.QUERY_HISTORY(
 WHERE query_tag IN (
     'locid_bench_A_scala_scalar',
     'locid_bench_B_python_scalar',
-    'locid_bench_C_python_vectorized'
+    'locid_bench_C_python_vectorized',
+    'locid_bench_D_whl_vectorized'
 )
   AND execution_status = 'SUCCESS'
 -- Keep only the most recent run per approach if re-run multiple times
@@ -158,7 +181,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY query_tag ORDER BY start_time DESC) = 1;
 
 
 -- =============================================================================
--- SUMMARY: Compare all three approaches
+-- SUMMARY: Compare all four approaches
 -- =============================================================================
 SELECT
     approach,

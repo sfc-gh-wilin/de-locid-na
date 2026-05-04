@@ -3,10 +3,11 @@
 -- LocID Dev: Benchmark schema + 5M mockup row table
 --
 -- Creates LOCID_DEV.BENCHMARK schema and a 5-million-row table of synthetic
--- LocID-like strings used to compare UDF throughput across three approaches:
+-- LocID-like strings used to compare UDF throughput across four approaches:
 --   A. Existing Scala scalar UDF (LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT)
 --   B. Python scalar proxy UDF  (LOCID_DEV.BENCHMARK.PROXY_SCALAR)
 --   C. Python vectorized proxy  (LOCID_DEV.BENCHMARK.PROXY_VECTORIZED)
+--   D. Python vectorized, actual mb-locid-encoding WHL (LOCID_DEV.BENCHMARK.PROXY_WHL)
 --
 -- Run order: after db/dev/provider/01_setup.sql (LOCID_DEV database must exist).
 -- Idempotent: CREATE OR REPLACE on all objects.
@@ -64,7 +65,7 @@ FROM gen;
 -- STEP 3: Results table (populated by 04_run_timing.sql)
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS (
-    approach        VARCHAR  NOT NULL COMMENT 'A_scala_scalar | B_python_scalar | C_python_vectorized',
+    approach        VARCHAR  NOT NULL COMMENT 'A_scala_scalar | B_python_scalar | C_python_vectorized | D_whl_vectorized',
     warehouse_size  VARCHAR  NOT NULL COMMENT 'Snowflake warehouse size used',
     rows_processed  BIGINT   NOT NULL COMMENT 'Number of rows in the benchmark query',
     elapsed_s       FLOAT    NOT NULL COMMENT 'Wall-clock seconds from QUERY_HISTORY',

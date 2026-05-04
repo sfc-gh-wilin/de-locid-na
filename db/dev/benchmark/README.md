@@ -1,7 +1,7 @@
 # UDF Throughput Benchmark — Scala Scalar vs Python Vectorized
 
 **Purpose:** Measure the per-row throughput difference between the existing Scala scalar
-UDFs (JAR-based) and a Python `@vectorized` UDF when applied to a 5-million-row dataset.
+UDFs (JAR-based) and Python `@vectorized` UDFs when applied to a 5-million-row dataset.
 Results feed the performance estimates table in `docs/20260428_Architecture_v3.md §
 Performance Estimates`.
 
@@ -13,34 +13,40 @@ Performance Estimates`.
 |------|-------------|
 | `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 5M mockup row table, and results table |
 | `02_proxy_scalar_python.sql` | Register Python **scalar** UDF `PROXY_SCALAR` — per-row dispatch |
-| `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch |
-| `04_run_timing.sql` | Time all three approaches on 5M rows; insert results into `BENCHMARK_RESULTS` |
-| `04b_rerun_C_vectorized.sql` | Re-register `PROXY_VECTORIZED` and time Approach C only (use after updating the handler) |
+| `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch, numpy proxy |
+| `04_run_timing.sql` | Time all four approaches on 5M rows; insert results into `BENCHMARK_RESULTS` |
+| `05_whl_vectorized.sql` | Register Python **vectorized** UDF `PROXY_WHL` — batch dispatch, actual `mb-locid-encoding` WHL |
 
 ---
 
-## Three Approaches Timed
+## Four Approaches Timed
 
-| Approach | UDF | Language | Dispatch |
-|----------|-----|----------|----------|
-| **A — Scala scalar (JAR)** | `LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT` | Scala 2.13 | Per-row |
-| **B — Python scalar proxy** | `LOCID_DEV.BENCHMARK.PROXY_SCALAR` | Python 3.11 | Per-row |
-| **C — Python vectorized proxy** | `LOCID_DEV.BENCHMARK.PROXY_VECTORIZED` | Python 3.11 | Batch (1K–8K rows/batch) |
+| Approach | UDF | Language | Dispatch | Operation |
+|----------|-----|----------|----------|-----------|
+| **A — Scala scalar (JAR)** | `LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT` | Scala 2.13 | Per-row | AES-128 ECB |
+| **B — Python scalar proxy** | `LOCID_DEV.BENCHMARK.PROXY_SCALAR` | Python 3.11 | Per-row | HMAC-SHA256 proxy |
+| **C — Python vectorized proxy** | `LOCID_DEV.BENCHMARK.PROXY_VECTORIZED` | Python 3.11 | Batch (1K–8K rows/batch) | numpy BLAS polynomial hash proxy |
+| **D — Python vectorized (WHL)** | `LOCID_DEV.BENCHMARK.PROXY_WHL` | Python 3.11 | Batch (1K–8K rows/batch) | `locid_sf.encode_stable_cloc` (actual production WHL) |
 
-### Compute proxy
+### Compute operations
 
-Approach B uses `hashlib.SHA256` as a compute proxy.
+**Approach A** calls `LOCID_BASE_ENCRYPT` (AES-128 ECB via encode-lib JAR) per row.
 
-Approach C uses a **numpy polynomial hash** via BLAS `dot()` — no Python-level loop in the hot path.
-The critical path is all C/BLAS: `str.ljust/encode → b''.join → np.frombuffer().reshape →
-arr.dot(_PRIMES) → hashes.astype(str)`. SHA-256 was replaced because it has no numpy batch
-interface, which would have made the `@vectorized` implementation equivalent to a Python loop.
+**Approach B** uses `hashlib.SHA256` as a compute proxy — re-derives the key on every row,
+matching the per-row `toKey()` pattern in the Scala scalar UDFs.
 
-Both proxies are used only because `locid.py` (the Python implementation of `encode-lib` operations)
-has not yet been provided by LocID. Results will be re-run with actual AES-128 operations once it
-is available.
+**Approach C** uses a **numpy polynomial hash** via BLAS `dot()` — no Python-level loop in
+the hot path. SHA-256 was replaced because it has no numpy batch interface, which would make
+the `@vectorized` implementation equivalent to a Python loop. C isolates the batching overhead
+from the operation cost.
+
+**Approach D** uses the actual `mb-locid-encoding` WHL (`locid_sf.encode_stable_cloc` —
+SHA-1 UUID5 via the production library). This is the definitive Python vectorized measurement:
+real production code, real cryptographic primitives, `@vectorized` batch dispatch.
 
 ### Results — XS warehouse, 5M rows (2026-04-29)
+
+Approaches A–C (proxy baseline):
 
 | Approach | Handler | Elapsed (s) | Throughput (krows/s) | vs A warm | Notes |
 |----------|---------|:-----------:|:--------------------:|:---------:|-------|
@@ -54,11 +60,16 @@ is available.
 > Subsequent calls in the same session use a warm JVM with the JAR in local disk cache (0.111 s).
 > The warm number is the steady-state figure.
 
-> **C ≈ B:** The numpy BLAS rewrite removed the Python-level loop, but the proxy compute
-> (polynomial hash on 21-byte strings) is still too fast (~10–50 ns/row with Snowflake's
-> parallel workers) for the `@vectorized` batching overhead (~5 ms/batch for DataFrame
-> construction) to be outweighed. C > B will show with the real `locid.py` AES-128 workload
-> where per-row cost is ~1–10 µs and key amortisation is meaningful.
+> **C ≈ B (proxy):** The numpy BLAS rewrite removed the Python-level loop, but the proxy
+> compute (polynomial hash on 21-byte strings) is too fast (~10–50 ns/row) for the `@vectorized`
+> batching overhead (~5 ms/batch for DataFrame construction) to be outweighed. D/A is the
+> definitive comparison for production-representative work.
+
+Approach D (actual WHL) — populate by running `05_whl_vectorized.sql` + `04_run_timing.sql`:
+
+| Approach | Handler | Elapsed (s) | Throughput (krows/s) | vs A warm | Notes |
+|----------|---------|:-----------:|:--------------------:|:---------:|-------|
+| D — Python vectorized (WHL) | `locid_sf.encode_stable_cloc` | — | — | — | Run `05_whl_vectorized.sql` then `04_run_timing.sql` |
 
 ### Warm-up for Scala UDFs
 
@@ -68,11 +79,12 @@ the `LOCID_ENCRYPT` and `LOCID_DECRYPT` stored procedures — each proc issues a
 The `jvm_warmup_s` field in `APP_LOGS` shows the actual cost per job.
 
 For the benchmark, the warm-up is built into `04_run_timing.sql` via `USE_CACHED_RESULT = FALSE`
-and the sequential run order (A runs first, warming the JVM for B and C in the same session).
+and the sequential run order (A runs first, warming the JVM for B, C, and D in the same session).
 
 The **3–5× improvement** estimate in the architecture doc applies to the actual `locid.py`
-workload vs warm Scala, where AES-128 key derivation costs ~100–1000× more per row than the
-proxy, making key amortisation and reduced boundary crossings meaningful.
+workload (Approach D) vs warm Scala (Approach A), where SHA-1 UUID5 key derivation costs
+meaningfully more per row than the proxy, making key amortisation and reduced boundary
+crossings impactful.
 
 ---
 
@@ -83,12 +95,19 @@ proxy, making key amortisation and reduced boundary crossings meaningful.
 2. Warehouse `WLIN_WH_XS` (or equivalent) available.
 3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
    Approach A only. Set as `$base_locid_secret` in `04_run_timing.sql` before running.
+4. **For Approach D only:** Upload the `mb-locid-encoding` wheel to the stage before running
+   `05_whl_vectorized.sql`. Replace `<WHEEL_FILE>` in that file with the actual filename:
+   ```sql
+   PUT file:///path/to/dist/<WHEEL_FILE>
+       @LOCID_DEV.STAGING.LOCID_STAGE/wheels/
+       AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+   ```
+   Verify with: `LIST @LOCID_DEV.STAGING.LOCID_STAGE/wheels/;`
 
 > **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_5M`
 > is recreated with the same deterministic data (identical SQL + identical rows), the result
 > fingerprint matches the cache and all approaches return in ~60–70 ms regardless of true UDF
-> cost. Both `04_run_timing.sql` and `04b_rerun_C_vectorized.sql` include
-> `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
+> cost. `04_run_timing.sql` includes `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
 
 ---
 
@@ -99,17 +118,19 @@ proxy, making key amortisation and reduced boundary crossings meaningful.
 ```
 01_setup.sql                   -- once; ~30–60 s on XS to generate 5M rows
 02_proxy_scalar_python.sql     -- register PROXY_SCALAR
-03_proxy_vectorized_python.sql -- register PROXY_VECTORIZED (numpy BLAS handler)
-04_run_timing.sql              -- set $base_locid_secret first, then run all three timings
+03_proxy_vectorized_python.sql -- register PROXY_VECTORIZED (numpy BLAS proxy)
+05_whl_vectorized.sql          -- register PROXY_WHL (actual mb-locid-encoding WHL); set <WHEEL_FILE> first
+04_run_timing.sql              -- set $base_locid_secret first, then run all four timings
 ```
 
-**Re-run Approach C only** (e.g. after updating the vectorized handler):
+**Re-run Approach D only** (e.g. after updating the WHL):
 
 ```
-04b_rerun_C_vectorized.sql     -- re-registers PROXY_VECTORIZED and times C only
+05_whl_vectorized.sql          -- re-registers PROXY_WHL
+04_run_timing.sql              -- run Approach D block only; insert result
 ```
 
-**Before re-running**, truncate old results to keep the table clean:
+**Before re-running all approaches**, truncate old results to keep the table clean:
 
 ```sql
 TRUNCATE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
@@ -128,9 +149,10 @@ FROM   LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
 ORDER  BY approach, run_at DESC;
 ```
 
-- **A/C ratio** — Scala scalar → Python vectorized speedup estimate at the UDF phase.
+- **D/A ratio** — Python vectorized WHL vs Scala scalar; the definitive production speedup estimate.
+- **C/A ratio** — numpy proxy vs Scala scalar; isolates dispatch overhead from operation cost.
 - **B/C ratio** — isolates the `@vectorized` batch-dispatch gain from the operation cost.
-- **B/A ratio** — Python scalar vs Scala scalar; shows Python runtime overhead independent of batching.
+- **B/A ratio** — Python scalar vs Scala scalar; Python runtime overhead independent of batching.
 
 ---
 
@@ -145,6 +167,7 @@ USE ROLE LOCID_APP_ADMIN;
 -- Drop UDFs
 DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_SCALAR(VARCHAR, VARCHAR);
 DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(VARCHAR, VARCHAR);
+DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_WHL(VARCHAR, VARCHAR);
 
 -- Drop tables
 DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.MOCKUP_5M;
@@ -156,7 +179,7 @@ DROP SCHEMA IF EXISTS LOCID_DEV.BENCHMARK CASCADE;
 
 > After cleanup, restart from `01_setup.sql` to rebuild.
 
-If you just need to run 04_run_timing.sql again:
+If you just need to re-run timings:
 ```sql
 TRUNCATE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
 ```
