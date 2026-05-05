@@ -379,6 +379,13 @@ elif step == 4:
         "Output will be written to an auto-named table in APP_SCHEMA "
         "(e.g. LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
     )
+    st.info(
+        "**Warehouse tip:** For best performance, use a Snowpark-optimized warehouse.  \n"
+        "**< 10M rows** → Small/Medium  \n"
+        "**10M–100M rows** → Medium Snowpark-optimized  \n"
+        "**100M+ rows** → Large or X-Large Snowpark-optimized",
+        icon="💡",
+    )
 
     col1, col2 = st.columns(2)
     with col1:
