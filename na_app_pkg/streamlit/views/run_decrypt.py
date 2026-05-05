@@ -36,6 +36,13 @@ sid = _session_id()
 
 st.header(":material/lock_open: Run Decrypt")
 st.caption("Decode TX_CLOC values back to STABLE_CLOC and geo context.")
+st.info(
+    "**Warehouse tip:** For best performance, use a Snowpark-optimized warehouse.  \n"
+    "**< 10M rows** → Small/Medium  |  "
+    "**10M–100M rows** → Medium Snowpark-optimized  |  "
+    "**100M+ rows** → Large+ Snowpark-optimized",
+    icon="💡",
+)
 st.divider()
 
 
@@ -223,13 +230,6 @@ elif step == 4:
     st.caption(
         "Output will be written to an auto-named table in APP_SCHEMA "
         "(e.g. LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
-    )
-    st.info(
-        "**Warehouse tip:** For best performance, use a Snowpark-optimized warehouse.  \n"
-        "**< 10M rows** → Small/Medium  \n"
-        "**10M–100M rows** → Medium Snowpark-optimized  \n"
-        "**100M+ rows** → Large or X-Large Snowpark-optimized",
-        icon="💡",
     )
 
     col1, col2 = st.columns(2)
