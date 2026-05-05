@@ -14,8 +14,8 @@ Performance Estimates`.
 | `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 50M mockup row table, and results table |
 | `02_proxy_scalar_python.sql` | Register Python **scalar** UDF `PROXY_SCALAR` — per-row dispatch |
 | `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch, numpy proxy |
-| `05_run_timing.sql` | Time all four approaches on 50M rows; insert results into `BENCHMARK_RESULTS` |
 | `04_whl_vectorized.sql` | Register Python **vectorized** UDF `PROXY_WHL` — batch dispatch, actual `mb-locid-encoding` WHL |
+| `05_run_timing.sql` | Time all four approaches on 50M rows; insert results into `BENCHMARK_RESULTS` |
 
 ---
 

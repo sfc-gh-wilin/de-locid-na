@@ -179,6 +179,8 @@ WHERE query_tag IN (
 -- Keep only the most recent run per approach if re-run multiple times
 QUALIFY ROW_NUMBER() OVER (PARTITION BY query_tag ORDER BY start_time DESC) = 1;
 
+-- Restore session default
+ALTER SESSION UNSET USE_CACHED_RESULT;
 
 -- =============================================================================
 -- SUMMARY: Compare all four approaches
@@ -196,6 +198,3 @@ SELECT
     run_at
 FROM LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
 ORDER BY approach, run_at DESC;
-
--- Restore session default
-ALTER SESSION UNSET USE_CACHED_RESULT;
