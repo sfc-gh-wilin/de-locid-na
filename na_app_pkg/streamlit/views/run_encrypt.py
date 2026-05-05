@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
-from utils.entitlements import get_active_output_cols
+from utils.entitlements import get_active_output_cols, get_active_entitlements
 from utils import logger
 from utils.errors import show_error
 
@@ -223,6 +223,18 @@ def _show_validation(v: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Entitlement gate — block the entire workflow if allow_encrypt is missing
+# ---------------------------------------------------------------------------
+if 'allow_encrypt' not in get_active_entitlements(sid):
+    st.error(
+        "Your LocID license does not include the **Encrypt** entitlement (`allow_encrypt`). "
+        "Contact LocID to upgrade your access.",
+        icon="🔒",
+    )
+    st.stop()
+
+
+# ---------------------------------------------------------------------------
 # Step state
 # ---------------------------------------------------------------------------
 if "enc_step" not in st.session_state:
@@ -233,7 +245,7 @@ steps = ["Input", "Map Columns", "Output Columns", "Review & Run"]
 
 st.progress((step - 1) / (len(steps) - 1),
             text=f"Step {step} of {len(steps)}: {steps[step-1]}")
-st.divider()
+# st.divider()
 
 # ---------------------------------------------------------------------------
 # Step 1 — Input Table
