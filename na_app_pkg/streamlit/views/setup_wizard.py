@@ -17,6 +17,7 @@ LocID Native App — Setup Wizard (View 2)
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
 from utils.locid_central import fetch_license
+from utils.entitlements import get_active_entitlements, get_active_output_cols
 from utils import logger
 from utils.errors import show_error
 
@@ -305,6 +306,9 @@ elif step == "H":
                         _upsert_config("namespace_guid",      entry.get("namespace_guid", ""))
                         _upsert_config("client_id",           str(client_id))
                         _upsert_config("onboarding_complete", "true")
+                        # Clear entitlement caches so the new API key's flags take effect immediately
+                        get_active_entitlements.clear()
+                        get_active_output_cols.clear()
                         logger.info(session, "setup_wizard.api_key",
                                     f"API key selected: {api_key_id}")
                     st.session_state.wizard_step = "I"
