@@ -14,8 +14,8 @@ Performance Estimates`.
 | `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 50M mockup row table, and results table |
 | `02_proxy_scalar_python.sql` | Register Python **scalar** UDF `PROXY_SCALAR` — per-row dispatch |
 | `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch, numpy proxy |
-| `04_run_timing.sql` | Time all four approaches on 50M rows; insert results into `BENCHMARK_RESULTS` |
-| `05_whl_vectorized.sql` | Register Python **vectorized** UDF `PROXY_WHL` — batch dispatch, actual `mb-locid-encoding` WHL |
+| `05_run_timing.sql` | Time all four approaches on 50M rows; insert results into `BENCHMARK_RESULTS` |
+| `04_whl_vectorized.sql` | Register Python **vectorized** UDF `PROXY_WHL` — batch dispatch, actual `mb-locid-encoding` WHL |
 
 ---
 
@@ -68,7 +68,7 @@ the `LOCID_ENCRYPT` and `LOCID_DECRYPT` stored procedures — each proc issues a
 `LOCID_BASE_ENCRYPT` call after secrets are loaded and before the main production query.
 The `jvm_warmup_s` field in `APP_LOGS` shows the actual cost per job.
 
-For the benchmark, the warm-up is built into `04_run_timing.sql` via `USE_CACHED_RESULT = FALSE`
+For the benchmark, the warm-up is built into `05_run_timing.sql` via `USE_CACHED_RESULT = FALSE`
 and the sequential run order (A runs first, warming the JVM for B, C, and D in the same session).
 
 The **3–5× improvement** estimate in the architecture doc applies to the actual `locid.py`
@@ -84,9 +84,9 @@ crossings impactful.
    and `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
 2. Warehouse available (XS minimum; larger warehouse recommended for faster 50M setup).
 3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
-   Approach A only. Set as `$base_locid_secret` in `04_run_timing.sql` before running.
+   Approach A only. Set as `$base_locid_secret` in `05_run_timing.sql` before running.
 4. **For Approach D only:** Upload the `mb-locid-encoding` wheel to the stage before running
-   `05_whl_vectorized.sql`. Replace the wheel filename in the IMPORTS path if needed:
+   `04_whl_vectorized.sql`. Replace the wheel filename in the IMPORTS path if needed:
    ```bash
    snow stage copy /path/to/dist/mb_locid_encoding-0.0.0-py3-none-any.whl \
        @LOCID_DEV.STAGING.LOCID_STAGE --connection <your_connection> --overwrite
@@ -95,7 +95,7 @@ crossings impactful.
 
 > **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_50M`
 > is recreated with the same deterministic data, the result fingerprint matches the cache and all
-> approaches return in ~60–70 ms regardless of true UDF cost. `04_run_timing.sql` includes
+> approaches return in ~60–70 ms regardless of true UDF cost. `05_run_timing.sql` includes
 > `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
 
 > **Setup runtime.** Generating 50M rows in `01_setup.sql` takes ~10–20 minutes on an XS
@@ -111,8 +111,8 @@ crossings impactful.
 01_setup.sql                   -- once; ~10–20 min on XS to generate 50M rows
 02_proxy_scalar_python.sql     -- register PROXY_SCALAR
 03_proxy_vectorized_python.sql -- register PROXY_VECTORIZED (numpy BLAS proxy)
-05_whl_vectorized.sql          -- register PROXY_WHL (actual mb-locid-encoding WHL); stage wheel first
-04_run_timing.sql              -- set $base_locid_secret first, then run all four timings
+04_whl_vectorized.sql          -- register PROXY_WHL (actual mb-locid-encoding WHL); stage wheel first
+05_run_timing.sql              -- set $base_locid_secret first, then run all four timings
 ```
 
 **Before re-running timings**, truncate old results to keep the table clean:
@@ -148,15 +148,6 @@ and will recreate everything from scratch.
 
 ```sql
 USE ROLE LOCID_APP_ADMIN;
-
--- Drop UDFs
-DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_SCALAR(VARCHAR, VARCHAR);
-DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(VARCHAR, VARCHAR);
-DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_WHL(VARCHAR, VARCHAR);
-
--- Drop tables
-DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.MOCKUP_50M;
-DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
 
 -- Drop schema
 DROP SCHEMA IF EXISTS LOCID_DEV.BENCHMARK CASCADE;

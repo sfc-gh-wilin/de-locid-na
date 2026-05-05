@@ -36,13 +36,13 @@ USE SCHEMA LOCID_DEV.BENCHMARK;
 --
 -- key_str  — constant placeholder key for all rows.
 --            For Approach A (Scala/JAR), replace with actual $base_locid_secret
---            in 04_run_timing.sql — the value here is not used by that query.
+--            in 05_run_timing.sql — the value here is not used by that query.
 --            For Approaches B/C/D (Python), any non-empty string is valid.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.MOCKUP_50M (
     row_id   BIGINT        NOT NULL COMMENT 'Sequential row identifier (1–100,000,000)',
     loc_id   VARCHAR(21)   NOT NULL COMMENT 'Synthetic 21-char LocID-like string',
-    key_str  VARCHAR       NOT NULL COMMENT 'Constant key placeholder; overridden per approach in 04_run_timing.sql'
+    key_str  VARCHAR       NOT NULL COMMENT 'Constant key placeholder; overridden per approach in 05_run_timing.sql'
 )
 COMMENT = 'Benchmark input: 50M synthetic rows for UDF throughput testing'
 AS
@@ -62,7 +62,7 @@ FROM gen;
 
 
 -- ---------------------------------------------------------------------------
--- STEP 3: Results table (populated by 04_run_timing.sql)
+-- STEP 3: Results table (populated by 05_run_timing.sql)
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS (
     approach        VARCHAR  NOT NULL COMMENT 'A_scala_scalar | B_python_scalar | C_python_vectorized | D_whl_vectorized',
@@ -73,7 +73,7 @@ CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS (
     notes           VARCHAR  COMMENT 'Optional notes (cold start, cache state, etc.)',
     run_at          TIMESTAMP_NTZ DEFAULT CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ
 )
-COMMENT = 'Benchmark timing results — insert one row per run via 04_run_timing.sql';
+COMMENT = 'Benchmark timing results — insert one row per run via 05_run_timing.sql';
 
 
 -- ---------------------------------------------------------------------------

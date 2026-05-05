@@ -1,5 +1,5 @@
 -- =============================================================================
--- db/dev/benchmark/04_run_timing.sql
+-- db/dev/benchmark/05_run_timing.sql
 -- LocID Dev: UDF throughput benchmark — timing queries for all four approaches
 --
 -- Need replace: 'REPLACE_WITH_YOUR_BASE_LOCID_SECRET'
@@ -13,7 +13,7 @@
 --   1. 01_setup.sql has been run (MOCKUP_50M + BENCHMARK_RESULTS tables exist)
 --   2. 02_proxy_scalar_python.sql has been run (PROXY_SCALAR UDF exists)
 --   3. 03_proxy_vectorized_python.sql has been run (PROXY_VECTORIZED UDF exists)
---   4. 05_whl_vectorized.sql has been run (PROXY_WHL UDF exists — requires WHL staged)
+--   4. 04_whl_vectorized.sql has been run (PROXY_WHL UDF exists — requires WHL staged)
 --   5. db/dev/provider/06_udfs.sql has been run (LOCID_BASE_ENCRYPT UDF exists)
 --   6. $base_locid_secret is set below (required for Approach A only)
 --
@@ -107,7 +107,7 @@ ALTER SESSION UNSET QUERY_TAG;
 -- APPROACH D — Python vectorized UDF (actual mb-locid-encoding wheel)
 --   LOCID_DEV.BENCHMARK.PROXY_WHL(loc_id, key_str)
 --   Uses locid_sf.encode_stable_cloc from the production WHL.
---   ⚠ Requires 05_whl_vectorized.sql to have been run with <WHEEL_FILE> set.
+--   ⚠ Requires 04_whl_vectorized.sql to have been run with <WHEEL_FILE> set.
 -- =============================================================================
 ALTER SESSION SET QUERY_TAG = 'locid_bench_D_whl_vectorized';
 

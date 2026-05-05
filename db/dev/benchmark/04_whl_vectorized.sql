@@ -1,5 +1,5 @@
 -- =============================================================================
--- db/dev/benchmark/05_whl_vectorized.sql
+-- db/dev/benchmark/04_whl_vectorized.sql
 -- LocID Dev: Approach D — Python vectorized UDF using the actual mb-locid-encoding wheel
 --
 -- APPROACH D — Python vectorized, actual WHL
@@ -12,7 +12,7 @@
 --
 -- Production equivalent: LOCID_DEV.APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN
 --
--- UDF signature mirrors MOCKUP_50M (loc_id, key_str) so 04_run_timing.sql can
+-- UDF signature mirrors MOCKUP_50M (loc_id, key_str) so 05_run_timing.sql can
 -- address it with the same FROM clause as Approaches B and C.
 -- key_str is unused — encode_stable_cloc requires no secret key.
 --
@@ -25,7 +25,7 @@
 --   3. Replace <WHEEL_FILE> below with the actual filename
 --      (e.g. mb_locid_encoding-1.0.0-py3-none-any.whl).
 --
--- Run order: after 01_setup.sql; before 04_run_timing.sql Approach D block.
+-- Run order: after 01_setup.sql; before 05_run_timing.sql Approach D block.
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
