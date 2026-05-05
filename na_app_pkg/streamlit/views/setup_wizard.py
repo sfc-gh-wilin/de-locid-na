@@ -298,14 +298,15 @@ elif step == "H":
                         "Re-validate your license key and try again."
                     )
                 else:
-                    session.call("APP_SCHEMA.LOCID_SET_API_KEY",
-                                 api_key_id, api_key_val)
-                    _upsert_config("api_key_id",          str(api_key_id))
-                    _upsert_config("namespace_guid",      entry.get("namespace_guid", ""))
-                    _upsert_config("client_id",           str(client_id))
-                    _upsert_config("onboarding_complete", "true")
-                    logger.info(session, "setup_wizard.api_key",
-                                f"API key selected: {api_key_id}")
+                    with st.spinner("Saving API key and completing setup…"):
+                        session.call("APP_SCHEMA.LOCID_SET_API_KEY",
+                                     api_key_id, api_key_val)
+                        _upsert_config("api_key_id",          str(api_key_id))
+                        _upsert_config("namespace_guid",      entry.get("namespace_guid", ""))
+                        _upsert_config("client_id",           str(client_id))
+                        _upsert_config("onboarding_complete", "true")
+                        logger.info(session, "setup_wizard.api_key",
+                                    f"API key selected: {api_key_id}")
                     st.session_state.wizard_step = "I"
                     st.rerun()
 
