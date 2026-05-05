@@ -2,7 +2,7 @@
 -- db/dev/benchmark/01_setup.sql
 -- LocID Dev: Benchmark schema + 50M mockup row table
 --
--- Creates LOCID_DEV.BENCHMARK schema and a 100-million-row table of synthetic
+-- Creates LOCID_DEV.BENCHMARK schema and a 50-million-row table of synthetic
 -- LocID-like strings used to compare UDF throughput across four approaches:
 --   A. Existing Scala scalar UDF (LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT)
 --   B. Python scalar proxy UDF  (LOCID_DEV.BENCHMARK.PROXY_SCALAR)
@@ -11,7 +11,6 @@
 --
 -- Run order: after db/dev/provider/01_setup.sql (LOCID_DEV database must exist).
 -- Idempotent: CREATE OR REPLACE on all objects.
--- Expected runtime: ~10–20 min on an XS warehouse for the 50M INSERT.
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
@@ -40,7 +39,7 @@ USE SCHEMA LOCID_DEV.BENCHMARK;
 --            For Approaches B/C/D (Python), any non-empty string is valid.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.MOCKUP_50M (
-    row_id   BIGINT        NOT NULL COMMENT 'Sequential row identifier (1–100,000,000)',
+    row_id   BIGINT        NOT NULL COMMENT 'Sequential row identifier (1–50,000,000)',
     loc_id   VARCHAR(21)   NOT NULL COMMENT 'Synthetic 21-char LocID-like string',
     key_str  VARCHAR       NOT NULL COMMENT 'Constant key placeholder; overridden per approach in 05_run_timing.sql'
 )
@@ -80,7 +79,7 @@ COMMENT = 'Benchmark timing results — insert one row per run via 05_run_timing
 -- STEP 4: Verify
 -- ---------------------------------------------------------------------------
 SELECT COUNT(*) AS row_count FROM LOCID_DEV.BENCHMARK.MOCKUP_50M;
--- Expected: 100,000,000
+-- Expected: 50,000,000
 
 -- Spot-check first 5 rows
 SELECT * FROM LOCID_DEV.BENCHMARK.MOCKUP_50M LIMIT 5;

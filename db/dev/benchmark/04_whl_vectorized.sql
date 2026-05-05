@@ -22,8 +22,7 @@
 --
 -- ⚠ Prerequisites:
 --   1. Upload the wheel to the stage:
---        snow stage copy /path/to/dist/mb_locid_encoding-0.0.0-py3-none-any.whl
---            @LOCID_DEV.STAGING.LOCID_STAGE --connection <conn> --overwrite
+--        snow snowpark package upload
 --   2. Verify: LIST @LOCID_DEV.STAGING.LOCID_STAGE;
 --
 -- Run order: after 01_setup.sql; before 05_run_timing.sql Approach D block.
@@ -54,15 +53,6 @@ PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
 HANDLER = 'encode_batch'
 COMMENT = 'Approach D: Python vectorized WHL — inlined UUID5/SHA-1, zero per-row allocation'
 AS $$
-import os, sys, glob
-
-# Promote any .whl files staged via IMPORTS onto sys.path so zipimport can find them.
-for _dir in list(sys.path):
-    if _dir and os.path.isdir(_dir):
-        for _whl in glob.glob(os.path.join(_dir, '*.whl')):
-            if _whl not in sys.path:
-                sys.path.insert(0, _whl)
-
 import hashlib
 import uuid as _uuid_mod
 import pandas as pd

@@ -82,7 +82,7 @@ crossings impactful.
 
 1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (`LOCID_DEV.STAGING` schema
    and `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
-2. Warehouse available (XS minimum; larger warehouse recommended for faster 50M setup).
+2. Warehouse available.
 3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
    Approach A only. Set as `$base_locid_secret` in `05_run_timing.sql` before running.
 4. **For Approach D only:** Upload the `mb-locid-encoding` wheel to the stage before running

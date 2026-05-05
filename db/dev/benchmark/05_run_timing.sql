@@ -17,7 +17,7 @@
 --   5. db/dev/provider/06_udfs.sql has been run (LOCID_BASE_ENCRYPT UDF exists)
 --   6. $base_locid_secret is set below (required for Approach A only)
 --
--- Run on at least an XS warehouse. For more realistic production numbers, run
+-- Run on at least an MEDIUM warehouse. For more realistic production numbers, run
 -- on the same warehouse size used in production encrypt/decrypt jobs.
 -- =============================================================================
 
