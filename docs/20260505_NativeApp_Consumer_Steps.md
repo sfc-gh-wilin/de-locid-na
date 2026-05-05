@@ -29,36 +29,62 @@ snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dc
 
 ### 0.2 Enable external distribution and share to consumer account
 
-For testing without a public Marketplace listing, share the package directly:
+For testing without a public Marketplace listing, share the package directly to the consumer account.
+
+**Step A — Set distribution to EXTERNAL:**
 
 ```sql
 USE ROLE LOCID_APP_ADMIN;
 
--- Enable cross-account sharing (required before setting release directive)
 ALTER APPLICATION PACKAGE LOCID_DEV_PKG
     SET DISTRIBUTION = 'EXTERNAL';
-
--- Grant access to the consumer account
-GRANT INSTALL ON APPLICATION PACKAGE LOCID_DEV_PKG
-    TO ACCOUNT SFPSCOGS_WLIN_AWS_W2;
 ```
 
-> Replace `SFPSCOGS_WLIN_AWS_W2` with the consumer's account locator (use underscores, not hyphens).
-
-### 0.3 Set a release directive
+**Step B — Add version to the default release channel:**
 
 ```sql
-USE ROLE LOCID_APP_ADMIN;
-
-SHOW VERSIONS IN APPLICATION PACKAGE LOCID_DEV_PKG;
-
 ALTER APPLICATION PACKAGE LOCID_DEV_PKG
-    SET DEFAULT RELEASE DIRECTIVE
+    MODIFY RELEASE CHANNEL DEFAULT
+    ADD VERSION v1_0;
+```
+
+**Step C — Wait for security scan approval:**
+
+Snowflake runs an automated security scan on all versions released externally. Check scan status:
+
+```sql
+SHOW VERSIONS IN APPLICATION PACKAGE LOCID_DEV_PKG;
+-- Look for review_status = 'APPROVED' on v1_0
+-- If 'PENDING' — wait (typically < 1 hour, can take longer)
+```
+
+> **Note:** The scan must show `APPROVED` before you can set a release directive targeting external accounts. If the scan finds issues, check the scan report in Snowsight under the app package.
+
+**Step D — Set release directive for the consumer account:**
+
+Once the version is approved:
+
+```sql
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    SET RELEASE DIRECTIVE CONSUMER_TEST_DIRECTIVE
+    ACCOUNTS = (SFPSCOGS.WLIN_AWS_W2)
     VERSION = v1_0
     PATCH = 0;
 ```
 
-### 0.4 Verify listing is visible
+> Replace `SFPSCOGS.WLIN_AWS_W2` with the consumer's org.account (dot-separated). Replace `PATCH = 0` with the latest approved patch number from `SHOW VERSIONS`.
+
+**Step E — Grant install privilege:**
+
+```sql
+GRANT INSTALL ON APPLICATION PACKAGE LOCID_DEV_PKG
+    TO ACCOUNT SFPSCOGS_WLIN_AWS_W2;
+```
+
+> Use underscores (not dots) for the account locator in `GRANT INSTALL`.
+
+### 0.3 Verify listing is visible
 
 In Snowsight on the consumer account, navigate to **Data Products → Apps** and confirm "LocID for Snowflake" appears in the available apps list.
 
