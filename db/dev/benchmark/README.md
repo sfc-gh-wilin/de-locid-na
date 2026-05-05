@@ -89,21 +89,40 @@ doc's 5–10× estimate for production workloads at scale.
 
 1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (`LOCID_DEV.STAGING` schema
    and `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
-2. Warehouse available.
+2. **Snowpark-optimized warehouse** (Medium recommended). Standard warehouses work but
+   Snowpark-optimized provides better Python UDF throughput.
 3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
    Approach A only. Set as `$base_locid_secret` in `05_run_timing.sql` before running.
-4. **For Approach D only:** Upload the `mb-locid-encoding` wheel to the stage before running
-   `04_whl_vectorized.sql`. Replace the wheel filename in the IMPORTS path if needed:
+4. **For Approach D only:** Upload the `mb-locid-encoding` wheel using `snow snowpark package upload`:
    ```bash
-   snow stage copy /path/to/dist/mb_locid_encoding-0.0.0-py3-none-any.whl \
-       @LOCID_DEV.STAGING.LOCID_STAGE --connection <your_connection> --overwrite
+   snow snowpark package upload \
+       -f <path>/mb_locid_encoding-0.0.0-py3-none-any.whl \
+       -s LOCID_DEV.STAGING.LOCID_STAGE \
+       --connection <conn> --role LOCID_APP_ADMIN --overwrite
    ```
    Verify: `LIST @LOCID_DEV.STAGING.LOCID_STAGE;`
+
+   > **Why `snow snowpark package upload` instead of `snow stage copy`?** The snowpark upload
+   > command registers the wheel so Snowflake's Python runtime can import it directly via
+   > `IMPORTS`. If you use `snow stage copy` instead, you must add a sys.path hack in the
+   > UDF handler body to promote `.whl` files onto `sys.path` manually.
 
 > **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_50M`
 > is recreated with the same deterministic data, the result fingerprint matches the cache and all
 > approaches return in ~60–70 ms regardless of true UDF cost. `05_run_timing.sql` includes
-> `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
+> `ALTER SESSION SET USE_CACHED_RESULT = FALSE` and uses CTAS to force full materialization.
+
+### Warehouse Sizing Recommendations
+
+For production Encrypt/Decrypt jobs, the warehouse size depends on input row count:
+
+- **< 10M rows** — Small or Medium standard warehouse (completes in seconds)
+- **10M – 100M rows** — Medium Snowpark-optimized warehouse recommended (~25s for 50M)
+- **100M – 1B rows** — Large or X-Large Snowpark-optimized warehouse
+- **> 1B rows** — X-Large or larger; consider partitioning input into batches
+
+> Snowpark-optimized warehouses allocate more memory per node for Python UDF execution,
+> reducing spill-to-disk and improving throughput for the vectorized batch handlers.
 
 > **Setup runtime.** Generating 50M rows in `01_setup.sql` takes ~10–20 minutes on an XS
 > warehouse. Run on a larger warehouse to reduce setup time if needed.

@@ -708,7 +708,7 @@ Python source implementing the same encoding operations currently provided by `e
 | Option | What LocID provides | How it's used in the UDF |
 |--------|-----------------|--------------------------|
 | **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('/src/lib/locid.py')` |
-| **Wheel file** | A `.whl` built from the source | `IMPORTS = ('/src/lib/locid-x.y.z-py3-none-any.whl')` |
+| **Wheel file** *(delivered)* | A `.whl` built from the source | `IMPORTS = ('@stage/locid-x.y.z-py3-none-any.whl')` — upload via `snow snowpark package upload` |
 | **pip package** | Published to Anaconda or private PyPI | `PACKAGES = ('locid-python==x.y.z')` |
 | **Scala/Java source** | Share the relevant encoding source files | We port the logic to Python on our side |
 

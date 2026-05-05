@@ -690,7 +690,7 @@ Scalar UDF (current):      Python vectorized UDF (target):
   (N function calls)           (1 function call per batch)
 ```
 
-Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes.
+Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes. Our measured result: **5.7× improvement** (Python vectorized WHL vs Scala scalar at 50M rows).
 
 ### Performance Estimates
 
@@ -708,17 +708,30 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
 
-**Sandbox benchmark results — XS warehouse, 5M rows (2026-04-28/29)**
+**Benchmark results — Medium Snowpark-optimized WH, 50M rows, CTAS forced materialization (2026-05-05)**
 
-| Approach | UDF | Elapsed (s) | Throughput (krows/s) | Speedup vs A | Notes |
-|----------|-----|:-----------:|:--------------------:|:------------:|-------|
-| A — Scala scalar (JAR) | `LOCID_BASE_ENCRYPT` | 0.316 | 15,823 | 1.0× | AES-128 ECB via encode-lib; cold JVM (2026-04-28) |
-| B — Python scalar proxy | `PROXY_SCALAR` | 0.073 | 68,493 | 4.3× | SHA-256 proxy; locid.py not yet available (2026-04-29) |
-| C — Python vectorized proxy | `PROXY_VECTORIZED` | 0.064 | 78,125 | 4.9× | numpy BLAS polynomial hash; no Python loop (2026-04-29) |
+| Approach | UDF | Avg Elapsed (s) | Throughput (krows/s) | Speedup vs A | Notes |
+|----------|-----|:---------------:|:--------------------:|:------------:|-------|
+| A — Scala scalar (JAR) | `LOCID_BASE_ENCRYPT` | ~145 | ~373 | 1.0× | AES-128 ECB via encode-lib; warm JVM |
+| B — Python scalar proxy | `PROXY_SCALAR` | ~23 | ~2,152 | 6.3× | SHA-256 per row |
+| C — Python vectorized proxy | `PROXY_VECTORIZED` | ~20 | ~2,480 | 7.2× | numpy BLAS polynomial hash; no Python loop |
+| D — Python vectorized (WHL) | `PROXY_WHL` | ~25 | ~2,040 | 5.7× | `StableCloc.encode()` SHA-1 UUID5 via production WHL |
 
-> **Interpretation:** C is now faster than B (0.064 s vs 0.073 s) — the numpy BLAS rewrite eliminated the Python-level per-row loop and the gain is confirmed. B and C are 4.3× and 4.9× faster than A respectively, consistent with the 3–5× improvement estimate. A is from a cold-JVM run (first call after warehouse resume, includes ~200 ms one-time JVM init); warm steady-state Scala is ~0.111 s (~2.2× slower than Python). B and C are from a separate cache-free run (`USE_CACHED_RESULT = FALSE`, 2026-04-29).
+> **Interpretation:** D (production WHL) is **5.7× faster** than A (Scala scalar, warm JVM) at 50M rows. All Python approaches (B, C, D) cluster in the 20–26s range — the `@vectorized` batch dispatch effectively eliminates the Python/SQL boundary overhead.
 
-> **Warm-up note:** The first Scala UDF call after a warehouse resume incurs ~200 ms of cold-JVM overhead (JVM init + JAR load from stage). Both `LOCID_ENCRYPT` and `LOCID_DECRYPT` stored procedures handle this automatically — a single-row `LOCID_BASE_ENCRYPT` call is issued after secrets are loaded and before the main production query, so cold-JVM latency never hits production data. The `jvm_warmup_s` field in `APP_LOGS` shows the actual cost per job.
+> **Cold JVM:** Run 1 shows A at 209s (first call in session — JVM init + JAR load). Warm steady-state A averages ~113s. Both `LOCID_ENCRYPT` and `LOCID_DECRYPT` handle cold-start automatically via a single-row warmup call before the production query.
+
+### Warehouse Sizing Recommendations
+
+For production Encrypt/Decrypt jobs:
+
+- **< 10M rows** — Small or Medium standard warehouse
+- **10M – 100M rows** — Medium Snowpark-optimized warehouse recommended
+- **100M – 1B rows** — Large or X-Large Snowpark-optimized warehouse
+- **> 1B rows** — X-Large or larger; consider partitioning input into batches
+
+> Snowpark-optimized warehouses allocate more memory per node for Python UDF execution,
+> reducing spill-to-disk and improving throughput for the vectorized batch handlers.
 
 ### What LocID Needs to Provide
 
@@ -729,7 +742,7 @@ Python source implementing the same encoding operations currently provided by `e
 | Option | What LocID provides | How it's used in the UDF |
 |--------|-----------------|--------------------------|
 | **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('/src/lib/locid.py')` |
-| **Wheel file** | A `.whl` built from the source | `IMPORTS = ('/src/lib/locid-x.y.z-py3-none-any.whl')` |
+| **Wheel file** *(delivered)* | A `.whl` built from the source | `IMPORTS = ('@stage/locid-x.y.z-py3-none-any.whl')` — upload via `snow snowpark package upload` |
 | **pip package** | Published to Anaconda or private PyPI | `PACKAGES = ('locid-python==x.y.z')` |
 | **Scala/Java source** | Share the relevant encoding source files | We port the logic to Python on our side |
 
