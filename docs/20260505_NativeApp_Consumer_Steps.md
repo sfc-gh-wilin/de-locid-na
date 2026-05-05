@@ -75,15 +75,6 @@ ALTER APPLICATION PACKAGE LOCID_DEV_PKG
 
 > Replace `SFPSCOGS.WLIN_AWS_W2` with the consumer's org.account (dot-separated). Replace `PATCH = 0` with the latest approved patch number from `SHOW VERSIONS`.
 
-**Step E — Grant install privilege:**
-
-```sql
-GRANT INSTALL ON APPLICATION PACKAGE LOCID_DEV_PKG
-    TO ACCOUNT SFPSCOGS_WLIN_AWS_W2;
-```
-
-> Use underscores (not dots) for the account locator in `GRANT INSTALL`.
-
 ### 0.3 Verify listing is visible
 
 In Snowsight on the consumer account, navigate to **Data Products → Apps** and confirm "LocID for Snowflake" appears in the available apps list.
@@ -337,6 +328,8 @@ To revoke access from the consumer:
 ```sql
 USE ROLE LOCID_APP_ADMIN;
 
-REVOKE INSTALL ON APPLICATION PACKAGE LOCID_DEV_PKG
-    FROM ACCOUNT SFPSCOGS_WLIN_AWS_W2;
+-- Remove the release directive targeting the consumer account
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    UNSET RELEASE DIRECTIVE CONSUMER_TEST_DIRECTIVE;
 ```
