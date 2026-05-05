@@ -20,7 +20,7 @@ CREATE APPLICATION ROLE IF NOT EXISTS APP_VIEWER;
 -- =============================================================================
 -- 2. Schemas
 --    APP_SCHEMA  — non-versioned, stateful: tables, stage, network rule, output tables
---    APP_CODE    — versioned, stateless: Scala UDFs with JAR imports
+--    APP_CODE    — versioned, stateless: Python vectorized UDFs with WHL imports
 --                  (CREATE OR ALTER VERSIONED SCHEMA required for UDFs with IMPORTS)
 -- =============================================================================
 CREATE SCHEMA IF NOT EXISTS APP_SCHEMA;
@@ -34,9 +34,9 @@ GRANT USAGE ON SCHEMA APP_CODE TO APPLICATION ROLE APP_ADMIN;
 
 -- =============================================================================
 -- 3. App Stage
---    Stores the encode-lib JAR and modular SQL scripts.
+--    Stores the mb-locid-encoding WHL and modular SQL scripts.
 --    After creating the app package version, upload:
---      - src/lib/encode-lib-*.jar       → @APP_STAGE/lib/
+--      - src/lib/mb_locid_encoding-*.whl  → @APP_STAGE/lib/
 --      - src/udfs/locid_udf.sql         → @APP_STAGE/src/udfs/
 --      - src/procs/encrypt.sql          → @APP_STAGE/src/procs/
 --      - src/procs/decrypt.sql          → @APP_STAGE/src/procs/
@@ -45,7 +45,7 @@ CREATE STAGE IF NOT EXISTS APP_SCHEMA.APP_STAGE
     DIRECTORY = (ENABLE = TRUE);
 
 -- READ on APP_STAGE is intentionally NOT granted to APP_ADMIN or APP_VIEWER.
--- The stage contains the encode-lib JAR and SQL source files; granting READ
+-- The stage contains the WHL and SQL source files; granting READ
 -- would allow consumers with the APP_ADMIN role to download those files.
 -- Procedures and UDFs reference the stage internally — no consumer-facing
 -- READ access is required at runtime.
@@ -301,7 +301,7 @@ GRANT SELECT ON TABLE APP_SCHEMA.APP_LOGS
 --      APP_SCHEMA.HTTP_PING()         (section 7)
 --      APP_SCHEMA.LOCID_ENCRYPT(...)  (src/procs/encrypt.sql)
 --      APP_SCHEMA.LOCID_DECRYPT(...)  (src/procs/decrypt.sql)
---      Scala UDFs                     (src/udfs/locid_udf.sql)
+--      Python vectorized UDFs         (src/udfs/locid_udf.sql)
 -- =============================================================================
 CREATE OR REPLACE NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE
     TYPE       = HOST_PORT
@@ -425,12 +425,11 @@ GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR)
 
 
 -- =============================================================================
--- 8. Scala UDFs  (encode-lib JAR)
+-- 8. Python Vectorized UDFs  (mb-locid-encoding WHL)
 --
--- JAR: encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
---      (Scala 2.13 / Java 17 — validated 2026-04-15)
+-- WHL: mb_locid_encoding-0.0.0-py3-none-any.whl  (Python 3.11, pure Python)
 --
--- Upload JAR to @APP_SCHEMA.APP_STAGE/lib/ before installing this version.
+-- Staged to @APP_SCHEMA.APP_STAGE/lib/ via snow app deploy (from src/lib/).
 -- UDFs defined: LOCID_BASE_ENCRYPT, LOCID_BASE_DECRYPT, LOCID_TXCLOC_ENCRYPT,
 --               LOCID_TXCLOC_DECRYPT, LOCID_STABLE_CLOC, LOCID_STABLE_CLOC_FROM_PLAIN
 -- =============================================================================

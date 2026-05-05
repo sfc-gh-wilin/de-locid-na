@@ -7,9 +7,8 @@
 #       --connection <conn>                                   # create/patch version
 #   snow app run --version v1_0 --connection <conn>           # install / upgrade app
 #
-# Pre-requisite: encode-lib JAR must be placed in src/lib/ before deploying.
-#   cp "Coco/tmp/20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar" \
-#      na_app_pkg/src/lib/
+# Pre-requisite: mb-locid-encoding WHL must be placed in src/lib/ before deploying.
+#   The WHL is staged to @APP_STAGE/lib/ and referenced via IMPORTS in Python UDFs.
 # =============================================================================
 
 definition_version: 2
@@ -31,9 +30,9 @@ entities:
       - src: README.md
         dest: README.md
 
-      # encode-lib JAR: local src/lib/ → stage lib/
-      # UDFs reference @APP_SCHEMA.APP_STAGE/lib/encode-lib-*.jar
-      # dest: ./ places the lib/ directory at the stage root → lib/encode-lib-*.jar
+      # mb-locid-encoding WHL: local src/lib/ → stage lib/
+      # Python UDFs reference @APP_SCHEMA.APP_STAGE/lib/mb_locid_encoding-*.whl
+      # dest: ./ places the lib/ directory at the stage root → lib/mb_locid_encoding-*.whl
       - src: src/lib/
         dest: ./
 

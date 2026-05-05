@@ -205,13 +205,13 @@ All `snow app` commands must be run from inside `na_app_pkg/`.
 
 ---
 
-### 3.1 Pre-requisite — copy encode-lib JAR into `src/lib/`
+### 3.1 Pre-requisite — mb-locid-encoding WHL in `src/lib/`
 
-The JAR is not checked in to git. Copy it once before the first deploy:
+The WHL is not checked in to git. Place it once before the first deploy:
 
 ```bash
 ls na_app_pkg/src/lib/
-# encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
+# mb_locid_encoding-0.0.0-py3-none-any.whl
 ```
 
 ---

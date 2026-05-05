@@ -11,7 +11,7 @@ Customers who use LocID today call cloud or on-premise APIs to enrich their data
 
 1. Customer provides a table with `(unique_id, ip_address, timestamp)` rows.
 2. The app matches each IP + timestamp against LocID's weekly LocID data lake.
-3. For each matched row, the Scala UDF generates encrypted identifiers (TX_CLOC, STABLE_CLOC) and optional geo context.
+3. For each matched row, Python vectorized UDFs generate encrypted identifiers (TX_CLOC, STABLE_CLOC) and optional geo context.
 4. Results are written to a customer-specified output table — all within the customer's account.
 5. Usage statistics are reported back to LocID Central over HTTPS.
 
@@ -30,7 +30,7 @@ Two operations are supported:
 |---|-----------|-------|
 | 1 | Native App package scaffolding | `manifest.yml`, `setup.sql`, directory structure |
 | 2 | External Access Integration (EAI) | Outbound HTTPS to `central.locid.com` |
-| 3 | Scala UDF | Wrap `encode-lib` JAR; functions: encrypt, decrypt, stable CLOC |
+| 3 | Python vectorized UDF | Wrap `mb-locid-encoding` WHL; functions: encrypt, decrypt, stable CLOC |
 | 4 | Config table design | Dynamic entitlements and output column registry |
 | 5 | LocID Central integration | Fetch license/secrets/entitlements, cache, report stats |
 | 6 | Encrypt stored procedure | IP matching (IPv4 + IPv6) + UDF call → output table |
@@ -52,7 +52,7 @@ Ordered phases from first artifact to production-ready app.
 | **1 — Foundation** | 1    | Provider DB DDL | `db/dev/provider/` |
 | | 2    | Native App package scaffold | `na_app_pkg/` skeleton |
 | | 3    | External Access Integration (EAI) | Network rule + EAI for `central.locid.com` |
-| **2 — Core Engine** | 4    | Scala UDF | JAR registered, encrypt/decrypt/stable functions |
+| **2 — Core Engine** | 4    | Python UDF | WHL registered, encrypt/decrypt/stable functions |
 | | 5    | APP_CONFIG table + entitlement logic | Dynamic output column registry |
 | | 6    | LocID Central integration | Fetch/cache secrets, report stats |
 | | 7    | Usage telemetry | POST stats to LocID Central post-job |
@@ -80,9 +80,9 @@ na_app_pkg/
 │   │   ├── decrypt.sql           # Decrypt stored procedure
 │   │   └── fetch_license.sql     # License fetch stored procedure (EXTERNAL_ACCESS_INTEGRATIONS = LOCID_CENTRAL_EAI)
 │   ├── udfs/
-│   │   └── locid_udf.sql         # Scala UDF definitions (APP_CODE versioned schema)
+│   │   └── locid_udf.sql         # Python vectorized UDF definitions (APP_CODE versioned schema)
 │   └── lib/
-│       └── encode-lib-*.jar      # Bundled Scala 2.13 / Java 17 fat JAR
+│       └── mb_locid_encoding-*.whl # Bundled Python wheel (mb-locid-encoding)
 └── streamlit/
     ├── Home.py                   # Main Streamlit entry point (dashboard)
     ├── environment.yml           # Conda dependencies (runtime version is fixed by Snowflake)
@@ -120,7 +120,7 @@ Updated weekly via an Airflow DAG on LocID's side. The Native App accesses these
 APP_SCHEMA.APP_CONFIG                       -- License key, cached secrets, entitlements, output column registry
 APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
 APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID, level, message, created_at)
-APP_SCHEMA.APP_STAGE                        -- Internal stage: JAR, UDF SQL, proc SQL
+APP_SCHEMA.APP_STAGE                        -- Internal stage: WHL, UDF SQL, proc SQL
 APP_SCHEMA.LOCID_CENTRAL_RULE               -- Network rule (allowlist: central.locid.com:443)
 APP_SCHEMA.LOCID_CENTRAL_EAI                -- External Access Integration (created at install time)
 LOCID_CENTRAL_EAI_SPEC                      -- App specification (consumer must approve before EAI is usable; see Setup Wizard Screen E)
@@ -132,7 +132,7 @@ APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
 APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
--- APP_CODE (versioned schema): Scala UDFs — required by Snowflake for UDFs with JAR IMPORTS
+-- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
 APP_CODE.LOCID_BASE_ENCRYPT(...)            -- Decrypt base LocID, return encrypted form
 APP_CODE.LOCID_BASE_DECRYPT(...)            -- Decrypt base LocID, return plain form
 APP_CODE.LOCID_TXCLOC_ENCRYPT(...)          -- Generate TX_CLOC from base LocID
@@ -143,13 +143,13 @@ APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(...)  -- Generate STABLE_CLOC from plain b
 
 ---
 
-## Scala UDF Design
+## Python Vectorized UDF Design
 
-The `encode-lib` JAR (Scala 2.13 / Java 17) is bundled in the app stage. All six Scala UDFs are registered under the `APP_CODE` versioned schema (`CREATE OR ALTER VERSIONED SCHEMA APP_CODE`) — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Each UDF uses `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with an inline handler and a relative IMPORTS path (`/lib/encode-lib-*.jar`).
+The `mb-locid-encoding` WHL (Python 3.11, pure Python) is bundled in the app stage. All six Python UDFs are registered under the `APP_CODE` versioned schema (`CREATE OR ALTER VERSIONED SCHEMA APP_CODE`) — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Each UDF uses `LANGUAGE PYTHON RUNTIME_VERSION = '3.11'` with a `@vectorized` handler and `IMPORTS = ('/lib/mb_locid_encoding-0.0.0-py3-none-any.whl')`.
 
-> **Note:** Snowflake UDF supported languages are Java, Scala, Python, JavaScript, and SQL. Rust is **not** a supported UDF language in Snowflake. The Scala + JAR approach via `encode-lib` is the correct and only JVM-native path available; there is no Rust UDF migration path.
+> **Note:** The WHL is staged via `snow app deploy` (same deployment path as the previous JAR). A sys.path hack in each UDF handler promotes the `.whl` file for Python import resolution. This has negligible performance impact (~10–50 μs one-time per worker process).
 
-> **Status (2026-04-15):** Inline Scala approach validated in dev environment (`LOCID_DEV.STAGING`). SnowflakeHandler wrapper is no longer required. Working handler implementations: `db/dev/provider/06_udfs.sql`. Native app UDF file: `na_app_pkg/src/udfs/locid_udf.sql`.
+> **Status (2026-05-05):** All 6 UDFs migrated from Scala scalar to Python vectorized. Benchmark confirms 5.7× throughput improvement over Scala at 50M rows.
 
 Key functions:
 
@@ -667,15 +667,9 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ### Background
 
-The current implementation uses Scala UDFs backed by the `encode-lib` JAR. Each UDF is a scalar function — Snowflake calls it once per row within a SQL query. Snowflake's MPP engine distributes rows across warehouse nodes in parallel, which is already efficient. However, within each node the per-row call overhead accumulates:
+The current implementation uses Python vectorized UDFs backed by the `mb-locid-encoding` WHL. Each UDF uses `@vectorized` batch dispatch — Snowflake delivers batches of ~4,000 rows per call, reducing Python/SQL boundary crossings by ~1000×. Within each batch, cipher objects are cached at module scope and reused across all rows in the same worker process.
 
-- Key derivation (`Base64.decode` + `SecretKeySpec`) runs per row (partially mitigated in v1.1 via JVM-level companion object caching)
-- Object allocation (`BaseLocIdEncryption`, `EncScheme0`) runs per row
-- JVM call dispatch overhead applies to every row
-
-For workloads in the tens or hundreds of millions of rows, this per-row overhead becomes measurable wall-clock time.
-
-There is also an ongoing practical concern: the JAR must be compiled to match Snowflake's supported JVM target. This has already caused one integration delay (Java 17 vs. Java 11 — see Open Items history). Each new Snowflake runtime version requires a JAR recompile and re-bundle.
+The previous implementation used Scala scalar UDFs backed by the `encode-lib` JAR. The migration to Python vectorized UDFs delivered a **5.7× throughput improvement** at 50M rows (benchmarked 2026-05-05). Additional benefits: no JVM cold-start latency, no JAR recompile on Snowflake runtime updates, standard `pytest` for local testing.
 
 ### Snowflake Python Vectorized UDFs
 
@@ -733,60 +727,22 @@ For production Encrypt/Decrypt jobs:
 > Snowpark-optimized warehouses allocate more memory per node for Python UDF execution,
 > reducing spill-to-disk and improving throughput for the vectorized batch handlers.
 
-### What LocID Needs to Provide
+### What LocID Has Provided
 
-Python source implementing the same encoding operations currently provided by `encode-lib`. **A pip package is not required** — plain `.py` files are sufficient. Snowflake Python UDFs support `IMPORTS = ('@stage/locid.py')` to load staged source files directly, the same way the JAR is staged today.
+LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl` — a pure-Python wheel implementing all encoding operations previously provided by `encode-lib` (Scala JAR). The wheel is staged to `@APP_STAGE/lib/` via `snow app deploy` and referenced by all Python vectorized UDFs via `IMPORTS`.
 
-**Delivery options (any of these works):**
+**Deployed UDFs (all Python vectorized, @vectorized batch dispatch):**
 
-| Option | What LocID provides | How it's used in the UDF |
-|--------|-----------------|--------------------------|
-| **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('/src/lib/locid.py')` |
-| **Wheel file** *(delivered)* | A `.whl` built from the source | `IMPORTS = ('@stage/locid-x.y.z-py3-none-any.whl')` — upload via `snow snowpark package upload` |
-| **pip package** | Published to Anaconda or private PyPI | `PACKAGES = ('locid-python==x.y.z')` |
-| **Scala/Java source** | Share the relevant encoding source files | We port the logic to Python on our side |
+| UDF | Python handler | Operation |
+|-----|---------------|-----------|
+| `LOCID_BASE_ENCRYPT` | `locid_sf.encrypt_base_loc_id` | AES-GCM encrypt raw base LocID |
+| `LOCID_BASE_DECRYPT` | `locid_sf.decrypt_base_loc_id` | AES-GCM decrypt ciphertext |
+| `LOCID_TXCLOC_ENCRYPT` | Custom (decrypt + build JSON + EncScheme0) | encrypted_locid → TX_CLOC |
+| `LOCID_TXCLOC_DECRYPT` | `locid_sf.decrypt_tx_cloc` | TX_CLOC → JSON |
+| `LOCID_STABLE_CLOC` | `locid_sf.stable_cloc_from_encrypted` | encrypted_locid → STABLE_CLOC |
+| `LOCID_STABLE_CLOC_FROM_PLAIN` | `locid_sf.encode_stable_cloc` | plaintext locid → STABLE_CLOC |
 
-**Required API surface** — five functions matching the JAR's operations:
-
-| Current (JAR — Scala) | Target (Python) |
-|-----------------------|----------------|
-| `BaseLocIdEncryption.encrypt(locId, key)` | `locid.base_encrypt(loc_id: str, key: str) -> str` |
-| `BaseLocIdEncryption.decrypt(ciphertext, key)` | `locid.base_decrypt(ciphertext: str, key: str) -> str` |
-| `TxCloc` + `EncScheme0.encode(...)` | `locid.txcloc_encrypt(encrypted_locid, base_key, scheme_key, ts, client_id) -> str` |
-| `EncScheme0.decode(txCloc)` | `locid.txcloc_decrypt(tx_cloc: str, scheme_key: str) -> dict` |
-| `StableCloc.encode(...)` | `locid.stable_cloc(encrypted_locid, base_key, ns_guid, client_id, enc_client_id, tier) -> str` |
-
-### What the Vectorized UDF Would Look Like
-
-```sql
--- LOCID_TXCLOC_DECRYPT — vectorized Python example (source file delivery)
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
-    TX_CLOC    VARCHAR,
-    SCHEME_KEY VARCHAR
-)
-RETURNS VARCHAR
-LANGUAGE PYTHON
-RUNTIME_VERSION = '3.11'
-IMPORTS = ('/src/lib/locid.py')   -- LocID-provided source file (relative path in app stage)
-HANDLER = 'decrypt_batch'
-AS $$
-import pandas as pd
-import locid  # sourced from the staged locid.py
-
-# _scheme_cache: key string → EncScheme0 object; persists across batches in the same worker
-_scheme_cache = {}
-
-@vectorized(input=pd.DataFrame)
-def decrypt_batch(df: pd.DataFrame) -> pd.Series:
-    scheme_key = df.iloc[0, 1]  # constant for all rows in this query
-    if scheme_key not in _scheme_cache:
-        _scheme_cache[scheme_key] = locid.EncScheme0(scheme_key)
-    scheme = _scheme_cache[scheme_key]
-    return df.iloc[:, 0].apply(lambda tx: scheme.decode_json(tx))
-$$;
-```
-
-No changes are required to the stored procedures (`encrypt.sql`, `decrypt.sql`) — they call the UDFs via SQL and are unaffected by the language change.
+No changes were required to the stored procedures (`encrypt.sql`, `decrypt.sql`) — they call the UDFs via SQL and are unaffected by the language change.
 
 ### Additional Benefits of Moving to Python
 

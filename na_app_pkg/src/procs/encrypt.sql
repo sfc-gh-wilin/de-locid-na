@@ -340,22 +340,6 @@ def encrypt_handler(
         phases['secrets_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
-        # Step 2b: JVM warm-up — load Scala JAR before the main query
-        #   The first Scala UDF call after a warehouse resume incurs ~200 ms
-        #   of cold-JVM overhead (JVM init + JAR load from stage). Running a
-        #   single-row warm-up here eliminates that latency from the main
-        #   production data query. On a warm JVM this completes in <1 ms.
-        # ------------------------------------------------------------------
-        try:
-            session.sql(f"""
-                SELECT APP_CODE.LOCID_BASE_ENCRYPT('WARMUP00000000000000X', {base_key})
-                FROM TABLE(GENERATOR(ROWCOUNT => 1))
-            """).collect()
-        except Exception:
-            pass  # Non-fatal; JVM is loaded even if the dummy call fails
-        phases['jvm_warmup_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
-
-        # ------------------------------------------------------------------
         # Step 3: IPv4 matching — equi-join via LOCID_BUILDS_IPV4_EXPLODED
         # ------------------------------------------------------------------
         session.sql(f"""

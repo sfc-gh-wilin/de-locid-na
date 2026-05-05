@@ -699,57 +699,50 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > **Cold JVM:** Run 1 shows A at 209s (first call in session — JVM init + JAR load). Warm steady-state A averages ~113s. Both `LOCID_ENCRYPT` and `LOCID_DECRYPT` handle cold-start automatically via a single-row warmup call before the production query.
 
-### What We Are Asking LocID to Provide
+### What LocID Has Provided
 
-Python source implementing the same encoding operations currently provided by `encode-lib`. **A pip package is not required** — plain `.py` files are sufficient. Snowflake Python UDFs support `IMPORTS = ('@stage/locid.py')` to load staged source files directly, the same way the JAR is staged today.
+LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl` — a pure-Python wheel implementing all encoding operations previously provided by `encode-lib` (Scala JAR). The wheel is staged to `@APP_STAGE/lib/` via `snow app deploy` and referenced by all Python vectorized UDFs via `IMPORTS`.
 
-**Delivery options (any of these works):**
+**Deployed UDFs (all Python vectorized, @vectorized batch dispatch):**
 
-| Option | What LocID provides | How it's used in the UDF |
-|--------|-----------------|--------------------------|
-| **Source files** *(simplest)* | One or more `.py` files | `IMPORTS = ('/src/lib/locid.py')` |
-| **Wheel file** *(delivered)* | A `.whl` built from the source | `IMPORTS = ('@stage/locid-x.y.z-py3-none-any.whl')` — upload via `snow snowpark package upload` |
-| **pip package** | Published to Anaconda or private PyPI | `PACKAGES = ('locid-python==x.y.z')` |
-| **Scala/Java source** | Share the relevant encoding source files | We port the logic to Python on our side |
+| UDF | Python handler | Operation |
+|-----|---------------|-----------|
+| `LOCID_BASE_ENCRYPT` | `locid_sf.encrypt_base_loc_id` | AES-GCM encrypt raw base LocID |
+| `LOCID_BASE_DECRYPT` | `locid_sf.decrypt_base_loc_id` | AES-GCM decrypt ciphertext |
+| `LOCID_TXCLOC_ENCRYPT` | Custom (decrypt + build JSON + EncScheme0) | encrypted_locid → TX_CLOC |
+| `LOCID_TXCLOC_DECRYPT` | `locid_sf.decrypt_tx_cloc` | TX_CLOC → JSON |
+| `LOCID_STABLE_CLOC` | `locid_sf.stable_cloc_from_encrypted` | encrypted_locid → STABLE_CLOC |
+| `LOCID_STABLE_CLOC_FROM_PLAIN` | `locid_sf.encode_stable_cloc` | plaintext locid → STABLE_CLOC |
 
-**Required API surface** — five functions matching the JAR's operations:
-
-| Current (JAR — Scala) | Target (Python) |
-|-----------------------|----------------|
-| `BaseLocIdEncryption.encrypt(locId, key)` | `locid.base_encrypt(loc_id: str, key: str) -> str` |
-| `BaseLocIdEncryption.decrypt(ciphertext, key)` | `locid.base_decrypt(ciphertext: str, key: str) -> str` |
-| `TxCloc` + `EncScheme0.encode(...)` | `locid.txcloc_encrypt(encrypted_locid, base_key, scheme_key, ts, client_id) -> str` |
-| `EncScheme0.decode(txCloc)` | `locid.txcloc_decrypt(tx_cloc: str, scheme_key: str) -> dict` |
-| `StableCloc.encode(...)` | `locid.stable_cloc(encrypted_locid, base_key, ns_guid, client_id, enc_client_id, tier) -> str` |
-
-### What the Vectorized UDF Would Look Like
+### Production UDF Example
 
 ```sql
--- LOCID_TXCLOC_DECRYPT — vectorized Python example (source file delivery)
-CREATE OR REPLACE FUNCTION APP_SCHEMA.LOCID_TXCLOC_DECRYPT(
+-- LOCID_TXCLOC_DECRYPT — Python vectorized (WHL delivery)
+CREATE OR REPLACE FUNCTION APP_CODE.LOCID_TXCLOC_DECRYPT(
     TX_CLOC    VARCHAR,
     SCHEME_KEY VARCHAR
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('/src/lib/locid.py')   -- LocID-provided source file (relative path in app stage)
+IMPORTS = ('/lib/mb_locid_encoding-0.0.0-py3-none-any.whl')
+PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
 HANDLER = 'decrypt_batch'
 AS $$
-import pandas as pd
-import locid  # sourced from the staged locid.py
-from _snowflake import vectorized
+import os, sys, glob
+for _dir in list(sys.path):
+    if _dir and os.path.isdir(_dir):
+        for _whl in glob.glob(os.path.join(_dir, '*.whl')):
+            if _whl not in sys.path:
+                sys.path.insert(0, _whl)
 
-# _scheme_cache: key string → EncScheme0 object; persists across batches in the same worker
-_scheme_cache = {}
+import pandas as pd
+from _snowflake import vectorized
+from locid import snowflake as locid_sf
 
 @vectorized(input=pd.DataFrame)
 def decrypt_batch(df: pd.DataFrame) -> pd.Series:
-    scheme_key = df.iloc[0, 1]  # constant for all rows in this query
-    if scheme_key not in _scheme_cache:
-        _scheme_cache[scheme_key] = locid.EncScheme0(scheme_key)
-    scheme = _scheme_cache[scheme_key]
-    return df.iloc[:, 0].apply(lambda tx: scheme.decode_json(tx))
+    return locid_sf.decrypt_tx_cloc(df.iloc[:, 0], df.iloc[:, 1])
 $$;
 ```
 
