@@ -6,7 +6,7 @@
 --
 -- Purpose:
 --   Measures the throughput gain of @vectorized batch dispatch vs per-row
---   dispatch (Approach B) on 100M rows. This is the architecture described in
+--   dispatch (Approach B) on 50M rows. This is the architecture described in
 --   docs/20260428_Architecture_v3.md § Roadmap: Python Package for Vectorized UDFs.
 --
 -- Key improvements vs scalar (Approach B):

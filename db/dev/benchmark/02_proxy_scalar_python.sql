@@ -5,7 +5,7 @@
 -- APPROACH B — Python scalar, per-row dispatch
 --
 -- Purpose:
---   Measures the per-row Python function call overhead on 100M rows.
+--   Measures the per-row Python function call overhead on 50M rows.
 --   Acts as the Python-language baseline to compare against:
 --     - Approach A: Scala scalar (LOCID_BASE_ENCRYPT, JAR-based)
 --     - Approach C: Python vectorized (PROXY_VECTORIZED, batch dispatch)

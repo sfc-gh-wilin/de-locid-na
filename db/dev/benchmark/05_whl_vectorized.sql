@@ -12,7 +12,7 @@
 --
 -- Production equivalent: LOCID_DEV.APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN
 --
--- UDF signature mirrors MOCKUP_100M (loc_id, key_str) so 04_run_timing.sql can
+-- UDF signature mirrors MOCKUP_50M (loc_id, key_str) so 04_run_timing.sql can
 -- address it with the same FROM clause as Approaches B and C.
 -- key_str is unused — encode_stable_cloc requires no secret key.
 --
@@ -41,8 +41,8 @@ USE SCHEMA   LOCID_DEV.BENCHMARK;
 -- every argument, matching its production calling convention.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION LOCID_DEV.BENCHMARK.PROXY_WHL(
-    LOC_ID   VARCHAR,   -- location_id (from MOCKUP_100M.loc_id; varies per row)
-    KEY_STR  VARCHAR    -- unused; included to match MOCKUP_100M schema
+    LOC_ID   VARCHAR,   -- location_id (from MOCKUP_50M.loc_id; varies per row)
+    KEY_STR  VARCHAR    -- unused; included to match MOCKUP_50M schema
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
@@ -50,7 +50,7 @@ RUNTIME_VERSION = '3.11'
 IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/mb_locid_encoding-0.0.0-py3-none-any.whl')
 PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
 HANDLER = 'encode_batch'
-COMMENT = 'Approach D: Python vectorized, actual mb-locid-encoding wheel — locid_sf.encode_stable_cloc on MOCKUP_100M'
+COMMENT = 'Approach D: Python vectorized, actual mb-locid-encoding wheel — locid_sf.encode_stable_cloc on MOCKUP_50M'
 AS $$
 import os, sys, glob
 

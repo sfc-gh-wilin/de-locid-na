@@ -11,10 +11,10 @@ Performance Estimates`.
 
 | File | Description |
 |------|-------------|
-| `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 100M mockup row table, and results table |
+| `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 50M mockup row table, and results table |
 | `02_proxy_scalar_python.sql` | Register Python **scalar** UDF `PROXY_SCALAR` — per-row dispatch |
 | `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch, numpy proxy |
-| `04_run_timing.sql` | Time all four approaches on 100M rows; insert results into `BENCHMARK_RESULTS` |
+| `04_run_timing.sql` | Time all four approaches on 50M rows; insert results into `BENCHMARK_RESULTS` |
 | `05_whl_vectorized.sql` | Register Python **vectorized** UDF `PROXY_WHL` — batch dispatch, actual `mb-locid-encoding` WHL |
 
 ---
@@ -44,7 +44,7 @@ from the operation cost.
 SHA-1 UUID5 via the production library). This is the definitive Python vectorized measurement:
 real production code, real cryptographic primitives, `@vectorized` batch dispatch.
 
-### Results — 100M rows
+### Results — 50M rows
 
 > Run all four approaches and populate this table from `BENCHMARK_RESULTS`:
 > ```sql
@@ -82,7 +82,7 @@ crossings impactful.
 
 1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (`LOCID_DEV.STAGING` schema
    and `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
-2. Warehouse available (XS minimum; larger warehouse recommended for faster 100M setup).
+2. Warehouse available (XS minimum; larger warehouse recommended for faster 50M setup).
 3. A valid `base_locid_secret` value (from the LocID Central license response) — required for
    Approach A only. Set as `$base_locid_secret` in `04_run_timing.sql` before running.
 4. **For Approach D only:** Upload the `mb-locid-encoding` wheel to the stage before running
@@ -93,12 +93,12 @@ crossings impactful.
    ```
    Verify: `LIST @LOCID_DEV.STAGING.LOCID_STAGE;`
 
-> **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_100M`
+> **Result cache warning.** Snowflake caches exact query results for 24 hours. If `MOCKUP_50M`
 > is recreated with the same deterministic data, the result fingerprint matches the cache and all
 > approaches return in ~60–70 ms regardless of true UDF cost. `04_run_timing.sql` includes
 > `ALTER SESSION SET USE_CACHED_RESULT = FALSE` to prevent this.
 
-> **Setup runtime.** Generating 100M rows in `01_setup.sql` takes ~10–20 minutes on an XS
+> **Setup runtime.** Generating 50M rows in `01_setup.sql` takes ~10–20 minutes on an XS
 > warehouse. Run on a larger warehouse to reduce setup time if needed.
 
 ---
@@ -108,7 +108,7 @@ crossings impactful.
 **Full clean run** (first time or after cleanup):
 
 ```
-01_setup.sql                   -- once; ~10–20 min on XS to generate 100M rows
+01_setup.sql                   -- once; ~10–20 min on XS to generate 50M rows
 02_proxy_scalar_python.sql     -- register PROXY_SCALAR
 03_proxy_vectorized_python.sql -- register PROXY_VECTORIZED (numpy BLAS proxy)
 05_whl_vectorized.sql          -- register PROXY_WHL (actual mb-locid-encoding WHL); stage wheel first
@@ -155,7 +155,7 @@ DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(VARCHAR, VARCHAR);
 DROP FUNCTION IF EXISTS LOCID_DEV.BENCHMARK.PROXY_WHL(VARCHAR, VARCHAR);
 
 -- Drop tables
-DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.MOCKUP_100M;
+DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.MOCKUP_50M;
 DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
 
 -- Drop schema
