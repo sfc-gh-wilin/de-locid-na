@@ -27,23 +27,14 @@ snow app deploy --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
 ```
 
-### 0.2 Set a release directive
-
-```sql
--- Run in provider account (Snowsight or Snow CLI)
-USE ROLE LOCID_APP_ADMIN;
-ALTER APPLICATION PACKAGE LOCID_DEV_PKG
-    SET DEFAULT RELEASE DIRECTIVE
-    VERSION = v1_0
-    PATCH = 0;
-```
-
-### 0.3 Share directly to consumer account (private listing)
+### 0.2 Enable external distribution and share to consumer account
 
 For testing without a public Marketplace listing, share the package directly:
 
 ```sql
 USE ROLE LOCID_APP_ADMIN;
+
+-- Enable cross-account sharing (required before setting release directive)
 ALTER APPLICATION PACKAGE LOCID_DEV_PKG
     SET DISTRIBUTION = 'EXTERNAL';
 
@@ -53,6 +44,19 @@ GRANT INSTALL ON APPLICATION PACKAGE LOCID_DEV_PKG
 ```
 
 > Replace `SFPSCOGS_WLIN_AWS_W2` with the consumer's account locator (use underscores, not hyphens).
+
+### 0.3 Set a release directive
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+
+SHOW VERSIONS IN APPLICATION PACKAGE LOCID_DEV_PKG;
+
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    SET DEFAULT RELEASE DIRECTIVE
+    VERSION = v1_0
+    PATCH = 0;
+```
 
 ### 0.4 Verify listing is visible
 
