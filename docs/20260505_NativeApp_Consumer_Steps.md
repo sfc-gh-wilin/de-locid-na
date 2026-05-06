@@ -29,7 +29,7 @@ snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dc
 
 ### 0.2 Enable external distribution and share to consumer account
 
-For testing without a public Marketplace listing, share the package directly to the consumer account.
+For testing without a public Marketplace listing, share the package directly to the consumer account via a private listing.
 
 **Step A — Set distribution to EXTERNAL:**
 
@@ -58,11 +58,34 @@ SHOW VERSIONS IN APPLICATION PACKAGE LOCID_DEV_PKG;
 -- If 'PENDING' — wait (typically < 1 hour, can take longer)
 ```
 
-> **Note:** The scan must show `APPROVED` before you can set a release directive targeting external accounts. If the scan finds issues, check the scan report in Snowsight under the app package.
+> **Note:** The scan must show `APPROVED` before you can set a release directive or attach the package to a listing. If the scan finds issues, check the scan report in Snowsight under the app package.
 
-**Step D — Set release directive for the consumer account:**
+**Step D — Set the DEFAULT release directive:**
 
-Once the version is approved:
+The private listing **requires** a default release directive on the DEFAULT release channel. Without this, attaching the package to a listing fails with:
+
+> *"No default release directive is found for application package 'LOCID_DEV_PKG' when setting up a listing with the application package."*
+
+```sql
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    SET DEFAULT RELEASE DIRECTIVE
+    VERSION = v1_0
+    PATCH = 0;
+```
+
+> Replace `PATCH = 0` with the latest approved patch number from `SHOW VERSIONS`.
+
+Verify:
+
+```sql
+SHOW RELEASE DIRECTIVES IN APPLICATION PACKAGE LOCID_DEV_PKG;
+-- Expected: a row with name=DEFAULT, target_type=DEFAULT, release_status=DEPLOYED
+```
+
+**Step D2 (optional) — Set a custom release directive for specific account targeting:**
+
+Only needed if you want to pin a *different* version/patch to the consumer account than the default. For basic testing where the consumer should get the same version as the default directive, skip this step.
 
 ```sql
 ALTER APPLICATION PACKAGE LOCID_DEV_PKG
@@ -73,7 +96,7 @@ ALTER APPLICATION PACKAGE LOCID_DEV_PKG
     PATCH = 0;
 ```
 
-> Replace `SFPSCOGS.WLIN_AWS_W2` with the consumer's org.account (dot-separated). Replace `PATCH = 0` with the latest approved patch number from `SHOW VERSIONS`.
+> **Note:** A custom directive always takes precedence over the default for the specified accounts.
 
 **Step E — Create a private listing (required for Snowsight visibility):**
 
@@ -86,7 +109,7 @@ A release directive alone does **not** make the app visible in the consumer's Sn
 3. Click **Create Listing**
 4. Enter a name: `LocID for Snowflake`
 5. Under "Who can discover the listing" → select **Only specified consumers**
-6. Click **+ Select** → choose `LOCID_DEV_PKG` as the application package
+6. Click **Add Data Product** → choose `LOCID_DEV_PKG`
 7. In "Add consumer accounts" → add `SFPSCOGS.WLIN_AWS_W2`
 8. Click **Publish**
 
