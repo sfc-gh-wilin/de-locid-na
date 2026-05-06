@@ -219,14 +219,15 @@ if save_clicked:
         show_error("Save failed.", detail=e)
 
 if purge_clicked:
-    try:
-        result = session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()
-        msg = result[0][0] if result else "Purge complete."
-        logger.info(session, "configuration.purge_logs", msg)
-        st.success(msg, icon="✅")
-    except Exception as e:
-        logger.error(session, "configuration.purge_logs", "Purge failed", exc=e)
-        show_error("Purge failed.", detail=e)
+    with st.spinner("Purging old logs…"):
+        try:
+            result = session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()
+            msg = result[0][0] if result else "Purge complete."
+            logger.info(session, "configuration.purge_logs", msg)
+            st.success(msg, icon="✅")
+        except Exception as e:
+            logger.error(session, "configuration.purge_logs", "Purge failed", exc=e)
+            show_error("Purge failed.", detail=e)
 
 st.divider()
 

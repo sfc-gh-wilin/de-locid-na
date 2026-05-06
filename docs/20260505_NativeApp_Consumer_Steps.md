@@ -102,68 +102,21 @@ ALTER APPLICATION PACKAGE LOCID_DEV_PKG
 
 A release directive alone does **not** make the app visible in the consumer's Snowsight UI. You must also create a private listing with the application package as its data content.
 
-**Option 1 — Snowsight UI (recommended):**
+In Snowsight on the **provider** account:
 
-1. Sign in to Snowsight on the **provider** account
-2. Navigate to **Marketplace → Provider Studio**
-3. Click **Create Listing**
-4. Enter a name: `LocID for Snowflake`
-5. Under "Who can discover the listing" → select **Only specified consumers**
-6. Click **Add Data Product** → choose `LOCID_DEV_PKG`
-7. In "Add consumer accounts" → add `SFPSCOGS.WLIN_AWS_W2`
-8. Click **Publish**
+1. Navigate to **Marketplace → Provider Studio**
+2. Click **Create Listing**
+3. Enter a name: `LocID for Snowflake`
+4. Under "Who can discover the listing" → select **Only specified consumers**
+5. Click **Add Data Product** → choose `LOCID_DEV_PKG`
+6. In "Add consumer accounts" → add `SFPSCOGS.WLIN_AWS_W2`
+7. Click **Publish**
 
-**Option 2 — SQL (if Provider Studio is not available):**
-
-```sql
-USE ROLE LOCID_APP_ADMIN;
-
-CREATE LISTING LOCID_PRIVATE_LISTING
-    FOR APPLICATION PACKAGE LOCID_DEV_PKG
-    AS $$
-    title: "LocID for Snowflake"
-    targets:
-      accounts:
-        - SFPSCOGS.WLIN_AWS_W2
-    $$;
-
-ALTER LISTING LOCID_PRIVATE_LISTING PUBLISH;
-```
-
-> **Note:** Without a listing, the consumer can still install via direct SQL (`CREATE APPLICATION ... FROM APPLICATION PACKAGE ...`), but the app will not appear in the Snowsight **Catalog → Apps** discovery UI.
+> **Note:** Without a listing, the app will not appear in the consumer's Snowsight **Catalog → Apps** UI.
 
 ### 0.3 Verify listing is visible
 
 In Snowsight on the consumer account, navigate to **Catalog → Apps** and confirm "LocID for Snowflake" appears in the available apps list.
-
-> **Troubleshooting — App not visible in consumer Snowsight "Catalog → Apps":**
->
-> The release directive is confirmed deployed (status `DEPLOYED`, targeting `SFPSCOGS.WLIN_AWS_W2`):
-> ```
-> SHOW RELEASE DIRECTIVES IN APPLICATION PACKAGE LOCID_DEV_PKG;
-> -- CONSUMER_TEST_DIRECTIVE | ACCOUNT | [SFPSCOGS.WLIN_AWS_W2] | DEPLOYED | V1_0 | patch 47
-> ```
->
-> If the app still does not appear in the consumer's Snowsight:
-> 1. **Propagation delay** — Cross-account release directives can take up to 10–15 minutes to propagate. Wait and refresh.
-> 2. **Role visibility** — In the consumer account, ensure you are using a role with `CREATE APPLICATION` privilege (e.g., `LOCID_APP_INSTALLER` or `ACCOUNTADMIN`). Lower-privilege roles may not see available packages.
-> 3. **Region mismatch** — Verify both accounts are in the same region, or that the release directive's `active_regions` is set to `ALL`.
-> 4. **SQL-based verification** — Instead of relying on Snowsight UI, verify directly via SQL in the consumer account:
->    ```sql
->    -- Run in consumer account (wl_sandbox)
->    USE ROLE ACCOUNTADMIN;
->    SHOW AVAILABLE LISTINGS;
->    -- or attempt the install directly:
->    CREATE APPLICATION LOCID_APP
->        FROM APPLICATION PACKAGE SFPSCOGS_WLIN_DCR_AWS_W2.LOCID_DEV_PKG
->        USING VERSION v1_0;
->    ```
-> 5. **Security scan not approved** — Even with `DEPLOYED` status, if the version's `review_status` is still `PENDING` or `REJECTED` on the provider side, the consumer may not see it. Re-check:
->    ```sql
->    -- Run in provider account
->    SHOW VERSIONS IN APPLICATION PACKAGE LOCID_DEV_PKG;
->    -- Confirm review_status = 'APPROVED' for V1_0
->    ```
 
 ---
 
@@ -214,39 +167,13 @@ In Snowsight on the consumer account:
    - External access to `central.locid.com` (license validation + usage reporting)
 6. Click **Activate**
 
-Or via SQL:
-
-```sql
-USE ROLE LOCID_APP_INSTALLER;
-
-CREATE APPLICATION LOCID_APP
-    FROM APPLICATION PACKAGE SFPSCOGS_WLIN_DCR_AWS_W2.LOCID_DEV_PKG
-    USING VERSION v1_0;
-```
-
 ### 2.2 Approve external access
 
-After installation, approve the app specification for outbound HTTPS:
-
-```sql
-USE ROLE LOCID_APP_INSTALLER;
-
--- Check the specification sequence number
-SHOW SPECIFICATIONS IN APPLICATION LOCID_APP;
-
--- Approve (replace N with the SEQUENCE_NUMBER from above, usually 1)
-ALTER APPLICATION LOCID_APP
-    APPROVE SPECIFICATION LOCID_CENTRAL_EAI_SPEC SEQUENCE_NUMBER = N;
-```
-
-> Alternatively, this is handled automatically via the Snowsight app permissions dialog during first launch.
+External access (outbound HTTPS to `central.locid.com`) is approved during installation via the Snowsight permissions dialog in step 2.1 above. If prompted again on first app launch, approve via the in-app permissions screen.
 
 ### 2.3 Verify installation
 
-```sql
-SHOW APPLICATIONS LIKE 'LOCID_APP';
--- Expected: 1 row with status READY
-```
+In Snowsight, navigate to **Catalog → Apps**. Confirm `LOCID_APP` appears with status **Ready**.
 
 ---
 
