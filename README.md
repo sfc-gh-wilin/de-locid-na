@@ -147,7 +147,7 @@ APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(...)  -- Generate STABLE_CLOC from plain b
 
 The `mb-locid-encoding` WHL (Python 3.11, pure Python) is bundled in the app stage. All six Python UDFs are registered under the `APP_CODE` versioned schema (`CREATE OR ALTER VERSIONED SCHEMA APP_CODE`) — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Each UDF uses `LANGUAGE PYTHON RUNTIME_VERSION = '3.11'` with a `@vectorized` handler and `IMPORTS = ('/lib/mb_locid_encoding-0.0.0-py3-none-any.whl')`.
 
-> **Note:** The WHL is staged via `snow app deploy` (same deployment path as the previous JAR). A sys.path hack in each UDF handler promotes the `.whl` file for Python import resolution. This has negligible performance impact (~10–50 μs one-time per worker process).
+> **Note — `sys.path` wheel-loading snippet is required:** Since `snow snowpark package upload` cannot be used for consumer app deployment, the `.whl` is staged via `IMPORTS = ('/lib/mb_locid_encoding-0.0.0-py3-none-any.whl')`. When Snowflake imports a `.whl` file this way, it places it on the filesystem but does **not** automatically unpack it onto `sys.path`. The snippet in each UDF handler manually adds the `.whl` to `sys.path` so that `from locid import ...` resolves correctly. This is the standard pattern for consuming `.whl` files delivered via `IMPORTS` in Snowflake Python UDFs. Performance impact is negligible (~10–50 μs one-time per worker process).
 
 > **Status (2026-05-05):** All 6 UDFs migrated from Scala scalar to Python vectorized. Benchmark confirms 5.7× throughput improvement over Scala at 50M rows.
 
@@ -663,7 +663,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
-## Roadmap: Python Package for Vectorized UDFs
+## Python Vectorized UDFs (Implemented)
 
 ### Background
 
@@ -676,7 +676,7 @@ The previous implementation used Scala scalar UDFs backed by the `encode-lib` JA
 Snowflake supports **vectorized Python UDFs** (`LANGUAGE PYTHON` with `@vectorized`). Instead of receiving one scalar value per call, the function receives a `pandas.Series` containing a **batch of rows** (typically thousands at a time) and returns a `pandas.Series`. This eliminates per-row dispatch overhead and allows the encoding logic to operate on the full batch using efficient array operations.
 
 ```
-Scalar UDF (current):      Python vectorized UDF (target):
+Scalar UDF (previous):     Python vectorized UDF (current):
   call(row_1) → result         call(Series[row_1, row_2, ... row_N]) → Series[result_1, ... result_N]
   call(row_2) → result
   ...
@@ -744,26 +744,18 @@ LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl` — a pure-Python whe
 
 No changes were required to the stored procedures (`encrypt.sql`, `decrypt.sql`) — they call the UDFs via SQL and are unaffected by the language change.
 
-### Additional Benefits of Moving to Python
+### Benefits of Python over JAR
 
-| Concern | JAR (current) | Python (target) |
+| Concern | JAR (previous) | Python (current) |
 |---------|--------------|-----------------|
 | JVM version compatibility | Must compile to match Snowflake's supported JVM target; caused one integration delay | No JVM dependency — runs on CPython 3.11 |
 | Distribution | Bundle `.jar` in app stage; re-bundle on JAR changes | Stage `.py` file(s) alongside other app sources — same process already in place |
 | Testing | Requires Snowflake sandbox to validate | Standard `pytest` on any developer machine |
 | Customer inspection | Opaque binary | Python source — auditable if LocID prefers |
 
-### Request to LocID
+### ~~Request to LocID~~ (Completed)
 
-1. **Provide Python source** implementing the five encoding operations listed above — plain `.py` file(s) are sufficient. A pip package or `.whl` is welcome but not required.
-2. **Alternatively**, share the relevant Scala/Java encoding source (the crypto and encoding classes from `encode-lib`) and we will handle the Python port on our side.
-3. **Version alignment**: The Python implementation should be kept in sync with `encode-lib` releases so encode/decode results remain byte-compatible across both paths.
-
-### Status
-
-This is a **v2 roadmap item** — the current JAR-based implementation is fully functional and in use. Added to Open Items for tracking.
-
-> **Note:** If LocID shares Scala/Java source for us to port, the Python implementation must be validated to produce byte-identical output to `encode-lib` (same ciphertext, same TX_CLOC encoding, same STABLE_CLOC UUIDs). A cross-compatibility test — running both the Scala UDFs and the Python UDFs against the same input and asserting identical output — is required before the Python path can be used in production.
+> **Fulfilled:** LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl`. Python vectorized UDFs are deployed and benchmarked at 5.7× improvement over the Scala scalar path. No further action needed.
 
 ---
 
@@ -915,7 +907,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | UAT test account strategy | Separate Snowflake accounts required for UAT to surface multi-account permission issues. Coordinate with Alyssa for throwaway account creation and Snowflake credits. William's sandbox available as fallback. |
 | Key status / expiry handling | License keys in LocID Central have status and expiry date fields. Implement configurable handling — surface warnings when key is nearing expiry or inactive; optionally gate job execution if key is expired. |
 | Step-by-step deployment guides | Provide guides for deploying the native app to multiple environments (dev, UAT, prod), including config changes required per environment. |
-| Python package for vectorized UDFs | **v2 roadmap item.** Request LocID to publish `locid-python` (pip-installable) implementing the five encoding operations in `encode-lib`. Enables `LANGUAGE PYTHON @vectorized` UDFs — 5–10× throughput improvement for large batches; also eliminates JVM version compatibility concerns. Distribution can be private (`.whl`, private PyPI, or Snowflake Anaconda channel). No stored procedure changes required. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
+| Python package for vectorized UDFs | ✓ Completed (2026-05-05). LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl`. All UDFs migrated to Python vectorized — benchmarked at 5.7× throughput vs Scala scalar at 50M rows. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
 | SQL-only workflow for consumers | ✓ Implemented (2026-04-28). SQL Guide view (View 6) added to Streamlit app — step-by-step instructions for running `LOCID_ENCRYPT` / `LOCID_DECRYPT` via SQL with live app name. Jobs submitted via SQL are tracked in Job History identically to UI jobs. |
 | Log retention for JOB_LOG / APP_LOGS | ✓ Implemented (2026-04-28). `LOCID_PURGE_LOGS()` stored procedure reads `log_retention_days` from APP_CONFIG (default 30 days) and deletes old rows. Called opportunistically at the start of each job and available on-demand via the Log Retention section in Configuration (View 7). |
 
