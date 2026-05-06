@@ -856,6 +856,53 @@ snow app run --version v1_0 --connection wl_sandbox_dcr
 
 `snow app deploy` syncs local files to the stage. `snow app version create` bundles the stage snapshot as a named version — required because `APP_CODE` is a versioned schema and Scala UDFs with JAR `IMPORTS` must live in a versioned schema. `snow app run --version` installs or upgrades the app using the named version (not dev-mode).
 
+### Version & Patch Updates (Push to Consumer)
+
+After the initial deployment, subsequent updates follow this workflow:
+
+```bash
+# 1. Deploy updated artifacts to the app package stage
+cd na_app_pkg
+snow app deploy --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
+
+# 2. Create a new patch on the existing version (auto-increments patch number)
+snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
+```
+
+```sql
+-- 3. Check current versions/patches
+USE ROLE LOCID_APP_ADMIN;
+SHOW VERSIONS IN APPLICATION PACKAGE LOCID_DEV_PKG;
+
+-- 4. Update the default release directive to push the new patch to all consumers
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    SET DEFAULT RELEASE DIRECTIVE
+    VERSION = v1_0
+    PATCH = <new_patch_number>;
+```
+
+> **What happens:** Snowflake queues all installed consumer apps for automatic upgrade. The setup script re-runs in each consumer account. Typically completes within minutes.
+
+**Consumer: Check installed version**
+
+- **Snowsight:** Navigate to Catalog → Apps → LOCID_APP — version and patch shown in app details.
+- **SQL:** `DESCRIBE APPLICATION LOCID_APP;` — shows `version`, `patch`, `upgrade_state`.
+
+**Consumer: Manually trigger upgrade** (if not waiting for auto-upgrade):
+
+```sql
+ALTER APPLICATION LOCID_APP UPGRADE;
+```
+
+**Provider: Monitor upgrade status:**
+
+```sql
+SELECT * FROM SNOWFLAKE.DATA_SHARING_USAGE.APPLICATION_STATE
+WHERE APPLICATION_NAME = 'LOCID_DEV_PKG';
+-- Check upgrade_state: COMPLETE, UPGRADING, QUEUED, FAILED
+```
+
 ---
 
 ## Usage Telemetry
