@@ -210,13 +210,17 @@ Expected keys: `api_key`, `api_key_id`, `cached_license`, `client_id`, `license_
 
 ### 4.1 Create a test input table
 
+> **Important:** The sample IPs below (`8.8.8.x`) are Google Public DNS addresses and are unlikely to exist in LocID's data lake. This table is useful for verifying the job executes without errors, but will produce **0 matched rows**. To get actual matches, use Option B below.
+
+**Option A — Smoke test (verifies job execution, 0 matches expected):**
+
 ```sql
 USE ROLE LOCID_APP_INSTALLER;
 
 CREATE DATABASE IF NOT EXISTS LOCID_TEST;
 CREATE SCHEMA IF NOT EXISTS LOCID_TEST.INPUT;
 
--- Simple test table (10 rows with known IPs)
+-- Simple test table (10 rows with fabricated IPs — will NOT match LocID data)
 CREATE OR REPLACE TABLE LOCID_TEST.INPUT.SAMPLE_DATA (
     ROW_ID      INTEGER,
     IP_ADDR     VARCHAR,
@@ -228,6 +232,41 @@ SELECT
     DATEADD('minute', SEQ4() * 10, '2025-06-01 08:00:00'::TIMESTAMP_NTZ) AS event_ts
 FROM TABLE(GENERATOR(ROWCOUNT => 10));
 ```
+
+**Option B — Real matches (requires provider to supply test IPs):**
+
+Ask the provider (or query on the provider account) for IPs that exist in the LocID data lake:
+
+```sql
+-- Run on PROVIDER account (wl_sandbox_dcr) to find sample IPs:
+SELECT DISTINCT ip_address, MIN(build_dt) AS earliest_build
+FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED
+LIMIT 10;
+```
+
+Then create the consumer test table using those IPs with timestamps that fall within the build date range:
+
+```sql
+-- Run on CONSUMER account (wl_sandbox)
+USE ROLE LOCID_APP_INSTALLER;
+
+CREATE DATABASE IF NOT EXISTS LOCID_TEST;
+CREATE SCHEMA IF NOT EXISTS LOCID_TEST.INPUT;
+
+-- Replace with real IPs from the provider query above
+CREATE OR REPLACE TABLE LOCID_TEST.INPUT.SAMPLE_DATA (
+    ROW_ID      INTEGER,
+    IP_ADDR     VARCHAR,
+    EVENT_TS    TIMESTAMP_NTZ
+) AS
+SELECT * FROM VALUES
+    (1, '<ip_from_provider_1>', '<timestamp_within_build_range>'::TIMESTAMP_NTZ),
+    (2, '<ip_from_provider_2>', '<timestamp_within_build_range>'::TIMESTAMP_NTZ),
+    (3, '<ip_from_provider_3>', '<timestamp_within_build_range>'::TIMESTAMP_NTZ)
+;
+```
+
+> **Note:** The encrypt procedure matches on both IP address AND timestamp (the event must fall within a LocID build date range). Both must align with the provider's data for a row to match.
 
 ### 4.2 Bind the input table reference
 
@@ -260,9 +299,10 @@ CALL LOCID_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
 4. Click **Run Job**
 
 **Expected:**
-- Job completes successfully
+- Job completes successfully (status = `SUCCESS` in Job History)
 - Output table created: `LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS`
-- `rows_matched` > 0 (depends on whether the IPs exist in LocID's data lake)
+- If using Option A test data (fabricated IPs): `rows_matched = 0` — this is expected
+- If using Option B test data (real IPs from provider): `rows_matched > 0`
 
 Inspect:
 
