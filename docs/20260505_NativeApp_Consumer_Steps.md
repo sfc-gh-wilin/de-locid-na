@@ -233,40 +233,15 @@ SELECT
 FROM TABLE(GENERATOR(ROWCOUNT => 10));
 ```
 
-**Option B — Real matches (requires provider to supply test IPs):**
-
-Ask the provider (or query on the provider account) for IPs that exist in the LocID data lake:
+**Option B — Data from Provider:**
 
 ```sql
--- Run on PROVIDER account (wl_sandbox_dcr) to find sample IPs:
-SELECT DISTINCT ip_address, MIN(build_dt) AS earliest_build
-FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED
-LIMIT 10;
-```
-
-Then create the consumer test table using those IPs with timestamps that fall within the build date range:
-
-```sql
--- Run on CONSUMER account (wl_sandbox)
-USE ROLE LOCID_APP_INSTALLER;
-
-CREATE DATABASE IF NOT EXISTS LOCID_TEST;
-CREATE SCHEMA IF NOT EXISTS LOCID_TEST.INPUT;
-
--- Replace with real IPs from the provider query above
 CREATE OR REPLACE TABLE LOCID_TEST.INPUT.SAMPLE_DATA (
-    ROW_ID      INTEGER,
-    IP_ADDR     VARCHAR,
-    EVENT_TS    TIMESTAMP_NTZ
-) AS
-SELECT * FROM VALUES
-    (1, '<ip_from_provider_1>', '<timestamp_within_build_range>'::TIMESTAMP_NTZ),
-    (2, '<ip_from_provider_2>', '<timestamp_within_build_range>'::TIMESTAMP_NTZ),
-    (3, '<ip_from_provider_3>', '<timestamp_within_build_range>'::TIMESTAMP_NTZ)
-;
+    row_id      VARCHAR        NOT NULL,   -- unique row identifier
+    ip_addr     VARCHAR        NOT NULL,   -- IPv4 or IPv6 address
+    event_ts    TIMESTAMP_NTZ(9) NOT NULL  -- event timestamp (Unix epoch or datetime)
+);
 ```
-
-> **Note:** The encrypt procedure matches on both IP address AND timestamp (the event must fall within a LocID build date range). Both must align with the provider's data for a row to match.
 
 ### 4.2 Bind the input table reference
 
