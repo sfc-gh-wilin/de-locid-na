@@ -31,7 +31,7 @@ The app is distributed via the Snowflake Native App Framework. LocID publishes t
 │  LOCID_BUILDS_IPV4_EXPLODED     │      │                              │
 │  LOCID_BUILD_DATES              │      │  Customer input table        │
 │                                 │      │  → App stored procedure      │
-│  encode-lib JAR (bundled)       │      │  → Customer output table     │
+│  mb_locid_encoding WHL (bundled) │      │  → Customer output table     │
 │  LocID Central API              │◄─────│  App reports usage stats     │
 └─────────────────────────────────┘      └──────────────────────────────┘
 ```
@@ -47,7 +47,7 @@ The app is distributed via the Snowflake Native App Framework. LocID publishes t
 | Component | Description |
 |-----------|-------------|
 | **LocID Build Tables** | Three tables shared to the app: `LOCID_BUILDS`, `LOCID_BUILDS_IPV4_EXPLODED`, `LOCID_BUILD_DATES`. Updated weekly via an Airflow DAG. |
-| **encode-lib JAR** | Scala library bundled in the app stage. Handles all TX_CLOC and STABLE_CLOC cryptographic operations. |
+| **mb_locid_encoding WHL** | Python wheel bundled in the app stage. Handles all TX_CLOC and STABLE_CLOC cryptographic operations via vectorized UDFs. |
 | **LocID Central** | HTTPS API at `central.locid.com` — validates license keys, delivers cryptographic secrets, and receives usage statistics after each job run. |
 
 ---
@@ -67,9 +67,9 @@ na_app_pkg/
 │   │   ├── decrypt.sql           # Decrypt stored procedure
 │   │   └── fetch_license.sql     # License fetch stored procedure (EXTERNAL_ACCESS_INTEGRATIONS = LOCID_CENTRAL_EAI)
 │   ├── udfs/
-│   │   └── locid_udf.sql         # Scala UDF definitions (APP_CODE versioned schema)
+│   │   └── locid_udf.sql         # Python vectorized UDF definitions (APP_CODE versioned schema)
 │   └── lib/
-│       └── encode-lib-*.jar      # Bundled Scala 2.13 / Java 17 fat JAR
+│       └── mb_locid_encoding-*.whl # Bundled Python wheel (mb-locid-encoding)
 └── streamlit/
     ├── Home.py                   # Main Streamlit entry point (dashboard)
     ├── environment.yml           # Conda dependencies (runtime version is fixed by Snowflake)
@@ -87,6 +87,7 @@ na_app_pkg/
     └── utils/
         ├── locid_central.py      # LocID Central client — delegates HTTP to LOCID_FETCH_LICENSE stored procedure (Streamlit cannot make direct HTTP calls in Native Apps)
         ├── entitlements.py       # Entitlement check helpers
+        ├── errors.py             # Error display helpers
         └── logger.py             # App logging utilities
 ```
 
@@ -97,7 +98,7 @@ na_app_pkg/
 APP_SCHEMA.APP_CONFIG                       -- Masked credential hints, entitlements, output column registry; full secrets in GENERIC_STRING SECRET objects
 APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
 APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID, level, message, created_at)
-APP_SCHEMA.APP_STAGE                        -- Internal stage: JAR, UDF SQL, proc SQL
+APP_SCHEMA.APP_STAGE                        -- Internal stage: WHL, UDF SQL, proc SQL
 APP_SCHEMA.LOCID_CENTRAL_RULE               -- Network rule (allowlist: central.locid.com:443)
 APP_SCHEMA.LOCID_CENTRAL_EAI                -- External Access Integration (created at install time)
 LOCID_CENTRAL_EAI_SPEC                      -- App specification (consumer must approve before EAI is usable; see Setup Wizard Screen E)
@@ -110,7 +111,7 @@ APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
 APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
--- APP_CODE (versioned schema): Scala UDFs — required by Snowflake for UDFs with JAR IMPORTS
+-- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
 APP_CODE.LOCID_BASE_ENCRYPT(...)            -- Decrypt base LocID, return encrypted form
 APP_CODE.LOCID_BASE_DECRYPT(...)            -- Decrypt base LocID, return plain form
 APP_CODE.LOCID_TXCLOC_ENCRYPT(...)          -- Generate TX_CLOC from base LocID
@@ -119,11 +120,11 @@ APP_CODE.LOCID_STABLE_CLOC(...)             -- Generate STABLE_CLOC (UUID format
 APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(...)  -- Generate STABLE_CLOC from plain base LocID
 ```
 
-### Scala UDF Design
+### Python Vectorized UDF Design
 
-The `encode-lib` JAR (Scala 2.13 / Java 17) is bundled in the app stage. All six Scala UDFs are registered under the `APP_CODE` versioned schema (`CREATE OR ALTER VERSIONED SCHEMA APP_CODE`) — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Each UDF uses `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with an inline handler and a relative IMPORTS path (`/lib/encode-lib-*.jar`).
+The `mb_locid_encoding` WHL (Python 3) is bundled in the app stage. All six Python vectorized UDFs are registered under the `APP_CODE` versioned schema (`CREATE OR ALTER VERSIONED SCHEMA APP_CODE`) — Snowflake Native Apps require a versioned schema for any UDF that specifies `IMPORTS`. Each UDF uses `LANGUAGE PYTHON RUNTIME_VERSION = '3.11'` with a `@vectorized` batch handler and a relative IMPORTS path (`/lib/mb_locid_encoding-*.whl`).
 
-> **Note:** Snowflake UDF supported languages are Java, Scala, Python, JavaScript, and SQL. Rust is **not** a supported UDF language in Snowflake. The Scala + JAR approach via `encode-lib` is the correct and only JVM-native path available; there is no Rust UDF migration path.
+> **Note:** The project migrated from Scala scalar UDFs (encode-lib JAR) to Python vectorized UDFs in May 2026. Python vectorized UDFs using pandas DataFrames achieve 5.7× throughput improvement over Scala scalar at 50M rows due to batch dispatch and columnar processing.
 
 ### IP Matching Strategy
 
@@ -327,15 +328,7 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 
 ---
 
-### View 2 — Setup Wizard
-
-**Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in approximately 5 minutes.
-
-See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow. The wizard is re-accessible from the Configuration view if credentials need to be updated.
-
----
-
-### View 3 — Run Encrypt
+### View 2 — Run Encrypt
 
 **Purpose:** Submit a batch Encrypt job — match customer IP + timestamp data against the LocID data lake and produce TX_CLOC / STABLE_CLOC output.
 
@@ -406,7 +399,7 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 
 ---
 
-### View 4 — Run Decrypt
+### View 3 — Run Decrypt
 
 **Purpose:** Submit a batch Decrypt job — decode TX_CLOC values back to STABLE_CLOC and optional geo context.
 
@@ -435,7 +428,7 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 
 ---
 
-### View 5 — Job History
+### View 4 — Job History
 
 **Purpose:** Full audit log of all Encrypt and Decrypt jobs run through the app.
 
@@ -464,7 +457,7 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 
 ---
 
-### View 6 — SQL Guide
+### View 5 — SQL Guide
 
 **Purpose:** Reference guide for consumers who want to run Encrypt and Decrypt jobs via SQL stored procedure calls instead of the Streamlit UI. All jobs submitted via SQL are tracked in Job History identically to UI jobs.
 
@@ -479,7 +472,7 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 
 ---
 
-### View 7 — Configuration
+### View 6 — Configuration
 
 **Purpose:** Manage license credentials, view current entitlements, and review the output column registry.
 
@@ -525,6 +518,14 @@ Read-only for customers. Updated by LocID via app version releases when new fiel
 
 **Advanced**
 - "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting connectivity
+
+---
+
+### View 7 — Setup Wizard
+
+**Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in approximately 5 minutes.
+
+See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow. The wizard is re-accessible from the Configuration view if credentials need to be updated.
 
 ---
 
@@ -625,7 +626,7 @@ snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dc
 snow app run --version v1_0 --connection wl_sandbox_dcr
 ```
 
-`snow app deploy` syncs local files to the stage. `snow app version create` bundles the stage snapshot as a named version — required because `APP_CODE` is a versioned schema and Scala UDFs with JAR `IMPORTS` must live in a versioned schema. `snow app run --version` installs or upgrades the app using the named version (not dev-mode).
+`snow app deploy` syncs local files to the stage. `snow app version create` bundles the stage snapshot as a named version — required because `APP_CODE` is a versioned schema and Python UDFs with WHL `IMPORTS` must live in a versioned schema. `snow app run --version` installs or upgrades the app using the named version (not dev-mode).
 
 ### Version & Patch Updates (Push to Consumer)
 
@@ -881,7 +882,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | **1 — Foundation** | Provider DB DDL (build tables, clustering, exploded IPv4 table) |
 | | Native App package scaffold (`manifest.yml`, `setup.sql`, directory structure) |
 | | External Access Integration (network rule + EAI for `central.locid.com`) |
-| **2 — Core Engine** | Scala UDFs (encrypt, decrypt, stable CLOC) registered via bundled JAR |
+| **2 — Core Engine** | Python vectorized UDFs (encrypt, decrypt, stable CLOC) registered via bundled WHL |
 | | APP_CONFIG table + entitlement logic (dynamic output column registry) |
 | | LocID Central integration (fetch/cache secrets, report usage stats) |
 | **3 — Processing** | Encrypt stored procedure (IPv4 + IPv6 matching → UDF → output table) |

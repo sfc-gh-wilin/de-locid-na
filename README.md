@@ -84,20 +84,23 @@ na_app_pkg/
 │   └── lib/
 │       └── mb_locid_encoding-*.whl # Bundled Python wheel (mb-locid-encoding)
 └── streamlit/
-    ├── Home.py                   # Main Streamlit entry point (dashboard)
+    ├── Home.py                   # Main Streamlit entry point (st.navigation)
     ├── environment.yml           # Conda dependencies (runtime version is fixed by Snowflake)
     ├── logo.svg                  # App logo
     ├── .streamlit/
     │   └── config.toml           # Streamlit theme config
-    ├── pages/
-    │   ├── 01_Setup_Wizard.py
-    │   ├── 02_Run_Encrypt.py
-    │   ├── 03_Run_Decrypt.py
-    │   ├── 04_Job_History.py
-    │   └── 05_Configuration.py
+    ├── views/
+    │   ├── home.py
+    │   ├── run_encrypt.py
+    │   ├── run_decrypt.py
+    │   ├── job_history.py
+    │   ├── sql_guide.py
+    │   ├── configuration.py
+    │   └── setup_wizard.py
     └── utils/
         ├── locid_central.py      # LocID Central client — delegates HTTP to LOCID_FETCH_LICENSE stored procedure (Streamlit cannot make direct HTTP calls in Native Apps)
         ├── entitlements.py       # Entitlement check helpers
+        ├── errors.py             # Error display helpers
         └── logger.py             # App logging utilities
 ```
 
@@ -430,15 +433,7 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 
 ---
 
-### View 2 — Setup Wizard
-
-**Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in ~5 minutes.
-
-See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow (Welcome → License Key → Privileges → App Objects → Select API Key → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
-
----
-
-### View 3 — Run Encrypt
+### View 2 — Run Encrypt
 
 **Purpose:** Submit a batch Encrypt job — match customer IP + timestamp data against the LocID data lake and produce TX_CLOC / STABLE_CLOC output.
 
@@ -509,7 +504,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
-### View 4 — Run Decrypt
+### View 3 — Run Decrypt
 
 **Purpose:** Submit a batch Decrypt job — decode TX_CLOC values back to STABLE_CLOC and optional geo context.
 
@@ -549,7 +544,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
-### View 5 — Job History
+### View 4 — Job History
 
 **Purpose:** Full audit log of all Encrypt and Decrypt jobs run through the app.
 
@@ -580,7 +575,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
-### View 6 — SQL Guide
+### View 5 — SQL Guide
 
 **Purpose:** Reference guide for consumers who want to run Encrypt and Decrypt jobs via SQL stored procedure calls instead of the Streamlit UI. All jobs submitted via SQL are tracked in Job History the same way as UI jobs.
 
@@ -596,7 +591,7 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 
 ---
 
-### View 7 — Configuration
+### View 6 — Configuration
 
 **Purpose:** Manage license credentials, view current entitlements, and review the output column registry.
 
@@ -648,6 +643,14 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 - Number input (1–365 days) for how long `JOB_LOG` and `APP_LOGS` rows are kept (default: 30 days)
 - Saved to `APP_CONFIG` key `log_retention_days`; applied opportunistically at the start of each job via `LOCID_PURGE_LOGS()`
 - **Purge Now** button — runs `CALL APP_SCHEMA.LOCID_PURGE_LOGS()` immediately and shows rows deleted
+
+---
+
+### View 7 — Setup Wizard
+
+**Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in ~5 minutes.
+
+See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow (Welcome → License Key → Privileges → App Objects → Select API Key → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
 
 ---
 
@@ -854,7 +857,7 @@ snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dc
 snow app run --version v1_0 --connection wl_sandbox_dcr
 ```
 
-`snow app deploy` syncs local files to the stage. `snow app version create` bundles the stage snapshot as a named version — required because `APP_CODE` is a versioned schema and Scala UDFs with JAR `IMPORTS` must live in a versioned schema. `snow app run --version` installs or upgrades the app using the named version (not dev-mode).
+`snow app deploy` syncs local files to the stage. `snow app version create` bundles the stage snapshot as a named version — required because `APP_CODE` is a versioned schema and Python UDFs with WHL `IMPORTS` must live in a versioned schema. `snow app run --version` installs or upgrades the app using the named version (not dev-mode).
 
 ### Version & Patch Updates (Push to Consumer)
 
@@ -979,13 +982,13 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | Telemetry payload examples from existing real-time services | ✓ Resolved (2026-05-06). Full telemetry contract confirmed — see [Telemetry Catalog Addendum](Tmp/tmp/20260505/locid-central-telemetry-catalog-native-app-addendum.md). 6 batch metric keys (hits, runtime, outcomes × encrypt/decrypt) with Counter and Timer datatypes. |
 | Reference Docker container for encrypt/decrypt validation | David to investigate |
 | V6 data confirmation in sandbox account | David to chase down |
-| Multiple API keys per license key | ✓ Spec'd (2026-04-16). `access[]` array confirmed via live API: each entry has its own `api_key`, `api_key_id`, `namespace_guid`, `provider_id`, `status`, and per-key entitlements. `secrets` are license-level (shared). Architecture updated: APP_CONFIG now stores selected key fields; onboarding wizard (Screen H) presents ACTIVE API keys for selection; View 7 Configuration provides a key-switcher table. |
+| Multiple API keys per license key | ✓ Spec'd (2026-04-16). `access[]` array confirmed via live API: each entry has its own `api_key`, `api_key_id`, `namespace_guid`, `provider_id`, `status`, and per-key entitlements. `secrets` are license-level (shared). Architecture updated: APP_CONFIG now stores selected key fields; onboarding wizard (Screen H) presents ACTIVE API keys for selection; View 6 Configuration provides a key-switcher table. |
 | Consumer/provider deployment role | ✓ Resolved. Custom roles defined — see [Role Setup for App Package & App Deployment](#role-setup-for-app-package--app-deployment). Provider: `LOCID_APP_ADMIN` with `CREATE APPLICATION PACKAGE`, `CREATE DATABASE`, `CREATE SHARE`, `CREATE LISTING`. Consumer: `LOCID_APP_INSTALLER` with `CREATE APPLICATION`, `CREATE DATABASE`. One-time grants require `ACCOUNTADMIN`; all routine operations use the custom role. |
 | UAT test account strategy | Separate Snowflake accounts required for UAT to surface multi-account permission issues. Coordinate with Alyssa for throwaway account creation and Snowflake credits. William's sandbox available as fallback. |
 | Key status / expiry handling | License keys in LocID Central have status and expiry date fields. Implement configurable handling — surface warnings when key is nearing expiry or inactive; optionally gate job execution if key is expired. |
 | Step-by-step deployment guides | Provide guides for deploying the native app to multiple environments (dev, UAT, prod), including config changes required per environment. |
 | Python package for vectorized UDFs | ✓ Completed (2026-05-05). LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl`. All UDFs migrated to Python vectorized — benchmarked at 5.7× throughput vs Scala scalar at 50M rows. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
-| SQL-only workflow for consumers | ✓ Implemented (2026-04-28). SQL Guide view (View 6) added to Streamlit app — step-by-step instructions for running `LOCID_ENCRYPT` / `LOCID_DECRYPT` via SQL with live app name. Jobs submitted via SQL are tracked in Job History identically to UI jobs. |
-| Log retention for JOB_LOG / APP_LOGS | ✓ Implemented (2026-04-28). `LOCID_PURGE_LOGS()` stored procedure reads `log_retention_days` from APP_CONFIG (default 30 days) and deletes old rows. Called opportunistically at the start of each job and available on-demand via the Log Retention section in Configuration (View 7). |
+| SQL-only workflow for consumers | ✓ Implemented (2026-04-28). SQL Guide view (View 5) added to Streamlit app — step-by-step instructions for running `LOCID_ENCRYPT` / `LOCID_DECRYPT` via SQL with live app name. Jobs submitted via SQL are tracked in Job History identically to UI jobs. |
+| Log retention for JOB_LOG / APP_LOGS | ✓ Implemented (2026-04-28). `LOCID_PURGE_LOGS()` stored procedure reads `log_retention_days` from APP_CONFIG (default 30 days) and deletes old rows. Called opportunistically at the start of each job and available on-demand via the Log Retention section in Configuration (View 6). |
 
 
