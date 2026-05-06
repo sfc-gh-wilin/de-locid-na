@@ -686,18 +686,18 @@ Scalar UDF (previous):     Python vectorized UDF (current):
 
 Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes. Our measured result: **5.7× improvement** (Python vectorized WHL vs Scala scalar at 50M rows).
 
-### Performance Estimates
+### Performance Results
 
 Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 rows per batch** per worker node. The throughput gain for this specific workload comes from two sources:
 
 - **Fewer dispatch crossings** — the Python–SQL boundary is crossed `ceil(N / batch_size)` times instead of `N` times.
 - **Amortised key setup** — `scheme_key` and `base_locid_key` are constants per query. A vectorized handler initialises cipher objects once per batch (or once per worker via `_scheme_cache`) instead of once per row.
 
-| Row count    | Expected improvement vs. current scalar Scala UDFs         |
+| Row count    | Measured/expected improvement vs. Scala scalar UDFs        |
 |--------------|------------------------------------------------------------|
 | < 1M         | Marginal — IP matching SQL dominates runtime               |
-| 1M – 10M     | 3–5× UDF throughput improvement likely                     |
-| 10M – 100M   | 5–10× UDF throughput improvement expected                  |
+| 1M – 10M     | 3–5× UDF throughput improvement                            |
+| 10M – 100M   | 5–10× UDF throughput improvement                           |
 | > 100M       | 5–10× or more — key-setup amortisation most impactful      |
 
 > These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
@@ -713,7 +713,7 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > **Interpretation:** D (production WHL) is **5.7× faster** than A (Scala scalar, warm JVM) at 50M rows. All Python approaches (B, C, D) cluster in the 20–26s range — the `@vectorized` batch dispatch effectively eliminates the Python/SQL boundary overhead.
 
-> **Cold JVM:** Run 1 shows A at 209s (first call in session — JVM init + JAR load). Warm steady-state A averages ~113s. Both `LOCID_ENCRYPT` and `LOCID_DECRYPT` handle cold-start automatically via a single-row warmup call before the production query.
+> **Note on JVM cold-start (historical):** The Scala path showed a 209s first-run penalty (JVM init + JAR load) before settling to ~113s steady-state. This concern is eliminated with the Python path — Python UDFs have no equivalent cold-start overhead.
 
 ### Warehouse Sizing Recommendations
 

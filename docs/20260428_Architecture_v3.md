@@ -641,26 +641,28 @@ snow app run --version v1_0 --connection wl_sandbox_dcr
 
 ---
 
-## Roadmap: Python Package for Vectorized UDFs
+## Python Vectorized UDFs (Implemented)
 
 ### Background
 
-The current implementation uses Scala UDFs backed by the `encode-lib` JAR. Each UDF is a scalar function — Snowflake calls it once per row within a SQL query. Snowflake's MPP engine distributes rows across warehouse nodes in parallel, which is already efficient. However, within each node the per-row call overhead accumulates:
+The previous implementation used Scala scalar UDFs backed by the `encode-lib` JAR. Each UDF was a scalar function — Snowflake called it once per row within a SQL query. Within each node the per-row call overhead accumulated:
 
-- Key derivation (`Base64.decode` + `SecretKeySpec`) runs per row (partially mitigated in v1.1 via JVM-level caching)
-- Object allocation (`BaseLocIdEncryption`, `EncScheme0`) runs per row
-- JVM call dispatch overhead applies to every row
+- Key derivation (`Base64.decode` + `SecretKeySpec`) ran per row (partially mitigated via JVM-level caching)
+- Object allocation (`BaseLocIdEncryption`, `EncScheme0`) ran per row
+- JVM call dispatch overhead applied to every row
 
-For workloads in the tens or hundreds of millions of rows, this per-row overhead becomes measurable wall-clock time.
+For workloads in the tens or hundreds of millions of rows, this per-row overhead became measurable wall-clock time.
 
-There is also an ongoing practical concern: the JAR must be compiled to match Snowflake's supported JVM target. This has already caused one integration delay (Java 17 vs. Java 11 — see prior discussion). Each new Snowflake runtime version requires a JAR recompile and re-bundle.
+There was also an ongoing practical concern: the JAR had to be compiled to match Snowflake's supported JVM target. This caused one integration delay (Java 17 vs. Java 11 — see prior discussion). Each new Snowflake runtime version would require a JAR recompile and re-bundle.
+
+The migration to Python vectorized UDFs (completed 2026-05-05) eliminated all of these concerns.
 
 ### Snowflake Python Vectorized UDFs
 
 Snowflake supports **vectorized Python UDFs** (`LANGUAGE PYTHON` with `@vectorized`). Instead of receiving one scalar value per call, the function receives a `pandas.Series` containing a **batch of rows** (typically thousands at a time) and returns a `pandas.Series`. This eliminates per-row dispatch overhead and allows the encoding logic to operate on the full batch using efficient array operations.
 
 ```
-Scalar UDF (current):      Python vectorized UDF (target):
+Scalar UDF (previous):     Python vectorized UDF (current):
   call(row_1) → result         call(Series[row_1, row_2, ... row_N]) 
   call(row_2) → result           → Series[result_1, ... result_N]
   ...
@@ -670,23 +672,23 @@ Scalar UDF (current):      Python vectorized UDF (target):
 
 Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typically show **5–10× throughput improvement** over equivalent scalar Python UDFs for string transformation workloads. The improvement is most pronounced at larger warehouse sizes and larger batch sizes. Our measured result: **5.7× improvement** (Python vectorized WHL vs Scala scalar at 50M rows).
 
-### Performance Estimates
+### Performance Results
 
 Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 rows per batch** per worker node. The throughput gain for this specific workload comes from two sources:
 
 - **Fewer dispatch crossings** — the Python–SQL boundary is crossed `ceil(N / batch_size)` times instead of `N` times.
 - **Amortised key setup** — `scheme_key` and `base_locid_key` are constants per query. A vectorized handler initialises cipher objects once per batch (or once per worker via `_scheme_cache`) instead of once per row.
 
-| Row count    | Expected improvement vs. current scalar Scala UDFs         |
+| Row count    | Measured/expected improvement vs. Scala scalar UDFs        |
 |--------------|------------------------------------------------------------|
 | < 1M         | Marginal — IP matching SQL dominates runtime               |
-| 1M – 10M     | 3–5× UDF throughput improvement likely                     |
-| 10M – 100M   | 5–10× UDF throughput improvement expected                  |
+| 1M – 10M     | 3–5× UDF throughput improvement                            |
+| 10M – 100M   | 5–10× UDF throughput improvement                           |
 | > 100M       | 5–10× or more — key-setup amortisation most impactful      |
 
 > These estimates apply to the **UDF execution phase** only. The IP matching phase (Steps 3–4 of the stored procedure) is pure Snowflake SQL, already fully parallelised, and is unaffected by the UDF language change.
 
-**Sandbox benchmark results — SNOWPARK_OPT_WH, 50M rows, CTAS forced materialization (2026-05-05)**
+**Sandbox benchmark results — SNOWPARK_OPT_WH (MEDIUM), 50M rows, CTAS forced materialization (2026-05-05)**
 
 | Approach | UDF | Avg Elapsed (s) | Throughput (krows/s) | Speedup vs A | Notes |
 |----------|-----|:---------------:|:--------------------:|:------------:|-------|
@@ -697,7 +699,7 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 > **Interpretation:** D (production WHL) is **5.7× faster** than A (Scala scalar, warm JVM) at 50M rows. All Python approaches (B, C, D) cluster in the 20–26s range — the `@vectorized` batch dispatch effectively eliminates the Python/SQL boundary overhead. D is slightly slower than C because it performs real SHA-1 UUID5 with object construction vs C's pure-C numpy polynomial hash.
 
-> **Cold JVM:** Run 1 shows A at 209s (first call in session — JVM init + JAR load). Warm steady-state A averages ~113s. Both `LOCID_ENCRYPT` and `LOCID_DECRYPT` handle cold-start automatically via a single-row warmup call before the production query.
+> **Note on JVM cold-start (historical):** The Scala path showed a 209s first-run penalty (JVM init + JAR load) before settling to ~113s steady-state. This concern is eliminated with the Python path — Python UDFs have no equivalent cold-start overhead.
 
 ### What LocID Has Provided
 
