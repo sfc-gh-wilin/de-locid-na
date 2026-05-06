@@ -191,7 +191,6 @@ Walk through the Setup Wizard:
 | **D — Review License** | Confirm license details and click **Continue** |
 | **E — Review Privileges** | Approve network access (if not already done in 2.2) |
 | **F — Create App Objects** | Click **Create App Objects** |
-| **G — Test Connectivity** | Click **Test Connectivity** — green indicator |
 | **H — Select API Key** | Choose the active API key and click **Confirm** |
 | **I — Setup Complete** | Done — sidebar navigation is now active |
 

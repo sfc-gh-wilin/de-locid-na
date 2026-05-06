@@ -35,7 +35,7 @@ Two operations are supported:
 | 5 | LocID Central integration | Fetch license/secrets/entitlements, cache, report stats |
 | 6 | Encrypt stored procedure | IP matching (IPv4 + IPv6) + UDF call → output table |
 | 7 | Decrypt stored procedure | TX_CLOC decode → STABLE_CLOC + context → output table |
-| 8 | Streamlit onboarding wizard | 9-screen setup flow (see below) |
+| 8 | Streamlit onboarding wizard | 8-screen setup flow (see below) |
 | 9 | Streamlit main app views | Job submission, history, config |
 | 10 | Performance tuning | Clustering keys / search optimization on provider build tables |
 | 11 | Usage telemetry | POST stats to LocID Central after each job run |
@@ -58,7 +58,7 @@ Ordered phases from first artifact to production-ready app.
 | | 7    | Usage telemetry | POST stats to LocID Central post-job |
 | **3 — Processing** | 8    | Encrypt stored procedure | IPv4 + IPv6 matching + UDF → output table |
 | | 9    | Decrypt stored procedure | TX_CLOC decode → STABLE_CLOC + context |
-| **4 — UI** | 10   | Streamlit onboarding wizard | 9-screen setup flow |
+| **4 — UI** | 10   | Streamlit onboarding wizard | 8-screen setup flow |
 | | 11   | Streamlit main views | Home, Run, History, Config |
 | **5 — Polish** | 12   | Performance tuning | Clustering keys, SOS evaluation |
 | | 13   | End-to-end testing | Encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates |
@@ -237,9 +237,8 @@ Multi-screen Streamlit wizard, runs once post-install.
             └── Yes → [Approve Network Access (EAI spec — ACCOUNTADMIN action)]
                         → [Enter License Key + Validate against LocID Central]
                             → [Create App Objects]
-                                → [Test EAI Connectivity]
-                                    → [Select API Key]
-                                        → [Setup Complete]
+                                → [Select API Key]
+                                    → [Setup Complete]
 ```
 
 ### Screen Details
@@ -252,7 +251,6 @@ Multi-screen Streamlit wizard, runs once post-install.
 | **E. Approve Network Access** | EAI spec approval (runs before D) | Shows `SHOW SPECIFICATIONS` + `ALTER APPLICATION APPROVE SPECIFICATION` SQL for ACCOUNTADMIN; also `GRANT USAGE ON INTEGRATION`; **must be completed before license validation** |
 | **D. Enter License Key** | Validate license | Masked input; calls `APP_SCHEMA.LOCID_FETCH_LICENSE` stored procedure (requires EAI spec approved at Screen E); caches full license payload in `APP_CONFIG` |
 | **F. Create App Objects** | Bootstrap check | Verifies APP_CONFIG, JOB_LOG, APP_LOGS, HTTP_PING UDF |
-| **G. Test Connectivity** | Validate EAI | Calls `APP_SCHEMA.HTTP_PING()` — HEAD request to `central.locid.com` |
 | **H. Select API Key** | API key picker | List ACTIVE keys from `access[]` using `api_key_hint` (first 8 chars); user selects which to use; calls `APP_SCHEMA.LOCID_SET_API_KEY` to write full key to `LOCID_API_KEY` SECRET and scrub raw values from cache; `api_key_id`, `namespace_guid`, `client_id` stored in APP_CONFIG |
 | **I. Success** | Done | Summary checklist, link to docs, "Launch App" |
 
@@ -436,7 +434,7 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 
 **Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in ~5 minutes.
 
-See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 9-screen flow (Welcome → License Key → Privileges → App Objects → EAI Test → Select API Key → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
+See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow (Welcome → License Key → Privileges → App Objects → Select API Key → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
 
 ---
 

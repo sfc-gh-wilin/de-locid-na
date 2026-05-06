@@ -2,14 +2,13 @@
 streamlit/views/setup_wizard.py
 LocID Native App — Setup Wizard (View 2)
 
-9-screen onboarding wizard:
+8-screen onboarding wizard:
   A. Welcome
   B. Have a license key?
   C. Contact Sales (no-key dead end)
   D. Enter License Key       → validates + fetches license from LocID Central
   E. Review Privileges
   F. Create App Objects
-  G. Test Connectivity
   H. Select API Key          → writes api_key / api_key_id / namespace_guid / client_id
   I. Setup Complete
 """
@@ -190,38 +189,6 @@ elif step == "F":
             st.rerun()
     with col2:
         if st.button("Continue", type="primary"):
-            st.session_state.wizard_step = "G"
-            st.rerun()
-
-# ---------------------------------------------------------------------------
-# Screen G — Test Connectivity
-# ---------------------------------------------------------------------------
-elif step == "G":
-    st.subheader(":material/cloud_circle: Test LocID Central Connectivity")
-    if st.button(":material/wifi_tethering: Run Connectivity Test", type="primary"):
-        with st.spinner("Connecting to central.locid.com…"):
-            try:
-                result = session.sql("SELECT APP_SCHEMA.HTTP_PING()").collect()[0][0]
-            except Exception as e:
-                logger.error(session, "setup_wizard.connectivity", "HTTP_PING failed", exc=e)
-                result = f"FAILED: {e}"
-        if result.startswith("OK"):
-            st.success(f"LocID Central is reachable", icon="✅")
-            logger.info(session, "setup_wizard.connectivity", f"Connectivity OK: {result}")
-            st.session_state.connectivity_ok = True
-        else:
-            show_error("LocID Central connection failed.", detail=result)
-            logger.error(session, "setup_wizard.connectivity",
-                         f"Connectivity failed: {result}")
-            st.session_state.connectivity_ok = False
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Back"):
-            st.session_state.wizard_step = "F"
-            st.rerun()
-    with col2:
-        if st.button("Continue", type="primary",
-                     disabled=not st.session_state.get("connectivity_ok")):
             st.session_state.wizard_step = "H"
             st.rerun()
 

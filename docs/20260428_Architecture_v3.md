@@ -207,9 +207,8 @@ A guided wizard runs once after install and can be re-accessed from the Configur
             └── Yes → [Approve Network Access (EAI spec — ACCOUNTADMIN action)]
                         → [Enter License Key + Validate against LocID Central]
                             → [Create App Objects]
-                                → [Test Connectivity to LocID Central]
-                                    → [Select API Key]
-                                        → [Setup Complete]
+                                → [Select API Key]
+                                    → [Setup Complete]
 ```
 
 | Screen | Purpose |
@@ -220,7 +219,6 @@ A guided wizard runs once after install and can be re-accessed from the Configur
 | **E. Approve Network Access** | Shows `ALTER APPLICATION APPROVE SPECIFICATION` SQL for ACCOUNTADMIN; also `GRANT USAGE ON INTEGRATION`; **must run before Screen D** |
 | **D. Enter License Key** | Masked input; calls `APP_SCHEMA.LOCID_FETCH_LICENSE` stored procedure (requires EAI spec approved at Screen E); caches full license payload in `APP_CONFIG` |
 | **F. Create App Objects** | Bootstraps `APP_CONFIG`, `JOB_LOG`, and the `HTTP_PING` UDF |
-| **G. Test Connectivity** | Calls `APP_SCHEMA.HTTP_PING()` — HEAD request to `central.locid.com` |
 | **H. Select API Key** | Lists ACTIVE entries using `api_key_hint` (first 8 chars); user selects which API key to use; calls `APP_SCHEMA.LOCID_SET_API_KEY` to write full key to `LOCID_API_KEY` SECRET and scrub cache; `api_key_id`, `namespace_guid`, `client_id` stored in `APP_CONFIG` |
 | **I. Success** | Summary checklist and "Launch App" button |
 
@@ -333,7 +331,7 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 
 **Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in approximately 5 minutes.
 
-See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 9-screen flow. The wizard is re-accessible from the Configuration view if credentials need to be updated.
+See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow. The wizard is re-accessible from the Configuration view if credentials need to be updated.
 
 ---
 
@@ -809,7 +807,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | | LocID Central integration (fetch/cache secrets, report usage stats) |
 | **3 — Processing** | Encrypt stored procedure (IPv4 + IPv6 matching → UDF → output table) |
 | | Decrypt stored procedure (TX_CLOC decode → STABLE_CLOC + geo context) |
-| **4 — UI** | Streamlit onboarding wizard (9-screen setup flow) |
+| **4 — UI** | Streamlit onboarding wizard (8-screen setup flow) |
 | | Streamlit main views (Home, Run Encrypt, Run Decrypt, History, SQL Guide, Config) |
 | **5 — Polish** | Performance tuning (clustering keys, Search Optimization Service evaluation) |
 | | End-to-end testing (encrypt/decrypt round-trip, IPv4 + IPv6, entitlement gates) |
