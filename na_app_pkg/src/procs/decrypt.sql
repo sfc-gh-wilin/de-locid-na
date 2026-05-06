@@ -257,6 +257,21 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
         }})
 
     try:
+        log_summary = json.dumps({
+            'job_id': job_id, 'op': op,
+            'rows_in': rows_in, 'rows_matched': rows_matched, 'rows_out': rows_out,
+            'tier_counts': tier_counts,
+            'phases': phases,
+            'metrics_count': len(stats),
+        })
+        session.sql(
+            "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+            params=['TELEMETRY', f'locid_{op}._post_stats', log_summary]
+        ).collect()
+    except Exception:
+        pass  # Logging must not abort the job
+
+    try:
         req = urllib.request.Request(
             'https://central.locid.com/api/0/location_id/stats',
             data=json.dumps(stats).encode(),
