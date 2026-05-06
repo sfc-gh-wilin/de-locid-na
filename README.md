@@ -907,29 +907,61 @@ WHERE APPLICATION_NAME = 'LOCID_DEV_PKG';
 
 ## Usage Telemetry
 
-After each job run, the stored procedure calls LocID Central stats endpoint:
+After each job run, the stored procedure reports usage statistics to LocID Central (best-effort — failures are logged but do not block the job). The telemetry contract is defined in the [Telemetry Catalog Addendum](Tmp/tmp/20260505/locid-central-telemetry-catalog-native-app-addendum.md).
 
-```json
+### Endpoint & Envelope
+
+```
 POST /api/0/location_id/stats
-Header: de-access-token: <api_key from entitlements>
-
-[{
-  "identifier": "<license_key>",
-  "source":     "snowflake-native-app",
-  "timestamp":  <epoch_ms>,
-  "data_type":  "usage_metrics",
-  "data": {
-    "metric_key": "encrypt_usage",
-    "dimensions": { "api_key": "<api_key>", "hit": 1, "tier": 0 },
-    "metric_value": <rows_processed>,
-    "metric_datatype": "Long"
-  }
-}]
+Content-Type: application/json
+de-access-token: <api_key>
 ```
 
-> **Pending from LocID:** The example above shows `encrypt_usage` only. LocID needs to confirm the complete telemetry contract before implementation:
-> - All `metric_key` values they want reported (e.g. `encrypt_usage`, `decrypt_usage`, and any others)
-> - The full `dimensions` schema for each metric key — field names, types, and semantics of `hit` and `tier`
+Body is a JSON array of `Stat` objects. Envelope-level fields:
+
+| Field        | Value |
+|--------------|-------|
+| `identifier` | `"{license_key}_{job_id}"` — one identifier per job run |
+| `source`     | `"snowflake-native-app"` |
+| `data_type`  | `"batch_metrics"` |
+| `timestamp`  | epoch ms at time of report |
+
+### Metric Catalog (6 metric keys)
+
+| metric_key | datatype | dimensions | description |
+|------------|----------|------------|-------------|
+| `batch-hits.encrypt` | Counter | api_key, client_id, tier, job_id | Rows matched at each tier |
+| `batch-hits.decrypt` | Counter | api_key, client_id, tier, job_id | Rows matched at each tier |
+| `batch-runtime.encrypt` | Timer | api_key, client_id, job_id, stage | Per-phase timing (match, udf, write, total) |
+| `batch-runtime.decrypt` | Timer | api_key, client_id, job_id, stage | Per-phase timing (match, udf, write, total) |
+| `batch-outcomes.encrypt` | Counter | api_key, client_id, outcome, job_id | Rows per outcome (matched, unmatched, invalid, error) |
+| `batch-outcomes.decrypt` | Counter | api_key, client_id, outcome, job_id | Rows per outcome (matched, unmatched, invalid, error) |
+
+### Example (Counter)
+
+```json
+{
+  "identifier": "1569-3f8c9b2e_a4d2c1f0-7e3b-4f1a-9d8e-0c2b5f7a1e34",
+  "source": "snowflake-native-app",
+  "timestamp": 1746401234567,
+  "data_type": "batch_metrics",
+  "data": {
+    "metric_key": "batch-hits.encrypt",
+    "dimensions": { "api_key": "ak_3f8c9b2e", "client_id": "1042", "tier": "T0", "job_id": "a4d2c1f0-..." },
+    "metric_value": 827341,
+    "metric_datatype": "Counter"
+  }
+}
+```
+
+### Cadence
+
+One flush per job, immediately after the matching/UDF/write phases complete and `JOB_LOG` is finalized. Each Counter value represents that job's totals (delta semantics — not cumulative since process start).
+
+### Integrity Invariants
+
+- `sum(batch-outcomes.{op} across all outcomes) == JOB_LOG.rows_in`
+- `sum(batch-hits.{op} across all tiers) == batch-outcomes.{op} where outcome='matched'`
 
 Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `APP_SCHEMA.JOB_LOG` for the customer's own visibility.
 
@@ -944,7 +976,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | IPv6 matching SQL | ✓ Implemented (2026-04-20). Optimised 6-pass cascading hex-prefix range join implemented in `na_app_pkg/src/procs/encrypt.sql`. Key optimisations vs. reference POC: ip_hex pre-computed once (not 6×), LOCID_BUILDS scanned once (date-filtered pre-materialisation), prefix filter applied before range join, single accumulator anti-join per pass. |
 | HomeBiz_Type entitlement details | De-scoped from v1 (2026-04-16). No solid spec yet. Retained as a future entitlement flag (`allow_homebiz`); will be scoped and implemented in a subsequent version. |
 | Additional FC50 columns / new entitlements | Pending LocID R&D spike outcome |
-| Telemetry payload examples from existing real-time services | David to provide |
+| Telemetry payload examples from existing real-time services | ✓ Resolved (2026-05-06). Full telemetry contract confirmed — see [Telemetry Catalog Addendum](Tmp/tmp/20260505/locid-central-telemetry-catalog-native-app-addendum.md). 6 batch metric keys (hits, runtime, outcomes × encrypt/decrypt) with Counter and Timer datatypes. |
 | Reference Docker container for encrypt/decrypt validation | David to investigate |
 | V6 data confirmation in sandbox account | David to chase down |
 | Multiple API keys per license key | ✓ Spec'd (2026-04-16). `access[]` array confirmed via live API: each entry has its own `api_key`, `api_key_id`, `namespace_guid`, `provider_id`, `status`, and per-key entitlements. `secrets` are license-level (shared). Architecture updated: APP_CONFIG now stores selected key fields; onboarding wizard (Screen H) presents ACTIVE API keys for selection; View 7 Configuration provides a key-switcher table. |

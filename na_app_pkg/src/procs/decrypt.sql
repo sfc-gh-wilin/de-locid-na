@@ -186,36 +186,87 @@ def _entitled_cols(session, operation: str) -> list:
     return cols
 
 
-def _post_stats(session, rows_processed: int, runtime_s: float, metric_key: str) -> None:
+def _timer(count: int, duration_ms: float) -> dict:
+    """Build a Timer-shaped metric_value per the batch telemetry convention."""
+    rate = count / (duration_ms / 1000.0) if count and duration_ms else 0
+    mean = duration_ms / max(count, 1) if duration_ms else 0
+    return {
+        'count': count, 'meanRate': round(rate, 1),
+        'oneMinuteRate': round(rate, 1), 'mean': round(mean, 5),
+        'median': round(duration_ms), 'p95': round(duration_ms), 'p99': round(duration_ms),
+    }
+
+
+def _post_stats(session, job_id: str, client_id: int, rows_in: int,
+                rows_matched: int, rows_out: int, phases: dict,
+                tier_counts: dict, op: str) -> None:
+    """POST batch-metrics telemetry to LocID Central. Non-blocking — silently ignores failures."""
     api_key_val = _snowflake.get_generic_secret_string('api_key')
     lic_key_val = _snowflake.get_generic_secret_string('license_key')
     if not api_key_val or not lic_key_val:
         return
 
-    payload = json.dumps([{
-        'identifier': lic_key_val,
-        'source':     'snowflake-native-app',
-        'timestamp':  int(time.time() * 1000),
-        'data_type':  'usage_metrics',
-        'data': {
-            'metric_key':      metric_key,
-            'dimensions':      {'api_key': api_key_val, 'hit': 1, 'tier': 0},
-            'metric_value':    rows_processed,
-            'metric_datatype': 'Long',
-        },
-    }]).encode()
+    identifier = f"{lic_key_val}_{job_id}"
+    ts_ms      = int(time.time() * 1000)
+    client_str = str(client_id)
+    base = {'identifier': identifier, 'source': 'snowflake-native-app',
+            'timestamp': ts_ms, 'data_type': 'batch_metrics'}
+
+    stats = []
+
+    # batch-hits — one Counter per tier
+    for tier_val, count in tier_counts.items():
+        stats.append({**base, 'data': {
+            'metric_key': f'batch-hits.{op}',
+            'dimensions': {'api_key': api_key_val, 'client_id': client_str,
+                           'tier': str(tier_val), 'job_id': job_id},
+            'metric_value': count,
+            'metric_datatype': 'Counter',
+        }})
+
+    # batch-outcomes — matched + unmatched (invalid/error = 0 in success path)
+    unmatched = max(rows_in - rows_matched, 0)
+    for outcome, val in [('matched', rows_matched), ('unmatched', unmatched)]:
+        if val > 0:
+            stats.append({**base, 'data': {
+                'metric_key': f'batch-outcomes.{op}',
+                'dimensions': {'api_key': api_key_val, 'client_id': client_str,
+                               'outcome': outcome, 'job_id': job_id},
+                'metric_value': val,
+                'metric_datatype': 'Counter',
+            }})
+
+    # batch-runtime — Timer per stage
+    match_ms = phases.get('match_s', 0) * 1000
+    udf_ms   = phases.get('udf_s', 0) * 1000
+    write_ms = phases.get('write_s', 0) * 1000
+    total_ms = phases.get('total_s', 0) * 1000
+
+    for stage, dur_ms, cnt in [
+        ('match', match_ms, rows_in),
+        ('udf',   udf_ms,   rows_matched),
+        ('write', write_ms,  rows_out),
+        ('total', total_ms,  rows_in),
+    ]:
+        stats.append({**base, 'data': {
+            'metric_key': f'batch-runtime.{op}',
+            'dimensions': {'api_key': api_key_val, 'client_id': client_str,
+                           'job_id': job_id, 'stage': stage},
+            'metric_value': _timer(cnt, dur_ms),
+            'metric_datatype': 'Timer',
+        }})
 
     try:
         req = urllib.request.Request(
             'https://central.locid.com/api/0/location_id/stats',
-            data=payload,
+            data=json.dumps(stats).encode(),
             headers={'Content-Type': 'application/json', 'de-access-token': api_key_val},
             method='POST',
         )
         with urllib.request.urlopen(req, timeout=10):
             pass
     except Exception:
-        pass
+        pass  # Stats failure must not abort the job
 
 
 def _log_job(session, job_id, operation, rows_in, rows_matched, rows_out,
@@ -367,6 +418,7 @@ def decrypt_handler(
             SELECT {', '.join(select_exprs)}
             FROM {TBL_DECODED}
         """).collect()
+        phases['udf_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         session.sql(
             f"GRANT SELECT ON TABLE APP_SCHEMA.{output_table} TO APPLICATION ROLE APP_ADMIN"
@@ -376,8 +428,9 @@ def decrypt_handler(
         ).collect()
 
         rows_out  = session.sql(f"SELECT COUNT(*) FROM APP_SCHEMA.{output_table}").collect()[0][0]
+        phases['write_s'] = round(time.perf_counter() - _pt, 3)
         runtime_s = round(time.time() - start_ts, 2)
-        phases['udf_output_s'] = round(time.perf_counter() - _pt, 3)
+        phases['match_s'] = phases.get('decode_s', 0)
         phases['total_s'] = runtime_s
         _log_perf(session, job_id, phases)
 
@@ -394,7 +447,8 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         # Step 8: POST usage stats to LocID Central
         # ------------------------------------------------------------------
-        _post_stats(session, rows_matched, runtime_s, 'decrypt_usage')
+        _post_stats(session, job_id, client_id, rows_in,
+                    rows_matched, rows_out, phases, {'T0': rows_matched}, 'decrypt')
 
         return {
             'job_id':        job_id,
