@@ -348,6 +348,91 @@ DROP APPLICATION IF EXISTS LOCID_APP CASCADE;
 DROP DATABASE IF EXISTS LOCID_TEST;
 ```
 
+---
+
+## Appendix C — Version & Patch Updates
+
+### Provider: Deploy a new version or patch
+
+**Creating a new patch (bug fix / minor update within the same version):**
+
+```bash
+cd na_app_pkg
+snow app deploy --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
+snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
+```
+
+> `--force` adds a new patch to the existing version. The patch number auto-increments.
+
+**Check current versions and patches:**
+
+```sql
+-- Provider account
+USE ROLE LOCID_APP_ADMIN;
+SHOW VERSIONS IN APPLICATION PACKAGE LOCID_DEV_PKG;
+-- Note the latest patch number for your version
+```
+
+### Provider: Push update to consumer
+
+Update the release directive to point to the new patch. Snowflake then automatically upgrades all installed consumer apps.
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+
+-- Update the default release directive (affects all consumers)
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    SET DEFAULT RELEASE DIRECTIVE
+    VERSION = v1_0
+    PATCH = <new_patch_number>;
+```
+
+> **What happens:** Snowflake queues the consumer's installed app for automatic upgrade. The setup script re-runs in the consumer account. This typically completes within minutes but can take longer depending on load.
+
+If using a **custom release directive** for a specific account:
+
+```sql
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    MODIFY RELEASE DIRECTIVE CONSUMER_TEST_DIRECTIVE
+    VERSION = v1_0
+    PATCH = <new_patch_number>;
+```
+
+### Provider: Monitor upgrade status
+
+```sql
+-- Provider account
+SELECT * FROM SNOWFLAKE.DATA_SHARING_USAGE.APPLICATION_STATE
+WHERE APPLICATION_NAME = 'LOCID_DEV_PKG';
+-- Check upgrade_state: COMPLETE, UPGRADING, QUEUED, FAILED
+```
+
+### Consumer: Check installed version
+
+In Snowsight, navigate to **Catalog → Apps → LOCID_APP** — the version and patch are shown in the app details.
+
+Or via SQL:
+
+```sql
+-- Consumer account
+DESCRIBE APPLICATION LOCID_APP;
+-- Look for: version, patch, upgrade_state, upgrade_target_version, upgrade_target_patch
+```
+
+### Consumer: Manually trigger an upgrade
+
+If the provider has published a new version/patch and you don't want to wait for the automatic upgrade:
+
+```sql
+ALTER APPLICATION LOCID_APP UPGRADE;
+```
+
+> **Note:** Once Snowflake begins the automatic upgrade process, the manual upgrade option is no longer available.
+
+---
+
 ## Appendix B — Cleanup (Provider)
 
 To revoke access from the consumer:
