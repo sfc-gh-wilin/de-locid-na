@@ -134,9 +134,9 @@ ALTER LISTING LOCID_PRIVATE_LISTING PUBLISH;
 
 ### 0.3 Verify listing is visible
 
-In Snowsight on the consumer account, navigate to **Data Products → Apps** and confirm "LocID for Snowflake" appears in the available apps list.
+In Snowsight on the consumer account, navigate to **Catalog → Apps** and confirm "LocID for Snowflake" appears in the available apps list.
 
-> **Troubleshooting — App not visible in consumer Snowsight "Data Products → Apps":**
+> **Troubleshooting — App not visible in consumer Snowsight "Catalog → Apps":**
 >
 > The release directive is confirmed deployed (status `DEPLOYED`, targeting `SFPSCOGS.WLIN_AWS_W2`):
 > ```
@@ -206,7 +206,7 @@ snow sql --connection wl_sandbox -q "SHOW ROLES LIKE 'LOCID_APP_INSTALLER'"
 
 In Snowsight on the consumer account:
 
-1. Navigate to **Data Products → Apps**
+1. Navigate to **Catalog → Apps**
 2. Find **LocID for Snowflake** (or the package name shared by the provider)
 3. Click **Get**
 4. Choose database name: `LOCID_APP` (or preferred name)
@@ -252,7 +252,7 @@ SHOW APPLICATIONS LIKE 'LOCID_APP';
 
 ## Phase 3 — Consumer: Setup Wizard
 
-Open the app in Snowsight: **Data Products → Apps → LOCID_APP**
+Open the app in Snowsight: **Catalog → Apps → LOCID_APP**
 
 Walk through the Setup Wizard:
 
