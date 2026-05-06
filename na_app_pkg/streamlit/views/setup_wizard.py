@@ -322,4 +322,6 @@ elif step == "I":
     if st.button("Launch App →", type="primary"):
         for key in ("wizard_step", "license_key", "license_data"):
             st.session_state.pop(key, None)
+        # Signal Home page to refresh cached data on next load
+        st.session_state["_invalidate_home_cache"] = True
         st.switch_page("views/home.py")

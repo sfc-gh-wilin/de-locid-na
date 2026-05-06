@@ -36,7 +36,7 @@ def _load_home_data(_session_id: int) -> dict:
     rows = _session.sql(
         "SELECT config_key, config_value, last_refreshed_at "
         "FROM APP_SCHEMA.APP_CONFIG "
-        "WHERE config_key IN ('onboarding_complete', 'cached_license') "
+        "WHERE config_key IN ('onboarding_complete', 'cached_license', 'api_key_id') "
         "AND is_active = TRUE"
     ).collect()
     return {r[0]: (r[1], r[2]) for r in rows}
@@ -84,6 +84,13 @@ def _session_id() -> int:
 
 
 sid = _session_id()
+
+# Invalidate caches if navigating from the setup wizard
+if st.session_state.pop("_invalidate_home_cache", False):
+    _load_home_data.clear()
+    _load_last_job.clear()
+    _load_recent_jobs.clear()
+
 config   = _load_home_data(sid)
 last_job = _load_last_job(sid)
 
@@ -215,10 +222,15 @@ with ent_col:
     if cached_raw:
         try:
             data = json.loads(cached_raw)
+            # Match entitlements to the selected API key
+            selected_key_id_raw = config.get("api_key_id", (None, None))[0]
+            selected_key_id = int(selected_key_id_raw) if selected_key_id_raw else None
             for entry in data.get("access", []):
                 if entry.get("status") == "ACTIVE":
-                    active_flags = {f for f in ALL_FLAGS if entry.get(f) is True}
-                    break
+                    if selected_key_id is None or entry.get("api_key_id") == selected_key_id:
+                        active_flags = {f for f in ALL_FLAGS if entry.get(f) is True}
+                        if selected_key_id is not None:
+                            break
         except Exception:
             pass
 
