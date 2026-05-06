@@ -238,7 +238,7 @@ elif step == "H":
             st.session_state.wizard_step = "F"
             st.rerun()
     elif active_entries:
-        # Build display labels with entitlement badges per key
+        # Build display labels with entitlement badges inline
         ENTITLEMENT_LABELS = {
             "allow_encrypt": "Encrypt",
             "allow_decrypt": "Decrypt",
@@ -247,35 +247,24 @@ elif step == "H":
             "allow_geo_context": "Geo Context",
         }
 
-        labels = [
-            f"API Key #{e.get('api_key_id')} — {e.get('api_key', '')[:8] or e.get('api_key_hint', '????')}****"
-            for e in active_entries
-        ]
+        def _key_label(entry):
+            key_hint = entry.get("api_key", "")[:8] or entry.get("api_key_hint", "????")
+            key_id = entry.get("api_key_id")
+            granted = [lbl for flag, lbl in ENTITLEMENT_LABELS.items() if entry.get(flag) is True]
+            denied = [lbl for flag, lbl in ENTITLEMENT_LABELS.items() if entry.get(flag) is not True]
+            badges = "  ".join(f"✓ {g}" for g in granted)
+            if denied:
+                badges += "  " + "  ".join(f"✗ {d}" for d in denied)
+            return f"API Key #{key_id} — {key_hint}****  |  {badges}"
+
+        labels = [_key_label(e) for e in active_entries]
 
         if len(active_entries) == 1:
             st.info(f"One active API key found: **{labels[0]}**")
             chosen_idx = 0
         else:
-            choice     = st.radio("Available API keys:", labels)
+            choice = st.radio("Select an API key:", labels)
             chosen_idx = labels.index(choice)
-
-        # Show entitlements for each key
-        st.markdown("**Entitlements per key:**")
-        for i, entry in enumerate(active_entries):
-            marker = "▶ " if i == chosen_idx else "  "
-            key_label = labels[i]
-            granted = [
-                lbl for flag, lbl in ENTITLEMENT_LABELS.items()
-                if entry.get(flag) is True
-            ]
-            denied = [
-                lbl for flag, lbl in ENTITLEMENT_LABELS.items()
-                if entry.get(flag) is not True
-            ]
-            badge_str = "  ".join(f"✓ {g}" for g in granted)
-            if denied:
-                badge_str += "  " + "  ".join(f"✗ {d}" for d in denied)
-            st.caption(f"{marker}**{key_label}**:  {badge_str}")
 
         col1, col2 = st.columns(2)
         with col1:
