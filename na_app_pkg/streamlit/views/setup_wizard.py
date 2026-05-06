@@ -235,9 +235,18 @@ elif step == "H":
             "Go back and re-validate your license key, or contact LocID."
         )
         if st.button("← Back"):
-            st.session_state.wizard_step = "G"
+            st.session_state.wizard_step = "F"
             st.rerun()
     elif active_entries:
+        # Build display labels with entitlement badges per key
+        ENTITLEMENT_LABELS = {
+            "allow_encrypt": "Encrypt",
+            "allow_decrypt": "Decrypt",
+            "allow_tx": "TX_CLOC",
+            "allow_stable": "STABLE_CLOC",
+            "allow_geo_context": "Geo Context",
+        }
+
         labels = [
             f"API Key #{e.get('api_key_id')} — {e.get('api_key', '')[:8] or e.get('api_key_hint', '????')}****"
             for e in active_entries
@@ -250,10 +259,28 @@ elif step == "H":
             choice     = st.radio("Available API keys:", labels)
             chosen_idx = labels.index(choice)
 
+        # Show entitlements for each key
+        st.markdown("**Entitlements per key:**")
+        for i, entry in enumerate(active_entries):
+            marker = "▶ " if i == chosen_idx else "  "
+            key_label = labels[i]
+            granted = [
+                lbl for flag, lbl in ENTITLEMENT_LABELS.items()
+                if entry.get(flag) is True
+            ]
+            denied = [
+                lbl for flag, lbl in ENTITLEMENT_LABELS.items()
+                if entry.get(flag) is not True
+            ]
+            badge_str = "  ".join(f"✓ {g}" for g in granted)
+            if denied:
+                badge_str += "  " + "  ".join(f"✗ {d}" for d in denied)
+            st.caption(f"{marker}**{key_label}**:  {badge_str}")
+
         col1, col2 = st.columns(2)
         with col1:
             if st.button("← Back"):
-                st.session_state.wizard_step = "G"
+                st.session_state.wizard_step = "F"
                 st.rerun()
         with col2:
             if st.button("Confirm Selection", type="primary"):
@@ -293,6 +320,6 @@ elif step == "I":
     st.write("- View your **Job History** at any time from the sidebar")
     logger.info(session, "setup_wizard", "Setup wizard completed")
     if st.button("Launch App →", type="primary"):
-        for key in ("wizard_step", "license_key", "license_data", "connectivity_ok"):
+        for key in ("wizard_step", "license_key", "license_data"):
             st.session_state.pop(key, None)
         st.switch_page("views/home.py")
