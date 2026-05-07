@@ -151,6 +151,29 @@ def _check_entitlement(session, flag: str) -> None:
     )
 
 
+def _resolve_ref_name(session, ref_name: str) -> str:
+    """Resolve a reference binding to its fully-qualified consumer table name.
+
+    Uses SYSTEM$GET_ALL_REFERENCES(name, TRUE) which returns a JSON array of
+    {database, schema, name} objects. Falls back to 'reference(<ref_name>)' if
+    resolution fails (e.g. reference not yet bound).
+    """
+    try:
+        rows = session.sql(
+            "SELECT SYSTEM$GET_ALL_REFERENCES(?, TRUE)", params=[ref_name]
+        ).collect()
+        if rows and rows[0][0]:
+            bindings = json.loads(rows[0][0])
+            if bindings:
+                b = bindings[0]
+                db, schema, name = b.get('database', ''), b.get('schema', ''), b.get('name', '')
+                if db and schema and name:
+                    return f"{db}.{schema}.{name}"
+    except Exception:
+        pass
+    return f"reference({ref_name})"
+
+
 def _entitled_cols(session, operation: str) -> list:
     active_flags = set()
     cached = _get_config(session, 'cached_license')
@@ -325,6 +348,7 @@ def decrypt_handler(
     job_id   = str(uuid.uuid4())
     start_ts = time.time()
     rows_in = rows_matched = rows_out = 0
+    input_table_name = 'reference(DECRYPT_INPUT_TABLE)'  # fallback; resolved in try block
 
     job_sfx     = job_id.replace('-', '')[:12].upper()
     TBL_DECODED = f'APP_SCHEMA._LOCID_DECODED_{job_sfx}'
@@ -355,6 +379,9 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         _check_entitlement(session, 'allow_decrypt')
         phases['entitlement_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
+
+        # Resolve consumer table name from reference binding for logging
+        input_table_name = _resolve_ref_name(session, 'DECRYPT_INPUT_TABLE')
 
         # ------------------------------------------------------------------
         # Step 2: Fetch secrets from LocID Central (cached)
@@ -454,7 +481,7 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         _log_job(
             session, job_id, 'DECRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None, 'reference(DECRYPT_INPUT_TABLE)',
+            runtime_s, 'SUCCESS', None, input_table_name,
             f"APP_SCHEMA.{output_table}",
             cur_wh, active_cols,
         )
@@ -468,6 +495,7 @@ def decrypt_handler(
         return {
             'job_id':        job_id,
             'status':        'SUCCESS',
+            'input_table':   input_table_name,
             'output_table':  f"APP_SCHEMA.{output_table}",
             'rows_in':       rows_in,
             'rows_matched':  rows_matched,
@@ -481,7 +509,7 @@ def decrypt_handler(
         _log_perf(session, job_id, phases)
         _log_job(
             session, job_id, 'DECRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc), 'reference(DECRYPT_INPUT_TABLE)',
+            runtime_s, 'FAILED', str(exc), input_table_name,
             f"APP_SCHEMA.{output_table}",
             cur_wh, [],
         )
