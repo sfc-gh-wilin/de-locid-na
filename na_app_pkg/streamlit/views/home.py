@@ -286,7 +286,7 @@ def _get_app_version(_sid: int) -> str:
         ).collect()
         ver = rows[0][0] if rows and rows[0][0] else "—"
         patch = rows[0][1] if rows and rows[0][1] is not None else "0"
-        return f"{ver} · Patch {patch}"
+        return f"{ver} · {patch}"
     except Exception:
         return "—"
 
