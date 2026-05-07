@@ -291,6 +291,6 @@ def _get_app_version(_sid: int) -> str:
         return "—"
 
 st.sidebar.caption(f"App {_get_app_version(sid)}")
-st.sidebar.caption(f"Streamlit {st.__version__}")
+# st.sidebar.caption(f"Streamlit {st.__version__}")
 
 logger.debug(session, "app.main", "Home view loaded")
