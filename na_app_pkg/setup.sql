@@ -11,7 +11,7 @@
 -- =============================================================================
 -- 1. Application Roles
 --    APP_ADMIN  — full access: run jobs, view history, manage configuration
---    APP_VIEWER — read-only access: view job history only
+--    APP_VIEWER — read-only access: view APP_CONFIG, JOB_LOG, APP_LOGS; use Streamlit app
 -- =============================================================================
 CREATE APPLICATION ROLE IF NOT EXISTS APP_ADMIN;
 CREATE APPLICATION ROLE IF NOT EXISTS APP_VIEWER;

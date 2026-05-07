@@ -16,11 +16,11 @@
 --
 --   APP_CONFIG (non-sensitive fields only):
 --     license_id_ref     — masked hint: first-4-chars + "****"
---     cached_license     — JSON with 'secrets' removed, license_key masked to
---                          first-4-chars + "-****", and api_key values kept
---                          intact for LOCID_SET_API_KEY (Screen H) plus
---                          api_key_hint (first-8-chars) added for display.
---                          LOCID_SET_API_KEY scrubs api_key after selection.
+--     cached_license     — JSON with 'secrets' field removed, license_key masked
+--                          to first-4-chars + "-****", and api_key values stripped
+--                          entirely (only api_key_hint first-8-chars retained for
+--                          display). Full api_key is passed to LOCID_SET_API_KEY
+--                          directly from Streamlit session state — never cached.
 --
 --   This procedure exists because Snowflake Native Apps do not support
 --   EXTERNAL_ACCESS_INTEGRATIONS on Streamlit objects (error 092839). All

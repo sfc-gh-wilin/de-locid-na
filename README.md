@@ -120,28 +120,29 @@ Updated weekly via an Airflow DAG on LocID's side. The Native App accesses these
 
 ```
 -- APP_SCHEMA (non-versioned): tables, stage, network rule, procedures, Streamlit
-APP_SCHEMA.APP_CONFIG                       -- License key, cached secrets, entitlements, output column registry
-APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, run_dt, rows_in, rows_out, runtime_s, status)
-APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID, level, message, created_at)
+APP_SCHEMA.APP_CONFIG                       -- Masked credential hints, entitlements, output column registry; full secrets in GENERIC_STRING SECRET objects
+APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, operation, run_dt, rows_in, rows_matched, rows_out, runtime_s, status, error_msg, input_table, output_table, warehouse, output_cols)
+APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID, level, source, logged_at, session_id, message, traceback)
 APP_SCHEMA.APP_STAGE                        -- Internal stage: WHL, UDF SQL, proc SQL
 APP_SCHEMA.LOCID_CENTRAL_RULE               -- Network rule (allowlist: central.locid.com:443)
 APP_SCHEMA.LOCID_CENTRAL_EAI                -- External Access Integration (created at install time)
 LOCID_CENTRAL_EAI_SPEC                      -- App specification (consumer must approve before EAI is usable; see Setup Wizard Screen E)
 APP_SCHEMA.HTTP_PING()                      -- Python UDF to verify EAI connectivity during setup
 APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)     -- Python stored procedure — fetches/caches license from LocID Central via EAI; called by Streamlit via session.call()
+APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR) -- Python stored procedure — writes selected API key to LOCID_API_KEY SECRET; stores api_key_hint in APP_CONFIG
 APP_SCHEMA.register_single_callback(...)    -- Callback proc for input table references
-APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure
-APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure
+APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure (uses EAI for stats reporting)
+APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure (uses EAI for stats reporting)
 APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
-APP_CODE.LOCID_BASE_ENCRYPT(...)            -- Decrypt base LocID, return encrypted form
-APP_CODE.LOCID_BASE_DECRYPT(...)            -- Decrypt base LocID, return plain form
-APP_CODE.LOCID_TXCLOC_ENCRYPT(...)          -- Generate TX_CLOC from base LocID
-APP_CODE.LOCID_TXCLOC_DECRYPT(...)          -- Decode TX_CLOC → base LocID + metadata
-APP_CODE.LOCID_STABLE_CLOC(...)             -- Generate STABLE_CLOC (UUID format)
-APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(...)  -- Generate STABLE_CLOC from plain base LocID
+APP_CODE.LOCID_BASE_ENCRYPT(LOC_ID, KEY_STR)                                           -- Encrypt raw base LocID (AES-GCM) → URL-safe base64
+APP_CODE.LOCID_BASE_DECRYPT(ENCRYPTED_LOC_ID, KEY_STR)                                 -- Decrypt base64 ciphertext → raw base LocID
+APP_CODE.LOCID_TXCLOC_ENCRYPT(ENCRYPTED_LOCID, BASE_LOCID_KEY, SCHEME_KEY, TIMESTAMP_SEC, CLIENT_ID) -- Generate TX_CLOC from encrypted base LocID
+APP_CODE.LOCID_TXCLOC_DECRYPT(TX_CLOC, SCHEME_KEY)                                     -- Decode TX_CLOC → VARCHAR JSON: {base_loc_id, timestamp, enc_client_id}
+APP_CODE.LOCID_STABLE_CLOC(ENCRYPTED_LOCID, BASE_LOCID_KEY, NAMESPACE_GUID, CLIENT_ID, ENC_CLIENT_ID, TIER) -- Generate STABLE_CLOC from encrypted base LocID
+APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(BASE_LOC_ID, NAMESPACE_GUID, DEC_CLIENT_ID, ENC_CLIENT_ID, TIER)     -- Generate STABLE_CLOC from plain base LocID (decrypt path)
 ```
 
 ---
@@ -158,12 +159,12 @@ Key functions:
 
 | UDF | Inputs | Output | Notes |
 |-----|--------|--------|-------|
-| `LOCID_BASE_ENCRYPT` | `locid`, `base_locid_key` | `encrypted_locid` | AES-encrypts plain base LocID for storage |
-| `LOCID_BASE_DECRYPT` | `encrypted_locid`, `base_locid_key` | `locid` | Decrypts stored base LocID to plain form |
-| `LOCID_TXCLOC_ENCRYPT` | `encrypted_locid`, `base_locid_key`, `scheme_key`, `timestamp`, `client_id` | `tx_cloc` | Decrypts base LocID, re-encrypts as TX_CLOC |
-| `LOCID_TXCLOC_DECRYPT` | `tx_cloc`, `scheme_key` | `VARIANT` (locid, timestamp, enc_client_id) | Decodes TX_CLOC → base LocID + metadata |
-| `LOCID_STABLE_CLOC` | `encrypted_locid`, `base_locid_key`, `namespace_guid`, `dec_client_id`, `enc_client_id`, `tier` | `stable_cloc` | Produces stable UUID-format CLOC from stored encrypted LocID |
-| `LOCID_STABLE_CLOC_FROM_PLAIN` | `locid`, `base_locid_key`, `namespace_guid`, `dec_client_id`, `enc_client_id`, `tier` | `stable_cloc` | As above, accepts plain (unencrypted) base LocID |
+| `LOCID_BASE_ENCRYPT` | `loc_id`, `key_str` | `encrypted_locid` (VARCHAR) | AES-encrypts plain base LocID for storage |
+| `LOCID_BASE_DECRYPT` | `encrypted_loc_id`, `key_str` | `locid` (VARCHAR) | Decrypts stored base LocID to plain form |
+| `LOCID_TXCLOC_ENCRYPT` | `encrypted_locid`, `base_locid_key`, `scheme_key`, `timestamp_sec`, `client_id` | `tx_cloc` (VARCHAR) | Decrypts base LocID, re-encrypts as TX_CLOC |
+| `LOCID_TXCLOC_DECRYPT` | `tx_cloc`, `scheme_key` | VARCHAR (JSON: {base_loc_id, timestamp, enc_client_id}) | Decodes TX_CLOC → base LocID + metadata |
+| `LOCID_STABLE_CLOC` | `encrypted_locid`, `base_locid_key`, `namespace_guid`, `client_id`, `enc_client_id`, `tier` | `stable_cloc` (VARCHAR) | Produces stable UUID-format CLOC from stored encrypted LocID |
+| `LOCID_STABLE_CLOC_FROM_PLAIN` | `base_loc_id`, `namespace_guid`, `dec_client_id`, `enc_client_id`, `tier` | `stable_cloc` (VARCHAR) | As above, accepts plain (unencrypted) base LocID (decrypt path) |
 
 Crypto keys (`scheme_key`, `base_locid_key`) are retrieved from LocID Central at job start, passed into UDFs — never stored in plaintext in tables.
 
@@ -264,54 +265,62 @@ Multi-screen Streamlit wizard, runs once post-install.
 ### Encrypt (IP → LocID)
 
 ```
-Customer Input Table
+Customer Input Table (via reference binding)
   (unique_id, ip_address, timestamp)
          │
          ▼
-  LOCID_ENCRYPT stored procedure
+  LOCID_ENCRYPT(ID_COL, IP_COL, TS_COL, TS_FORMAT, OUTPUT_COLS)
          │
-         ├─ 1. Fetch secrets + entitlements from LocID Central (cached)
-         │       Resolve selected API key from APP_CONFIG:
+         ├─ 1. Entitlement check — verify allow_encrypt + requested output columns
+         │
+         ├─ 2. Fetch secrets from Snowflake SECRETs (base_locid_key, scheme_key, api_key)
+         │       Resolve selected API key metadata from APP_CONFIG:
          │       namespace_guid, provider_id, client_id → used for STABLE_CLOC
          │
-         ├─ 2. IP Matching (see matching strategy below)
-         │       → returns: unique_id, ip_address, timestamp,
-         │                  encrypted_locid, tier, geo_context, build_dt
+         ├─ 3. IP Matching (see matching strategy below)
+         │       → unique_id, encrypted_locid, tier, geo_context, build_dt
          │
-         ├─ 3. Call LOCID_UDF per row
-         │       encrypted_locid → decrypt base LocID → re-encrypt
-         │       → TX_CLOC, STABLE_CLOC
+         ├─ 4. Call UDFs per matched row:
+         │       LOCID_TXCLOC_ENCRYPT → TX_CLOC
+         │       LOCID_STABLE_CLOC → STABLE_CLOC
          │
-         ├─ 4. Apply entitlement filter on output columns
+         ├─ 5. Apply entitlement filter on output columns
          │
-         ├─ 5. INSERT INTO customer output table
+         ├─ 6. CREATE TABLE APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS
+         │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
          │
-         └─ 6. POST usage stats to LocID Central
-                (rows_in, rows_out, runtime_s, job_id, timestamp)
+         ├─ 7. POST usage stats to LocID Central (via EAI)
+         │
+         └─ 8. Log to JOB_LOG + opportunistic LOCID_PURGE_LOGS
 ```
 
 ### Decrypt (TX_CLOC → STABLE_CLOC)
 
 ```
-Customer Input Table
+Customer Input Table (via reference binding)
   (unique_id, tx_cloc)
          │
          ▼
-  LOCID_DECRYPT stored procedure
+  LOCID_DECRYPT(ID_COL, TXCLOC_COL, OUTPUT_COLS)
          │
-         ├─ 1. Fetch secrets + entitlements from LocID Central (cached)
-         │       Resolve selected API key from APP_CONFIG:
-         │       namespace_guid, provider_id, client_id → used for STABLE_CLOC
+         ├─ 1. Entitlement check — verify allow_decrypt + requested output columns
          │
-         ├─ 2. Call LOCID_UDF per row
-         │       tx_cloc → decrypt → base LocID + embedded geo_context
-          │       → STABLE_CLOC, geo fields
+         ├─ 2. Fetch secrets from Snowflake SECRETs (scheme_key, api_key)
+         │       Resolve selected API key metadata from APP_CONFIG
          │
-         ├─ 3. Apply entitlement filter on output columns
+         ├─ 3. Call UDFs per row:
+         │       LOCID_TXCLOC_DECRYPT → base_loc_id + metadata (JSON)
+         │       LOCID_STABLE_CLOC_FROM_PLAIN → STABLE_CLOC
+         │       (Geo context columns: NULL in v1 — not available from TX_CLOC decode)
          │
-         ├─ 4. INSERT INTO customer output table
+         ├─ 4. Apply entitlement filter on output columns
          │
-         └─ 5. POST usage stats to LocID Central
+         ├─ 5. CREATE TABLE APP_SCHEMA.LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS
+         │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
+         │
+         ├─ 6. POST usage stats to LocID Central (via EAI)
+         │
+         └─ 7. Log to JOB_LOG + opportunistic LOCID_PURGE_LOGS
 ```
 
 ### IP Matching Strategy
@@ -437,16 +446,12 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 
 **Purpose:** Submit a batch Encrypt job — match customer IP + timestamp data against the LocID data lake and produce TX_CLOC / STABLE_CLOC output.
 
-**Workflow (5 steps, shown as a top stepper):**
-
-```
-[1. Input]  [2. Map Columns]  [3. Output]  [4. Options]  [5. Review & Run]
-```
+**Workflow (4 steps, shown as a top stepper):**
 
 **Step 1 — Select Input Table**
-- Dropdown: all tables/views the app has been granted access to in the customer's account
-- Preview: row count + first 5 rows shown inline after selection
-- IP version hint: app auto-detects whether the table contains IPv4, IPv6, or mixed addresses (shown as info badge)
+- Input table is bound via Native App reference binding (`ENCRYPT_INPUT_TABLE`)
+- Preview: row count + first 5 rows shown after binding
+- Warehouse sizing tip shown as info box
 
 **Step 2 — Map Columns**
 - The app reads the selected table's schema and presents a mapping widget:
@@ -469,12 +474,7 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 
   Validation is advisory — warnings are shown but the job can always proceed.
 
-**Step 3 — Configure Output**
-- Radio: *Create new table* or *Overwrite existing table*
-- Text input: output table name (e.g. `MY_DB.MY_SCHEMA.LOCID_RESULTS`)
-- If overwrite: confirmation prompt
-
-**Step 4 — Select Output Columns**
+**Step 3 — Select Output Columns**
 - Checkboxes for each available output field, gated by entitlement:
 
   | Column | Entitlement Required | Default |
@@ -485,33 +485,30 @@ The app has seven views accessible from a left-side navigation bar. All views ru
   | Region / Region Code | `allow_geo_context` | ✓ |
   | City / City Code | `allow_geo_context` | ✓ |
   | Postal Code | `allow_geo_context` | ✓ |
-  | HomeBiz_Type | *(future — de-scoped from v1)* | — |
 
 - Columns the customer is not entitled to are shown greyed out with a tooltip explaining why
 
-**Step 5 — Review & Run**
-- Summary card: input table, row count, output table, selected columns, warehouse
-- Warehouse selector: dropdown of warehouses the customer has access to
+**Step 4 — Review & Run**
+- Summary card: input table, row count, selected columns
 - **Run Job** button
 
 **During execution:**
-- Live progress bar with status messages (e.g. "Matching IP records…", "Generating LocIDs…", "Writing output…")
-- Cancel button available during run
+- Spinner with status message
 
 **On completion:**
 - Result summary: rows in, rows matched, rows written, unmatched count, runtime
-- Link: "View output table" (opens Snowflake worksheet) and "View in Job History"
+- Output table name displayed (auto-generated in APP_SCHEMA)
 
 ---
 
 ### View 3 — Run Decrypt
 
-**Purpose:** Submit a batch Decrypt job — decode TX_CLOC values back to STABLE_CLOC and optional geo context.
+**Purpose:** Submit a batch Decrypt job — decode TX_CLOC values back to STABLE_CLOC.
 
-**Workflow (same 5-step stepper as Encrypt):**
+**Workflow (same 4-step stepper as Encrypt):**
 
 **Step 1 — Select Input Table**
-- Same table selector as Encrypt
+- Input table is bound via Native App reference binding (`DECRYPT_INPUT_TABLE`)
 - Preview with row count + first 5 rows
 
 **Step 2 — Map Columns**
@@ -521,26 +518,24 @@ The app has seven views accessible from a left-side navigation bar. All views ru
   | Unique Row ID | `[dropdown]` |
   | TX_CLOC       | `[dropdown]` |
 
-**Step 3 — Configure Output**
-- Same as Encrypt: new table or overwrite
-
-**Step 4 — Select Output Columns**
+**Step 3 — Select Output Columns**
 
   | Column | Entitlement Required | Default |
   |--------|---------------------|---------|
   | STABLE_CLOC | `allow_stable` | ✓ |
-  | Country / Country Code | `allow_geo_context` | ✓ |
-  | Region / Region Code | `allow_geo_context` | ✓ |
-  | City / City Code | `allow_geo_context` | ✓ |
-  | Postal Code | `allow_geo_context` | ✓ |
-  | HomeBiz_Type | *(future — de-scoped from v1)* | — |
+  | Country / Country Code | `allow_geo_context` | shown but returns NULL in v1 |
+  | Region / Region Code | `allow_geo_context` | shown but returns NULL in v1 |
+  | City / City Code | `allow_geo_context` | shown but returns NULL in v1 |
+  | Postal Code | `allow_geo_context` | shown but returns NULL in v1 |
 
-**Step 5 — Review & Run**
-- Same summary + warehouse selector + Run Job button as Encrypt
+> **Note:** Geo context columns are not available in v1 of the Decrypt path — returned as NULL.
+
+**Step 4 — Review & Run**
+- Same summary + Run Job button as Encrypt
 
 **On completion:**
 - Result summary: rows in, rows decoded, rows written, runtime
-- Link to output table and Job History
+- Output table name displayed (auto-generated in APP_SCHEMA)
 
 ---
 
