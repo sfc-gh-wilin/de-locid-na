@@ -243,10 +243,14 @@ st.caption(
     "Severity order: DEBUG < PERF/TELEMETRY < INFO < WARNING < ERROR"
 )
 
-_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+_LOG_LEVELS = ["DEBUG", "PERF/TELEMETRY", "INFO", "WARNING", "ERROR"]
 _current_level = (config.get("log_level") or "INFO").upper().strip()
 if _current_level not in _LOG_LEVELS:
-    _current_level = "INFO"
+    # Normalize stored values like "PERF" or "TELEMETRY" to the display label
+    if _current_level in ("PERF", "TELEMETRY"):
+        _current_level = "PERF/TELEMETRY"
+    else:
+        _current_level = "INFO"
 
 new_level = st.selectbox(
     "Minimum log level",

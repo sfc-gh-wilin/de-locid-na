@@ -63,7 +63,10 @@ def _get_threshold(session: snowpark.Session) -> int:
         ).collect()
         if rows and rows[0][0]:
             val = rows[0][0].upper().strip()
-            _cached_threshold = _SEVERITY.get(val, _SEVERITY["INFO"])
+            if val == "PERF/TELEMETRY":
+                _cached_threshold = _SEVERITY["PERF"]
+            else:
+                _cached_threshold = _SEVERITY.get(val, _SEVERITY["INFO"])
         else:
             _cached_threshold = _SEVERITY["INFO"]
     except Exception:
