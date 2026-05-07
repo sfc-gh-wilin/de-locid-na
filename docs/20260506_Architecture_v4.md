@@ -24,16 +24,16 @@ The LocID Native App brings LocID's location identity enrichment capabilities na
 The app is distributed via the Snowflake Native App Framework. LocID publishes the app to the Snowflake Marketplace; customers install it in their own account in a few clicks.
 
 ```
-┌─────────────────────────────────┐      ┌──────────────────────────────┐
-│   LocID (Provider)      │      │   Customer (Consumer)        │
-│                                 │      │                              │
-│  LOCID_BUILDS (shared)          │◄─────│  App queries via share       │
-│  LOCID_BUILDS_IPV4_EXPLODED     │      │                              │
-│  LOCID_BUILD_DATES              │      │  Customer input table        │
-│                                 │      │  → App stored procedure      │
+┌──────────────────────────────────┐      ┌──────────────────────────────┐
+│   LocID (Provider)               │      │   Customer (Consumer)        │
+│                                  │      │                              │
+│  LOCID_BUILDS (shared)           │◄─────│  App queries via share       │
+│  LOCID_BUILDS_IPV4_EXPLODED      │      │                              │
+│  LOCID_BUILD_DATES               │      │  Customer input table        │
+│                                  │      │  → App stored procedure      │
 │  mb_locid_encoding WHL (bundled) │      │  → Customer output table     │
-│  LocID Central API              │◄─────│  App reports usage stats     │
-└─────────────────────────────────┘      └──────────────────────────────┘
+│  LocID Central API               │◄─────│  App reports usage stats     │
+└──────────────────────────────────┘      └──────────────────────────────┘
 ```
 
 **All customer data stays in the customer's Snowflake account.** LocID's data lake is shared as read-only — no customer rows are written to LocID's account.
@@ -695,7 +695,7 @@ ALTER APPLICATION PACKAGE LOCID_DEV_PKG
 
 -- 2. Enable auto-refresh on release directive changes (so consumers get updates automatically)
 ALTER APPLICATION PACKAGE LOCID_DEV_PKG
-    SET LISTING_AUTO_REFRESH = 'ON';
+    SET LISTING_AUTO_REFRESH = TRUE;
 ```
 
 Then create a **Private Listing** in Snowsight:
