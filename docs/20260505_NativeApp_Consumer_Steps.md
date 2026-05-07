@@ -96,6 +96,13 @@ ALTER APPLICATION PACKAGE LOCID_DEV_PKG
     PATCH = 0;
 ```
 
+To remove:
+```sql
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+  MODIFY RELEASE CHANNEL DEFAULT
+  UNSET RELEASE DIRECTIVE CONSUMER_TEST_DIRECTIVE;
+```
+
 > **Note:** A custom directive always takes precedence over the default for the specified accounts.
 
 **Step E — Create a private listing (required for Snowsight visibility):**
