@@ -6,6 +6,8 @@ Sections:
   - License & Credentials (masked, refresh from LocID Central)
   - Current Entitlements (live badge list)
   - Output Column Registry (read-only table from APP_CONFIG)
+  - Log Retention (days + purge now)
+  - Log Level (threshold filter for APP_LOGS)
   - Advanced (re-run setup wizard)
 
 All APP_CONFIG reads are batched into a single query per page load.
@@ -51,7 +53,7 @@ def _load_config(_session_id: int) -> dict[str, str | None]:
     _session = _gas()
     rows = _session.sql(
         "SELECT config_key, config_value FROM APP_SCHEMA.APP_CONFIG "
-        "WHERE config_key IN ('license_id_ref', 'api_key_hint', 'cached_license', 'api_key_id', 'log_retention_days') "
+        "WHERE config_key IN ('license_id_ref', 'api_key_hint', 'cached_license', 'api_key_id', 'log_retention_days', 'log_level') "
         "AND is_active = TRUE"
     ).collect()
     return {r[0]: r[1] for r in rows}
@@ -232,7 +234,49 @@ if purge_clicked:
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Section 5 — Advanced
+# Section 5 — Log Level
+# ---------------------------------------------------------------------------
+st.subheader(":material/filter_list: Log Level")
+st.caption(
+    "Controls which messages are written to APP_LOGS. "
+    "Messages below the selected severity are discarded. "
+    "Severity order: DEBUG < PERF/TELEMETRY < INFO < WARNING < ERROR"
+)
+
+_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+_current_level = (config.get("log_level") or "INFO").upper().strip()
+if _current_level not in _LOG_LEVELS:
+    _current_level = "INFO"
+
+new_level = st.selectbox(
+    "Minimum log level",
+    options=_LOG_LEVELS,
+    index=_LOG_LEVELS.index(_current_level),
+    help="Only messages at this level or higher will be stored.",
+)
+
+if st.button(":material/save: Save Log Level", key="save_log_level"):
+    try:
+        session.sql(
+            "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
+            "USING (SELECT 'log_level' AS k, ? AS v) AS s ON t.config_key = s.k "
+            "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
+            "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
+            params=[new_level],
+        ).collect()
+        _load_config.clear()
+        logger.info(session, "configuration.log_level",
+                    f"log_level updated to {new_level}")
+        st.success(f"Log level saved: {new_level}", icon="✅")
+        st.rerun()
+    except Exception as e:
+        logger.error(session, "configuration.log_level", "Save failed", exc=e)
+        show_error("Save failed.", detail=e)
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# Section 6 — Advanced
 # ---------------------------------------------------------------------------
 st.subheader(":material/settings: Advanced")
 if st.button(":material/restart_alt: Re-run Setup Wizard"):
