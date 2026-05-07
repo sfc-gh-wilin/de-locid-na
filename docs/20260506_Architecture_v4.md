@@ -675,6 +675,70 @@ WHERE APPLICATION_NAME = 'LOCID_DEV_PKG';
 -- Check upgrade_state: COMPLETE, UPGRADING, QUEUED, FAILED
 ```
 
+### Cross-Region & Cross-Cloud Distribution
+
+When consumers need to install the app in a region or cloud different from the provider's account, Snowflake's **Cross-Cloud Auto-Fulfillment** handles replication automatically via a Secure Share Area (SSA).
+
+| Scenario | Mechanism | Example |
+|----------|-----------|---------|
+| Same region | Direct install from application package | Provider: `aws_us_west_2` → Consumer: `aws_us_west_2` |
+| Different region, same cloud | Auto-fulfillment via Listing | Provider: `aws_us_west_2` → Consumer: `aws_us_east_1` |
+| Different cloud and region | Auto-fulfillment via Listing | Provider: `aws_us_west_2` → Consumer: `azure_eastus2` |
+
+**Provider: Set up for cross-region distribution**
+
+```sql
+-- 1. Set distribution to EXTERNAL (triggers automated security scan)
+USE ROLE LOCID_APP_ADMIN;
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    SET DISTRIBUTION = 'EXTERNAL';
+
+-- 2. Enable auto-refresh on release directive changes (so consumers get updates automatically)
+ALTER APPLICATION PACKAGE LOCID_DEV_PKG
+    SET LISTING_AUTO_REFRESH = 'ON';
+```
+
+Then create a **Private Listing** in Snowsight:
+
+1. Navigate to **Marketplace → Provider Studio → Create Listing**
+2. Select **"Only specified consumers"** (private listing)
+3. Attach the application package `LOCID_DEV_PKG`
+4. Add the consumer's account identifier (e.g., `ORG_NAME.ACCOUNT_NAME`)
+5. If the consumer is in a different region, Snowsight automatically detects this and enables auto-fulfillment
+6. Configure refresh frequency (recommended: trigger-based or daily)
+7. Publish the listing
+
+**Consumer: Install from a different region/cloud**
+
+1. Navigate to **Snowsight → Marketplace → Shared With Me** (or search if marketplace listing)
+2. Click **Get** on the LocID listing
+3. Follow normal installation flow — Snowflake handles replication transparently
+
+**Costs & Considerations:**
+
+- Cross-region auto-fulfillment incurs **data transfer** and **replication credits**
+- Initial replication may take time depending on the size of shared databases (`LOCID_BUILDS`, etc.)
+- Provider can monitor replication via `SNOWFLAKE.DATA_SHARING_USAGE.LISTING_AUTO_FULFILLMENT_REFRESH_DAILY`
+- ORGADMIN must first delegate auto-fulfillment privileges: `SELECT SYSTEM$ENABLE_GLOBAL_DATA_SHARING_FOR_ACCOUNT('<provider_account>')`
+
+**Cost Model (Provider pays):**
+
+The **provider** bears all auto-fulfillment costs. Consumers pay nothing extra beyond their normal compute.
+
+| Cost Component | Trigger | Scaling |
+|----------------|---------|---------|
+| Replication credits | Initial sync + each data refresh | Per distinct target region |
+| Data transfer (egress) | Cross-region/cross-cloud bytes moved | Per distinct target region × data size |
+| SSA storage | Data stored in each Secure Share Area | Per distinct target region |
+
+> **Key:** Snowflake creates **one SSA per region**, not per consumer. 10 consumers in the same region share one SSA — cost does not increase with consumer count within a region. Cost scales with the **number of distinct consumer regions**.
+
+**Cost control strategies:**
+
+- Use **trigger-based refresh** (`SYSTEM$TRIGGER_LISTING_REFRESH`) instead of interval-based — only replicate when a new version/patch is released
+- Limit listing availability to specific regions (marketplace listings allow region selection)
+- For LocID's weekly build-table updates + app patches, recommend trigger-based refresh tied to the Airflow DAG completion
+
 ---
 
 ## Performance Considerations
