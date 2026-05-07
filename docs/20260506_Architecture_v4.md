@@ -189,9 +189,9 @@ POST https://central.locid.com/api/0/location_id/stats
 ```
 
 **Caching and refresh strategy:**
-- On app launch: if `license_last_verified_at` in `APP_CONFIG` is older than 24 hours, re-fetch and refresh.
+- On app launch: if `cached_license.last_refreshed_at` in `APP_CONFIG` is older than 24 hours, auto-refresh from LocID Central.
 - On job run: use cached values. If cache is missing, the job is aborted — secrets are required.
-- If a refresh fails, cached values are used and a warning is logged.
+- If an auto-refresh fails, cached values remain usable and the error is logged.
 
 Sensitive values are stored as Snowflake `GENERIC_STRING` SECRETs (`LOCID_LICENSE_KEY`, `LOCID_API_KEY`, `LOCID_BASE_SECRET`, `LOCID_SCHEME_SECRET`). `APP_CONFIG` holds only masked hints (`license_id_ref` = first 4 chars + `-****`; `api_key_hint` = first 8 chars). The cached license payload (`cached_license`) is stripped of the `secrets` field before storage.
 
@@ -479,7 +479,7 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 **License & Credentials**
 - License key: shown masked (`1569-****-****-****`), with "Update" button that re-triggers the Enter Key screen
 - Client name and expiration date (read-only, from LocID Central)
-- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; daily auto-refresh also runs at app launch
+- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; auto-refresh also runs on app launch if cache is >24h stale
 
 **API Key Selection**
 - Table of all `access[]` entries from the last LocID Central fetch:

@@ -22,7 +22,8 @@ from typing import Any
 import snowflake.snowpark as snowpark
 from utils import logger
 
-CACHE_TTL_SECONDS = 3600    # refresh secrets if older than 1 hour
+CACHE_TTL_SECONDS = 3600         # refresh secrets if older than 1 hour
+AUTO_REFRESH_TTL_SECONDS = 86400  # auto-refresh on app launch if older than 24 hours
 
 
 def _get_config(session: snowpark.Session, key: str):
@@ -84,3 +85,32 @@ def get_secrets(session: snowpark.Session) -> None:
     logger.info(session, "locid_central.get_secrets",
                 "Cache stale — re-fetching from LocID Central")
     fetch_license(session, "")
+
+
+def ensure_fresh(session: snowpark.Session) -> bool:
+    """
+    Auto-refresh on app launch: if cached_license is older than 24 hours,
+    re-fetch from LocID Central.
+
+    Returns True if a refresh was performed, False if cache is still fresh.
+    Errors are logged but not raised — cached values remain usable.
+    """
+    lic_row = _get_config(session, "license_id_ref")
+    if not lic_row or not lic_row[0]:
+        return False  # not configured yet
+
+    cached = _get_config(session, "cached_license")
+    if cached and cached[1]:
+        age_s = time.time() - cached[1].timestamp()
+        if age_s < AUTO_REFRESH_TTL_SECONDS:
+            return False  # still fresh
+
+    try:
+        logger.info(session, "locid_central.ensure_fresh",
+                    "License cache stale (>24h) — auto-refreshing from LocID Central")
+        fetch_license(session, "")
+        return True
+    except Exception as e:
+        logger.error(session, "locid_central.ensure_fresh",
+                     "Auto-refresh failed; using cached values", exc=e)
+        return False

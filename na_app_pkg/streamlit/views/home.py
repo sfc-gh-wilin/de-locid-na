@@ -97,6 +97,16 @@ last_job = _load_last_job(sid)
 onboarding_complete = config.get("onboarding_complete", ("false", None))[0] == "true"
 
 # ---------------------------------------------------------------------------
+# Auto-refresh: re-fetch from LocID Central if cache is stale (>24 hours)
+# ---------------------------------------------------------------------------
+if onboarding_complete and not st.session_state.get("_auto_refresh_attempted"):
+    from utils.locid_central import ensure_fresh
+    st.session_state["_auto_refresh_attempted"] = True
+    if ensure_fresh(session):
+        _load_home_data.clear()
+        st.rerun()
+
+# ---------------------------------------------------------------------------
 # Onboarding banner
 # ---------------------------------------------------------------------------
 if not onboarding_complete:

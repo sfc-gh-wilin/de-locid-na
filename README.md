@@ -222,9 +222,9 @@ POST https://central.locid.com/api/0/location_id/stats
 ```
 
 **Caching and refresh strategy:**
-- On app launch: check `license_last_verified_at` in `APP_CONFIG`. If older than 24 hours (or not set), re-fetch from LocID Central and update `APP_CONFIG`.
+- On app launch: check `cached_license.last_refreshed_at` in `APP_CONFIG`. If older than 24 hours (or not set), auto-refresh from LocID Central.
 - On job run: use cached values. If cache is missing → abort (secrets required).
-- If refresh fails: use cached values, log warning.
+- If auto-refresh fails: cached values remain usable, error is logged.
 - Sensitive values are stored as Snowflake `GENERIC_STRING` SECRETs — not in APP_CONFIG rows. `APP_CONFIG` holds only masked hints (`license_id_ref` = first 4 chars + `-****`; `api_key_hint` = first 8 chars). The cached license payload (`cached_license`) is stripped of cryptographic secrets before storage.
 
 ---
@@ -381,7 +381,7 @@ APP_CONFIG (
 --   'provider_id'              → provider ID of selected key     (access[].provider_id)
 --   'client_id'                → customer client ID              (license.client_id)
 --   'scheme_version'           → crypto scheme version           (secrets.scheme_version)
---   'license_last_verified_at' → ISO timestamp of last successful LocID Central fetch
+--   (staleness tracked via cached_license.last_refreshed_at column, not a separate config key)
 --   'cached_license'           → stripped license JSON (no secrets field; api_key replaced by api_key_hint)
 --   'log_retention_days'       → number of days to retain JOB_LOG / APP_LOGS rows (default: 30)
 
@@ -600,8 +600,8 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 **License & Credentials**
 - License key: shown masked (`1569-****-****-****`), with "Update" button that re-triggers the Enter Key screen
 - Client name and expiration date (read-only, from LocID Central)
-- Last verified: timestamp of last successful LocID Central fetch (`license_last_verified_at`)
-- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; daily auto-refresh also runs at app launch
+- Last verified: timestamp of last successful LocID Central fetch (`cached_license.last_refreshed_at`)
+- **Refresh from LocID Central** button — manually re-fetches secrets and entitlements; auto-refresh also runs on app launch if cache is >24h stale
 
 **API Key Selection**
 - Table of all `access[]` entries from the last LocID Central fetch, with columns: API Key (masked), API Key ID, Provider ID, Namespace GUID, Status, and a "Use this key" radio selector:
