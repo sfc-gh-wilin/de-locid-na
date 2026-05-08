@@ -207,41 +207,18 @@ Expected keys: `api_key`, `api_key_id`, `cached_license`, `client_id`, `license_
 
 ## Phase 5 — Test Encrypt
 
-### 5.1 Prepare test input table
+Test input tables already exist in the `LOCID` database:
 
-Create a small test input table for the encrypt job:
+| Table | Rows | IP Type |
+|-------|------|---------|
+| `LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV4` | 1M | IPv4 |
+| `LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV6` | 1M | IPv6 |
 
-```sql
-USE ROLE LOCID_APP_INSTALLER;
-
-CREATE DATABASE IF NOT EXISTS LOCID_TEST;
-CREATE SCHEMA IF NOT EXISTS LOCID_TEST.INPUT;
-
-CREATE OR REPLACE TABLE LOCID_TEST.INPUT.SAMPLE_DATA (
-    row_id      VARCHAR        NOT NULL,
-    ip_addr     VARCHAR        NOT NULL,
-    event_ts    TIMESTAMP_NTZ(9) NOT NULL
-);
-
--- Insert sample rows (use IPs that exist in LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED)
--- Replace with actual IPs from the provider data for real matches:
-INSERT INTO LOCID_TEST.INPUT.SAMPLE_DATA
-SELECT
-    ROW_NUMBER() OVER (ORDER BY SEQ4()) AS row_id,
-    ip_addr,
-    DATEADD('minute', SEQ4() * 10, '2025-06-01 08:00:00'::TIMESTAMP_NTZ) AS event_ts
-FROM (
-    SELECT DISTINCT ip_address AS ip_addr
-    FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED
-    LIMIT 100
-);
-```
-
-### 5.2 Bind the input table
+### 5.1 Bind the input table
 
 **Option A — Streamlit UI (recommended):**
 
-Open the app → **Settings** (gear icon) → bind **Input Table for Encrypt** to `LOCID_TEST.INPUT.SAMPLE_DATA`.
+Open the app → **Settings** (gear icon) → bind **Input Table for Encrypt** to `LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV4`.
 
 **Option B — SQL:**
 
@@ -250,11 +227,13 @@ USE ROLE LOCID_APP_INSTALLER;
 
 CALL LOCID_APP.APP_SCHEMA.LOCID_REGISTER_SINGLE_CALLBACK(
     'ENCRYPT_INPUT_TABLE', 'ADD',
-    SYSTEM$REFERENCE('TABLE', 'LOCID_TEST.INPUT.SAMPLE_DATA', 'SESSION', 'SELECT')
+    SYSTEM$REFERENCE('TABLE', 'LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV4', 'SESSION', 'SELECT')
 );
 ```
 
-### 5.3 Run the Encrypt job
+> To test IPv6 instead, replace with `LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV6`.
+
+### 5.2 Run the Encrypt job
 
 Open **Run Encrypt** from the sidebar.
 
@@ -270,7 +249,7 @@ Click **Run Job**.
 **Expected:**
 - Job completes successfully (status = `SUCCESS` in Job History)
 - Output table created: `LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS`
-- `rows_matched > 0` (since test data uses real IPs from provider tables)
+- `rows_matched > 0`
 
 Inspect:
 
@@ -361,9 +340,6 @@ USE ROLE LOCID_APP_INSTALLER;
 
 -- Drop the installed app (including LOCID_CENTRAL_EAI)
 DROP APPLICATION IF EXISTS LOCID_APP CASCADE;
-
--- Drop test data
-DROP DATABASE IF EXISTS LOCID_TEST;
 ```
 
 ```sql
