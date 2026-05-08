@@ -109,6 +109,7 @@ APP_SCHEMA.register_single_callback(...)    -- Callback proc for input table ref
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure (uses EAI for stats reporting)
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure (uses EAI for stats reporting)
 APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
+APP_SCHEMA.LOCID_PURGE_OUTPUTS(INTEGER)   -- Drop output tables older than output_retention_days (default: 90)
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
@@ -518,6 +519,22 @@ Read-only for customers. Updated by LocID via app version releases when new fiel
 
 **Advanced**
 - "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting connectivity
+
+**Output Table Management**
+- Each Encrypt/Decrypt job creates a permanent table: `LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS` / `LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS`
+- Over time these accumulate; consumers can purge old output tables via `LOCID_PURGE_OUTPUTS`:
+
+  ```sql
+  -- Drop output tables older than the configured retention (default: 90 days)
+  CALL APP_SCHEMA.LOCID_PURGE_OUTPUTS(NULL);
+
+  -- Drop output tables older than a specific number of days
+  CALL APP_SCHEMA.LOCID_PURGE_OUTPUTS(30);
+  ```
+
+- Retention default stored in `APP_CONFIG` key `output_retention_days` (default: 90 days)
+- Requires `APP_ADMIN` application role
+- To list existing output tables: `SHOW TABLES LIKE 'LOCID_%_OUTPUT_%' IN SCHEMA APP_SCHEMA;`
 
 ---
 

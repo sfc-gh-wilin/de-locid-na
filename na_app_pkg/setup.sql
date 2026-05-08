@@ -77,7 +77,8 @@ INSERT INTO APP_SCHEMA.APP_CONFIG (config_key, config_value, is_active)
 SELECT col, val, active FROM (VALUES
     ('onboarding_complete',  'false', TRUE),
     ('scheme_version',       '0',     TRUE),
-    ('log_retention_days',   '30',    TRUE)
+    ('log_retention_days',   '30',    TRUE),
+    ('output_retention_days','90',    TRUE)
 ) AS t(col, val, active)
 WHERE NOT EXISTS (
     SELECT 1 FROM APP_SCHEMA.APP_CONFIG WHERE config_key = t.col
@@ -442,6 +443,7 @@ EXECUTE IMMEDIATE FROM 'src/udfs/locid_udf.sql';
 EXECUTE IMMEDIATE FROM 'src/procs/encrypt.sql';
 EXECUTE IMMEDIATE FROM 'src/procs/decrypt.sql';
 EXECUTE IMMEDIATE FROM 'src/procs/fetch_license.sql';
+EXECUTE IMMEDIATE FROM 'src/procs/purge_outputs.sql';
 
 
 -- =============================================================================

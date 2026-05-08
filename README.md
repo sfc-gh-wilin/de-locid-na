@@ -134,6 +134,7 @@ APP_SCHEMA.register_single_callback(...)    -- Callback proc for input table ref
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure (uses EAI for stats reporting)
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure (uses EAI for stats reporting)
 APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
+APP_SCHEMA.LOCID_PURGE_OUTPUTS(INTEGER)   -- Drop output tables older than output_retention_days (default: 90)
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
@@ -646,6 +647,71 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 **Purpose:** One-time post-install onboarding. Guides the customer from a fresh install to a fully connected and verified app in ~5 minutes.
 
 See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the full 8-screen flow (Welcome → License Key → Privileges → App Objects → Select API Key → Done). The wizard is re-accessible from the Configuration view if credentials need to be updated.
+
+---
+
+## Managing Output Tables
+
+Each Encrypt and Decrypt job creates a new permanent table in `APP_SCHEMA`:
+
+```
+LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS
+LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS
+```
+
+Over time, frequent job runs can produce many output tables. The app provides a built-in purge procedure to help consumers manage this.
+
+### Role Required
+
+All output table management requires the **`APP_ADMIN`** application role:
+
+```sql
+GRANT APPLICATION ROLE <app_name>.APP_ADMIN TO ROLE <your_role>;
+```
+
+### Listing Output Tables
+
+```sql
+SHOW TABLES LIKE 'LOCID_%_OUTPUT_%' IN SCHEMA <app_name>.APP_SCHEMA;
+```
+
+### Automatic Purge by Retention
+
+Call `LOCID_PURGE_OUTPUTS` to drop output tables older than a retention threshold:
+
+```sql
+-- Use the configured retention (default: 90 days, stored in APP_CONFIG key 'output_retention_days')
+CALL <app_name>.APP_SCHEMA.LOCID_PURGE_OUTPUTS(NULL);
+
+-- Or specify a custom retention (e.g., drop tables older than 30 days)
+CALL <app_name>.APP_SCHEMA.LOCID_PURGE_OUTPUTS(30);
+```
+
+Returns a summary:
+
+```json
+{
+  "tables_dropped": ["LOCID_ENCRYPT_OUTPUT_20260401_120000", ...],
+  "count": 5,
+  "retention_days": 30,
+  "cutoff_date": "2026-04-08 13:37:00"
+}
+```
+
+### Configuring Default Retention
+
+The default retention period is stored in `APP_CONFIG`:
+
+```sql
+-- View current setting
+SELECT config_value FROM <app_name>.APP_SCHEMA.APP_CONFIG
+WHERE config_key = 'output_retention_days';
+
+-- Update (e.g., keep output tables for 60 days)
+UPDATE <app_name>.APP_SCHEMA.APP_CONFIG
+SET config_value = '60'
+WHERE config_key = 'output_retention_days';
+```
 
 ---
 
