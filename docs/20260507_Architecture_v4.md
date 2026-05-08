@@ -789,6 +789,44 @@ The **provider** bears all auto-fulfillment costs. Consumers pay nothing extra b
 
 ## Performance Considerations
 
+### Provider Table Requirements
+
+The stored procedures depend on specific column types and clustering keys on the provider tables. If these are missing, jobs will either fail silently (IPv6 returns 0 matches) or run indefinitely (full table scans).
+
+**Column type requirement — `LOCID_BUILDS`:**
+
+| Column | Required Type | Symptom if VARIANT |
+|--------|--------------|-------------------|
+| `START_IP_INT_HEX` | `VARCHAR` | IPv6 matching returns 0 rows (SUBSTR on VARIANT → NULL) |
+| `END_IP_INT_HEX` | `VARCHAR` | Same — the hex-prefix range join fails silently |
+
+Fix:
+
+```sql
+ALTER TABLE LOCID.STAGING.LOCID_BUILDS ALTER COLUMN START_IP_INT_HEX SET DATA TYPE VARCHAR;
+ALTER TABLE LOCID.STAGING.LOCID_BUILDS ALTER COLUMN END_IP_INT_HEX SET DATA TYPE VARCHAR;
+```
+
+**Clustering key requirements:**
+
+| Table | Clustering Key | Why |
+|-------|---------------|-----|
+| `LOCID_BUILDS` | `(build_dt)` | Date-range filter via `LOCID_BUILD_DATES`; enables micro-partition pruning |
+| `LOCID_BUILDS_IPV4_EXPLODED` | `(ip_address, build_dt)` | IPv4 equi-join predicate; without this, full scan on millions of rows |
+| `LOCID_BUILD_DATES` | `(build_dt)` | Small table; good practice for partition alignment |
+
+Fix:
+
+```sql
+ALTER TABLE LOCID.STAGING.LOCID_BUILDS CLUSTER BY (BUILD_DT);
+ALTER TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED CLUSTER BY (IP_ADDRESS, BUILD_DT);
+ALTER TABLE LOCID.STAGING.LOCID_BUILD_DATES CLUSTER BY (BUILD_DT);
+```
+
+> **Tuning script:** `db/locid/provider/03_tune_provider_tables.sql` applies all fixes in one run.
+
+### General Performance Notes
+
 - **Clustering** on `LOCID_BUILDS`: `(build_dt)` — aligns with the date-range filter on `LOCID_BUILD_DATES`.
 - **Clustering** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the IPv4 equi-join.
 - **Search Optimization Service** candidate on the IPv4 exploded table for equality predicate on `ip_address`.
