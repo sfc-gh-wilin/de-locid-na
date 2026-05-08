@@ -172,6 +172,8 @@ snow app run --version v1_0 --connection locid
 
 `snow app run` creates `LOCID_APP` if it does not exist, or upgrades it if it does.
 
+<https://app.snowflake.com/us-east-1/mrc41853/#/apps/application/LOCID_APP>
+
 > **Note:** During installation, Snowflake will prompt for approval of the External Access Integration (`LOCID_CENTRAL_EAI`) for outbound HTTPS to `central.locid.com`. Approve it.
 
 ---
