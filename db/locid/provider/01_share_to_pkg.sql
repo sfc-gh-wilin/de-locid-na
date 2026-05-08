@@ -2,15 +2,16 @@
 -- 01_share_to_pkg.sql
 -- LocID: Share provider data into the Native App Package
 --
--- Run order: AFTER snow app deploy has created LOCID_PKG.
---            Re-run whenever provider source tables are re-created.
+-- Run order: AFTER 03_tune_provider_tables.sql and snow app deploy.
+--            Re-run whenever optimized tables are refreshed.
 --
 -- Role: LOCID_APP_ADMIN — this role owns LOCID_PKG because snowflake.yml
 --       declares meta.role: LOCID_APP_ADMIN for the pkg entity.
 --
 -- What this does:
 --   1. Creates a LOCID_SHARE schema inside the Application Package.
---   2. Creates Secure Views wrapping the three provider source tables.
+--   2. Creates Secure Views wrapping the optimized provider tables
+--      (LOCID.STAGING_OPTIMIZED — correct types + clustering keys).
 --   3. Grants REFERENCE_USAGE on LOCID so the package can query at runtime.
 --   4. Grants SELECT on each view to the package share, making them visible
 --      to every installed app instance.
@@ -40,16 +41,16 @@ GRANT USAGE ON SCHEMA LOCID_SHARE
 
 
 -- ---------------------------------------------------------------------------
--- Step 2: Secure Views over provider source tables
+-- Step 2: Secure Views over optimized provider tables
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS
-    AS SELECT * FROM LOCID.STAGING.LOCID_BUILDS;
+    AS SELECT * FROM LOCID.STAGING_OPTIMIZED.LOCID_BUILDS;
 
 CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
-    AS SELECT * FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
+    AS SELECT * FROM LOCID.STAGING_OPTIMIZED.LOCID_BUILDS_IPV4_EXPLODED;
 
 CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILD_DATES
-    AS SELECT * FROM LOCID.STAGING.LOCID_BUILD_DATES;
+    AS SELECT * FROM LOCID.STAGING_OPTIMIZED.LOCID_BUILD_DATES;
 
 
 -- ---------------------------------------------------------------------------

@@ -1,70 +1,124 @@
 -- =============================================================================
 -- 03_tune_provider_tables.sql
--- LocID: Tune provider tables for Native App performance
+-- LocID: Create optimized provider tables for Native App performance
 --
 -- Run order: BEFORE 01_share_to_pkg.sql (first deploy) or any time after
---            provider data is reloaded.
+--            LocID reloads data into LOCID.STAGING.
 --
--- Requires: ACCOUNTADMIN or a role with ALTER TABLE on LOCID.STAGING.
+-- Requires: ACCOUNTADMIN (or a role with CREATE SCHEMA + CREATE TABLE on LOCID).
 --
--- Problems this fixes:
---   1. START_IP_INT_HEX / END_IP_INT_HEX stored as VARIANT — the encrypt
---      procedure uses SUBSTR() on these columns for IPv6 prefix matching.
---      SUBSTR(VARIANT, ...) returns NULL → IPv6 matching fails silently.
---      Fix: ALTER COLUMN to VARCHAR.
+-- Strategy:
+--   Instead of altering LocID's source tables (which their pipelines own),
+--   we create a separate LOCID.STAGING_OPTIMIZED schema with derived tables
+--   that have correct column types and clustering keys.
 --
---   2. No clustering keys — without clustering, Snowflake performs full table
---      scans on tables with hundreds of millions of rows. The procedure's
---      query plan depends on micro-partition pruning via clustering.
---      Fix: Add clustering keys matching the procedure's access patterns.
+-- Problems this solves:
+--   1. START_IP_INT_HEX / END_IP_INT_HEX stored as VARIANT in LOCID.STAGING —
+--      the encrypt procedure uses SUBSTR() which requires VARCHAR.
+--      Fix: Cast to VARCHAR in the CTAS.
 --
--- Note: ALTER TABLE ... ALTER COLUMN ... SET DATA TYPE is a metadata-only
--- operation for VARIANT → VARCHAR when the underlying data is already string.
--- ALTER TABLE ... CLUSTER BY triggers a background reclustering process
--- (automatic clustering must be enabled on the account).
+--   2. No clustering keys on source tables — without clustering, Snowflake
+--      performs full table scans on hundreds of millions of rows.
+--      Fix: CLUSTER BY on the new tables matching the procedure's access patterns.
+--
+-- Re-run this script whenever LocID reloads LOCID.STAGING to pick up fresh data.
+-- All statements are idempotent (CREATE OR REPLACE).
 -- =============================================================================
 
 USE ROLE ACCOUNTADMIN;
 
 
 -- =============================================================================
--- 1. Fix column types: VARIANT → VARCHAR
---    SUBSTR() on VARIANT returns NULL; the IPv6 prefix matching requires VARCHAR.
+-- 1. Create the optimized schema
 -- =============================================================================
 
-ALTER TABLE LOCID.STAGING.LOCID_BUILDS
-    ALTER COLUMN START_IP_INT_HEX SET DATA TYPE VARCHAR;
-
-ALTER TABLE LOCID.STAGING.LOCID_BUILDS
-    ALTER COLUMN END_IP_INT_HEX SET DATA TYPE VARCHAR;
+CREATE SCHEMA IF NOT EXISTS LOCID.STAGING_OPTIMIZED
+    COMMENT = 'Optimized provider tables for Native App. Derived from LOCID.STAGING with correct types and clustering.';
 
 
 -- =============================================================================
--- 2. Add clustering keys
---    These align with the stored procedure's access patterns:
---      - LOCID_BUILDS: filtered by build_dt (via LOCID_BUILD_DATES range join)
---      - LOCID_BUILDS_IPV4_EXPLODED: equi-joined on ip_address, filtered by build_dt
---      - LOCID_BUILD_DATES: small table, but clustering on build_dt is good practice
+-- 2. LOCID_BUILDS — cast VARIANT hex columns to VARCHAR + cluster by build_dt
 -- =============================================================================
 
-ALTER TABLE LOCID.STAGING.LOCID_BUILDS
-    CLUSTER BY (BUILD_DT);
-
-ALTER TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED
-    CLUSTER BY (IP_ADDRESS, BUILD_DT);
-
-ALTER TABLE LOCID.STAGING.LOCID_BUILD_DATES
-    CLUSTER BY (BUILD_DT);
+CREATE OR REPLACE TABLE LOCID.STAGING_OPTIMIZED.LOCID_BUILDS
+    CLUSTER BY (BUILD_DT)
+AS
+SELECT
+    BUILD_DT,
+    START_IP,
+    END_IP,
+    START_IP_INT_HEX::VARCHAR   AS START_IP_INT_HEX,
+    END_IP_INT_HEX::VARCHAR     AS END_IP_INT_HEX,
+    TIER,
+    LOCID_COUNTRY,
+    LOCID_COUNTRY_CODE,
+    LOCID_REGION,
+    LOCID_REGION_CODE,
+    LOCID_CITY,
+    LOCID_CITY_CODE,
+    LOCID_POSTAL_CODE,
+    ENCRYPTED_LOCID,
+    LOCID_HORIZONTAL_ACCURACY
+FROM LOCID.STAGING.LOCID_BUILDS;
 
 
 -- =============================================================================
--- 3. Verify
+-- 3. LOCID_BUILDS_IPV4_EXPLODED — cluster by (ip_address, build_dt)
 -- =============================================================================
 
--- Confirm column types
-DESCRIBE TABLE LOCID.STAGING.LOCID_BUILDS;
--- Expected: START_IP_INT_HEX = VARCHAR, END_IP_INT_HEX = VARCHAR
+CREATE OR REPLACE TABLE LOCID.STAGING_OPTIMIZED.LOCID_BUILDS_IPV4_EXPLODED
+    CLUSTER BY (IP_ADDRESS, BUILD_DT)
+AS
+SELECT
+    BUILD_DT,
+    IP_ADDRESS,
+    START_IP,
+    END_IP
+FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
+
+
+-- =============================================================================
+-- 4. LOCID_BUILD_DATES — small table, cluster by build_dt for consistency
+-- =============================================================================
+
+CREATE OR REPLACE TABLE LOCID.STAGING_OPTIMIZED.LOCID_BUILD_DATES
+    CLUSTER BY (BUILD_DT)
+AS
+SELECT
+    BUILD_DT,
+    START_DT,
+    END_DT
+FROM LOCID.STAGING.LOCID_BUILD_DATES;
+
+
+-- =============================================================================
+-- 5. Grant access to LOCID_APP_ADMIN (needed for Secure Views in the package)
+-- =============================================================================
+
+GRANT USAGE ON SCHEMA LOCID.STAGING_OPTIMIZED TO ROLE LOCID_APP_ADMIN;
+GRANT SELECT ON ALL TABLES IN SCHEMA LOCID.STAGING_OPTIMIZED TO ROLE LOCID_APP_ADMIN;
+
+
+-- =============================================================================
+-- 6. Verify
+-- =============================================================================
+
+-- Confirm column types (START_IP_INT_HEX should be VARCHAR, not VARIANT)
+DESCRIBE TABLE LOCID.STAGING_OPTIMIZED.LOCID_BUILDS;
 
 -- Confirm clustering
-SHOW TABLES LIKE 'LOCID_BUILDS%' IN SCHEMA LOCID.STAGING;
--- Expected: cluster_by columns populated
+SHOW TABLES IN SCHEMA LOCID.STAGING_OPTIMIZED;
+
+-- Confirm row counts match source
+SELECT 'LOCID_BUILDS' AS tbl,
+       (SELECT COUNT(*) FROM LOCID.STAGING.LOCID_BUILDS) AS src,
+       (SELECT COUNT(*) FROM LOCID.STAGING_OPTIMIZED.LOCID_BUILDS) AS opt
+UNION ALL
+SELECT 'LOCID_BUILDS_IPV4_EXPLODED',
+       (SELECT COUNT(*) FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED),
+       (SELECT COUNT(*) FROM LOCID.STAGING_OPTIMIZED.LOCID_BUILDS_IPV4_EXPLODED)
+UNION ALL
+SELECT 'LOCID_BUILD_DATES',
+       (SELECT COUNT(*) FROM LOCID.STAGING.LOCID_BUILD_DATES),
+       (SELECT COUNT(*) FROM LOCID.STAGING_OPTIMIZED.LOCID_BUILD_DATES);
+

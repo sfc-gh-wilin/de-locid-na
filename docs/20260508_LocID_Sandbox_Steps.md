@@ -137,24 +137,25 @@ snow stage list-files @LOCID_PKG.APP_SCHEMA.APP_STAGE \
     --connection locid --role LOCID_APP_ADMIN
 ```
 
-### 3.3 Tune provider tables (one-time)
+### 3.3 Create optimized provider tables (one-time)
 
-The provider tables may have `START_IP_INT_HEX` / `END_IP_INT_HEX` stored as VARIANT (instead of VARCHAR) and may lack clustering keys. Without these fixes, the encrypt procedure runs indefinitely or returns 0 IPv6 matches.
+LocID's source tables in `LOCID.STAGING` have `START_IP_INT_HEX` / `END_IP_INT_HEX` as VARIANT and lack clustering keys. Rather than modifying LocID's tables, we create optimized copies in `LOCID.STAGING_OPTIMIZED` with correct types and clustering.
 
 ```bash
 cd <repository-root>
 snow sql --connection locid -f "db/locid/provider/03_tune_provider_tables.sql"
 ```
 
-This script:
-- Converts `START_IP_INT_HEX` / `END_IP_INT_HEX` from VARIANT to VARCHAR
-- Adds clustering keys: `LOCID_BUILDS(build_dt)`, `LOCID_BUILDS_IPV4_EXPLODED(ip_address, build_dt)`
+This creates:
+- `LOCID.STAGING_OPTIMIZED.LOCID_BUILDS` — VARIANT→VARCHAR cast + clustered by `(build_dt)`
+- `LOCID.STAGING_OPTIMIZED.LOCID_BUILDS_IPV4_EXPLODED` — clustered by `(ip_address, build_dt)`
+- `LOCID.STAGING_OPTIMIZED.LOCID_BUILD_DATES` — clustered by `(build_dt)`
 
-> **Note:** Clustering is a background process. After running, Snowflake's Automatic Clustering service rearranges micro-partitions over time. Initial queries may still be slow until reclustering completes.
+> **Re-run when needed:** Whenever LocID reloads data into `LOCID.STAGING`, re-run this script to refresh the optimized tables.
 
 ### 3.4 Grant source table access to LOCID_APP_ADMIN
 
-The Secure Views in the app package reference `LOCID.STAGING.*` tables. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on these tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
+The Secure Views in the app package reference `LOCID.STAGING_OPTIMIZED.*` tables. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on those tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
 
 ```bash
 cd <repository-root>
