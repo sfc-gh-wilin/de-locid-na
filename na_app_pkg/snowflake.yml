@@ -16,7 +16,7 @@ definition_version: 2
 entities:
   pkg:
     type: application package
-    identifier: LOCID_DEV_PKG
+    identifier: LOCID_PKG
     stage: APP_SCHEMA.APP_STAGE
     manifest: manifest.yml
     meta:
@@ -50,7 +50,7 @@ entities:
 
   app:
     type: application
-    identifier: LOCID_DEV_APP
+    identifier: LOCID_APP
     from:
       target: pkg
     meta:

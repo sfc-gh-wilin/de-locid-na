@@ -681,10 +681,10 @@ After the initial deployment, subsequent updates follow this workflow:
 ```bash
 # 1. Deploy updated artifacts to the app package stage
 cd na_app_pkg
-snow app deploy --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
+snow app deploy --connection wl_sandbox_dcr
 
 # 2. Create a new patch on the existing version (auto-increments patch number)
-snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr --role LOCID_APP_ADMIN
+snow app version create v1_0 --force --skip-git-check --connection wl_sandbox_dcr
 ```
 
 ```sql
