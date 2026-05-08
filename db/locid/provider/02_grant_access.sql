@@ -1,8 +1,8 @@
 -- =============================================================================
--- 02_grant_source_access.sql
+-- 02_grant_access.sql
 -- LocID: Grant LOCID_APP_ADMIN read access to provider tables
 --
--- Run order: AFTER 03_tune_provider_tables.sql, BEFORE 01_share_to_pkg.sql
+-- Run order: AFTER 01_optimize_tables.sql, BEFORE 03_share_to_pkg.sql
 --            (or re-run if views fail with "Error in secure object").
 --
 -- Requires: ACCOUNTADMIN (one-time setup).

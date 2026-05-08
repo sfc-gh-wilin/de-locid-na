@@ -810,7 +810,7 @@ The stored procedures depend on specific column types and clustering keys on the
 | `LOCID_BUILDS_IPV4_EXPLODED` | `(ip_address, build_dt)` | IPv4 equi-join predicate; without this, full scan on millions of rows |
 | `LOCID_BUILD_DATES` | `(build_dt)` | Small table; good practice for partition alignment |
 
-> **Tuning script:** `db/locid/provider/03_tune_provider_tables.sql` creates `LOCID.STAGING_OPTIMIZED` with CTAS + clustering. Re-run whenever LocID reloads `LOCID.STAGING`.
+> **Tuning script:** `db/locid/provider/01_optimize_tables.sql` creates `LOCID.STAGING_OPTIMIZED` with CTAS + clustering. Re-run whenever LocID reloads `LOCID.STAGING`.
 
 ### General Performance Notes
 

@@ -1,8 +1,8 @@
 -- =============================================================================
--- 03_tune_provider_tables.sql
+-- 01_optimize_tables.sql
 -- LocID: Create optimized provider tables for Native App performance
 --
--- Run order: BEFORE 01_share_to_pkg.sql (first deploy) or any time after
+-- Run order: FIRST (before 02 and 03). Re-run whenever
 --            LocID reloads data into LOCID.STAGING.
 --
 -- Requires: ACCOUNTADMIN (or a role with CREATE SCHEMA + CREATE TABLE on LOCID).

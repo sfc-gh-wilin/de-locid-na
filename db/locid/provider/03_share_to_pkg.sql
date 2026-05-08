@@ -1,8 +1,8 @@
 -- =============================================================================
--- 01_share_to_pkg.sql
+-- 03_share_to_pkg.sql
 -- LocID: Share provider data into the Native App Package
 --
--- Run order: AFTER 03_tune_provider_tables.sql and snow app deploy.
+-- Run order: AFTER 01_optimize_tables.sql and 02_grant_access.sql, and snow app deploy.
 --            Re-run whenever optimized tables are refreshed.
 --
 -- Role: LOCID_APP_ADMIN — this role owns LOCID_PKG because snowflake.yml

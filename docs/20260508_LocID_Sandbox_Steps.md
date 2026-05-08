@@ -28,9 +28,9 @@ This guide walks through deploying the LocID Native App on LocID's own Snowflake
 |-------|-------|
 | Key access setup | (manual — see below) |
 | Role setup | `db/locid/provider/00_roles.sql` |
-| Provider table tuning | `db/locid/provider/03_tune_provider_tables.sql` |
-| Source table access | `db/locid/provider/02_grant_source_access.sql` |
-| Provider data sharing | `db/locid/provider/01_share_to_pkg.sql` |
+| Optimize provider tables | `db/locid/provider/01_optimize_tables.sql` |
+| Grant access | `db/locid/provider/02_grant_access.sql` |
+| Share to app package | `db/locid/provider/03_share_to_pkg.sql` |
 
 ---
 
@@ -143,7 +143,7 @@ LocID's source tables in `LOCID.STAGING` have `START_IP_INT_HEX` / `END_IP_INT_H
 
 ```bash
 cd <repository-root>
-snow sql --connection locid -f "db/locid/provider/03_tune_provider_tables.sql"
+snow sql --connection locid -f "db/locid/provider/01_optimize_tables.sql"
 ```
 
 This creates:
@@ -153,13 +153,13 @@ This creates:
 
 > **Re-run when needed:** Whenever LocID reloads data into `LOCID.STAGING`, re-run this script to refresh the optimized tables.
 
-### 3.4 Grant source table access to LOCID_APP_ADMIN
+### 3.4 Grant access
 
 The Secure Views in the app package reference `LOCID.STAGING_OPTIMIZED.*` tables. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on those tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
 
 ```bash
 cd <repository-root>
-snow sql --connection locid -f "db/locid/provider/02_grant_source_access.sql"
+snow sql --connection locid -f "db/locid/provider/02_grant_access.sql"
 ```
 
 This also grants `LOCID_APP_INSTALLER` read access to the POC test input tables for reference binding.
@@ -170,7 +170,7 @@ Once `LOCID_PKG` exists, run the provider data sharing script. This creates `LOC
 
 ```bash
 cd <repository-root>
-snow sql --connection locid -f "db/locid/provider/01_share_to_pkg.sql"
+snow sql --connection locid -f "db/locid/provider/03_share_to_pkg.sql"
 ```
 
 Verify:
