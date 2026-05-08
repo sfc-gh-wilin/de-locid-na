@@ -28,6 +28,7 @@ This guide walks through deploying the LocID Native App on LocID's own Snowflake
 |-------|-------|
 | Key access setup | (manual — see below) |
 | Role setup | `db/locid/provider/00_roles.sql` |
+| Source table access | `db/locid/provider/02_grant_source_access.sql` |
 | Provider data sharing | `db/locid/provider/01_share_to_pkg.sql` |
 
 ---
@@ -135,7 +136,18 @@ snow stage list-files @LOCID_PKG.APP_SCHEMA.APP_STAGE \
     --connection locid --role LOCID_APP_ADMIN
 ```
 
-### 3.3 Share provider data into app package
+### 3.3 Grant source table access to LOCID_APP_ADMIN
+
+The Secure Views in the app package reference `LOCID.STAGING.*` tables. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on these tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
+
+```bash
+cd <repository-root>
+snow sql --connection locid -f "db/locid/provider/02_grant_source_access.sql"
+```
+
+This also grants `LOCID_APP_INSTALLER` read access to the POC test input tables for reference binding.
+
+### 3.4 Share provider data into app package
 
 Once `LOCID_PKG` exists, run the provider data sharing script. This creates `LOCID_SHARE` inside the app package and exposes the three provider tables as Secure Views.
 
@@ -154,7 +166,7 @@ snow sql --connection locid --role LOCID_APP_ADMIN \
 
 > **Re-run when needed:** If the provider source tables are recreated, re-run this file so the Secure Views and grants stay in sync.
 
-### 3.4 Create app version
+### 3.5 Create app version
 
 ```bash
 cd na_app_pkg
@@ -163,7 +175,7 @@ snow app version create v1_0 --force --skip-git-check --connection locid
 
 `--force` overwrites any existing `v1_0` version. `--skip-git-check` suppresses the uncommitted-files warning.
 
-### 3.5 Install the application
+### 3.6 Install the application
 
 ```bash
 cd na_app_pkg
