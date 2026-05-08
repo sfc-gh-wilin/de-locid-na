@@ -108,8 +108,8 @@ APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR) -- Python stored procedure — wr
 APP_SCHEMA.register_single_callback(...)    -- Callback proc for input table references
 APP_SCHEMA.LOCID_ENCRYPT(...)               -- Encrypt stored procedure (uses EAI for stats reporting)
 APP_SCHEMA.LOCID_DECRYPT(...)               -- Decrypt stored procedure (uses EAI for stats reporting)
-APP_SCHEMA.LOCID_PURGE_LOGS()              -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
-APP_SCHEMA.LOCID_PURGE_OUTPUTS(INTEGER)   -- Drop output tables older than output_retention_days (default: 90)
+APP_SCHEMA.LOCID_PURGE_LOGS()               -- Purge JOB_LOG / APP_LOGS rows older than log_retention_days
+APP_SCHEMA.LOCID_PURGE_OUTPUTS(INTEGER)     -- Drop output tables older than output_retention_days (default: 90)
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
@@ -526,7 +526,7 @@ Read-only for customers. Updated by LocID via app version releases when new fiel
 
   ```sql
   -- Drop output tables older than the configured retention (default: 90 days)
-  CALL APP_SCHEMA.LOCID_PURGE_OUTPUTS(NULL);
+  CALL APP_SCHEMA.LOCID_PURGE_OUTPUTS();
 
   -- Drop output tables older than a specific number of days
   CALL APP_SCHEMA.LOCID_PURGE_OUTPUTS(30);
@@ -617,6 +617,35 @@ GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
 ```
 
 After installation, the app's `setup.sql` creates all internal objects (schemas, tables, UDFs, stored procedures) within the app container. One additional post-install step is required: the consumer must approve the `LOCID_CENTRAL_EAI_SPEC` app specification so the EAI can make outbound HTTPS calls. The Setup Wizard (Screen E) provides the exact SQL.
+
+### Application Roles (APP_ADMIN / APP_VIEWER)
+
+The app defines two **Application Roles** inside the installed app. These are *not* account-level roles — they are internal permission boundaries within the app that consumers grant to their own account roles.
+
+**Automatic grant on install:** When you install the app via Snowsight, Snowflake automatically grants `APP_ADMIN` to the role that performed the installation (e.g., `LOCID_APP_INSTALLER`). No manual grant is needed.
+
+**Privilege comparison:**
+
+| Capability | APP_ADMIN | APP_VIEWER |
+|-----------|-----------|------------|
+| Open Streamlit app | ✓ | ✓ |
+| View job history (`JOB_LOG`) | ✓ | ✓ |
+| View app logs (`APP_LOGS`) | ✓ | ✓ |
+| Read app configuration (`APP_CONFIG`) | ✓ | ✓ |
+| Query output tables | ✓ | ✓ |
+| Run Encrypt / Decrypt jobs | ✓ | — |
+| Manage configuration (update `APP_CONFIG`) | ✓ | — |
+| Purge logs / output tables | ✓ | — |
+| Fetch license / set API key | ✓ | — |
+
+**When to use APP_VIEWER:** Use `APP_VIEWER` when you want analysts or downstream consumers to read job results and history without being able to trigger new jobs (which consume API quota and warehouse credits).
+
+```sql
+-- Grant APP_VIEWER to a read-only analyst role
+GRANT APPLICATION ROLE <app_name>.APP_VIEWER TO ROLE DATA_ANALYST;
+```
+
+`APP_VIEWER` is optional — if all users who access the app should be able to run jobs, `APP_ADMIN` (auto-granted to the installer role) is sufficient.
 
 ### Notes
 
