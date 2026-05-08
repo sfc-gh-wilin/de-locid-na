@@ -14,6 +14,7 @@ All APP_CONFIG reads are batched into a single query per page load.
 """
 
 import json
+import time
 
 import pandas as pd
 import streamlit as st
@@ -109,6 +110,7 @@ with colB:
                 logger.info(session, "configuration.refresh",
                             "Secrets and entitlements refreshed")
                 st.success("Secrets and entitlements refreshed.", icon="✅")
+                time.sleep(1)
                 st.rerun()
             except Exception as e:
                 logger.error(session, "configuration.refresh",
@@ -215,6 +217,7 @@ if save_clicked:
         logger.info(session, "configuration.log_retention",
                     f"log_retention_days updated to {new_days}")
         st.success(f"Retention period saved: {new_days} day(s).", icon="✅")
+        time.sleep(1)
         st.rerun()
     except Exception as e:
         logger.error(session, "configuration.log_retention", "Save failed", exc=e)
@@ -272,6 +275,7 @@ if st.button(":material/save: Save Log Level", key="save_log_level"):
         logger.info(session, "configuration.log_level",
                     f"log_level updated to {new_level}")
         st.success(f"Log level saved: {new_level}", icon="✅")
+        time.sleep(1)
         st.rerun()
     except Exception as e:
         logger.error(session, "configuration.log_level", "Save failed", exc=e)
