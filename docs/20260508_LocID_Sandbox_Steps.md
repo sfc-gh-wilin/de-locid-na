@@ -137,25 +137,22 @@ snow stage list-files @LOCID_PKG.APP_SCHEMA.APP_STAGE \
     --connection locid --role LOCID_APP_ADMIN
 ```
 
-### 3.3 Create optimized provider tables (one-time)
+### 3.3 Optimize provider tables (one-time)
 
-LocID's source tables in `LOCID.STAGING` have `START_IP_INT_HEX` / `END_IP_INT_HEX` as VARIANT and lack clustering keys. Rather than modifying LocID's tables, we create optimized copies in `LOCID.STAGING_OPTIMIZED` with correct types and clustering.
+LocID's source tables in `LOCID.STAGING` have `START_IP_INT_HEX` / `END_IP_INT_HEX` as VARIANT and lack clustering keys. This script:
+- Creates `LOCID.STAGING_OPTIMIZED` views with inline `VARIANT→VARCHAR` casts (for debugging)
+- Adds clustering keys to the source tables directly (needed for query performance at 58B+ rows)
 
 ```bash
 cd <repository-root>
 snow sql --connection locid -f "db/locid/provider/01_optimize_tables.sql"
 ```
 
-This creates:
-- `LOCID.STAGING_OPTIMIZED.LOCID_BUILDS` — VARIANT→VARCHAR cast + clustered by `(build_dt)`
-- `LOCID.STAGING_OPTIMIZED.LOCID_BUILDS_IPV4_EXPLODED` — clustered by `(ip_address, build_dt)`
-- `LOCID.STAGING_OPTIMIZED.LOCID_BUILD_DATES` — clustered by `(build_dt)`
-
-> **Re-run when needed:** Whenever LocID reloads data into `LOCID.STAGING`, re-run this script to refresh the optimized tables.
+> **Clustering note:** Initial reclustering on tables with billions of rows may take hours to days via Snowflake's Automatic Clustering service. Queries will progressively improve as reclustering progresses.
 
 ### 3.4 Grant access
 
-The Secure Views in the app package reference `LOCID.STAGING_OPTIMIZED.*` tables. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on those tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
+The Secure Views in the app package reference `LOCID.STAGING` tables directly. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on those tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
 
 ```bash
 cd <repository-root>

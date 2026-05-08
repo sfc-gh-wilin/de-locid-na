@@ -793,7 +793,9 @@ The **provider** bears all auto-fulfillment costs. Consumers pay nothing extra b
 
 The stored procedures depend on specific column types and clustering keys on the provider tables. If these are missing, jobs will either fail silently (IPv6 returns 0 matches) or run indefinitely (full table scans).
 
-**Strategy:** Rather than modifying LocID's source tables (which their pipelines own), we create a `LOCID.STAGING_OPTIMIZED` schema with derived tables that have correct types and clustering. The Secure Views in the app package point at the optimized tables.
+**Strategy:** At 58B+ and 253B+ rows, copying tables via CTAS is impractical. Instead:
+1. Secure Views in the app package cast `VARIANT→VARCHAR` inline at query time (zero storage cost)
+2. Clustering keys are added to the source tables directly for micro-partition pruning
 
 **Column type requirement — `LOCID_BUILDS`:**
 
@@ -810,7 +812,7 @@ The stored procedures depend on specific column types and clustering keys on the
 | `LOCID_BUILDS_IPV4_EXPLODED` | `(ip_address, build_dt)` | IPv4 equi-join predicate; without this, full scan on millions of rows |
 | `LOCID_BUILD_DATES` | `(build_dt)` | Small table; good practice for partition alignment |
 
-> **Tuning script:** `db/locid/provider/01_optimize_tables.sql` creates `LOCID.STAGING_OPTIMIZED` with CTAS + clustering. Re-run whenever LocID reloads `LOCID.STAGING`.
+> **Setup script:** `db/locid/provider/01_optimize_tables.sql` creates views in `LOCID.STAGING_OPTIMIZED` (for debugging) and adds clustering to the source tables. The Secure Views in `03_share_to_pkg.sql` handle the `VARIANT→VARCHAR` cast inline.
 
 ### General Performance Notes
 

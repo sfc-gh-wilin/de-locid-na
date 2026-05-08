@@ -9,29 +9,26 @@
 --
 -- Why this is needed:
 --   The Secure Views in LOCID_PKG.LOCID_SHARE reference tables in
---   LOCID.STAGING_OPTIMIZED. The role that owns the Application Package
+--   LOCID.STAGING directly. The role that owns the Application Package
 --   (LOCID_APP_ADMIN) must have SELECT on those tables for the views
 --   to resolve at runtime. Without this, the installed app gets:
 --     "SQL compilation error: Failure during expansion of view ... Error in secure object"
---
--- Note: This does NOT modify the LOCID database structure — it only
---       grants read privileges to the LOCID_APP_ADMIN role.
 -- =============================================================================
 
 USE ROLE ACCOUNTADMIN;
 
 -- Database and schema access
 GRANT USAGE ON DATABASE LOCID TO ROLE LOCID_APP_ADMIN;
+GRANT USAGE ON SCHEMA LOCID.STAGING TO ROLE LOCID_APP_ADMIN;
 GRANT USAGE ON SCHEMA LOCID.STAGING_OPTIMIZED TO ROLE LOCID_APP_ADMIN;
 
--- SELECT on the optimized provider tables used by the app
-GRANT SELECT ON ALL TABLES IN SCHEMA LOCID.STAGING_OPTIMIZED TO ROLE LOCID_APP_ADMIN;
-
--- Also grant access to LOCID.STAGING for the tuning script (reads source data)
-GRANT USAGE ON SCHEMA LOCID.STAGING TO ROLE LOCID_APP_ADMIN;
+-- SELECT on the provider source tables (used by Secure Views in the package)
 GRANT SELECT ON TABLE LOCID.STAGING.LOCID_BUILDS TO ROLE LOCID_APP_ADMIN;
 GRANT SELECT ON TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED TO ROLE LOCID_APP_ADMIN;
 GRANT SELECT ON TABLE LOCID.STAGING.LOCID_BUILD_DATES TO ROLE LOCID_APP_ADMIN;
+
+-- SELECT on the optimized views (for direct querying/troubleshooting)
+GRANT SELECT ON ALL VIEWS IN SCHEMA LOCID.STAGING_OPTIMIZED TO ROLE LOCID_APP_ADMIN;
 
 -- Grant access to the POC schema for test input tables
 GRANT USAGE ON SCHEMA LOCID.POC TO ROLE LOCID_APP_ADMIN;
