@@ -74,14 +74,14 @@ with tab_sql:
     st.markdown("Then bind each reference by calling the app's registration procedure:")
     st.code(
         f"-- Bind Encrypt input table:\n"
-        f"CALL {_app_name}.APP_SCHEMA.register_single_callback(\n"
+        f"CALL {_app_name}.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
         f"    'ENCRYPT_INPUT_TABLE', 'ADD',\n"
-        f"    '<your_db>.<your_schema>.<encrypt_input_table>'\n"
+        f"    SYSTEM$REFERENCE('TABLE', '<your_db>.<your_schema>.<encrypt_input_table>', 'PERSISTENT', 'SELECT')\n"
         f");\n\n"
         f"-- Bind Decrypt input table:\n"
-        f"CALL {_app_name}.APP_SCHEMA.register_single_callback(\n"
+        f"CALL {_app_name}.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
         f"    'DECRYPT_INPUT_TABLE', 'ADD',\n"
-        f"    '<your_db>.<your_schema>.<decrypt_input_table>'\n"
+        f"    SYSTEM$REFERENCE('TABLE', '<your_db>.<your_schema>.<decrypt_input_table>', 'PERSISTENT', 'SELECT')\n"
         f");",
         language="sql",
     )
