@@ -10,8 +10,8 @@
 --
 -- What this does:
 --   1. Creates a LOCID_SHARE schema inside the Application Package.
---   2. Creates Secure Views wrapping the optimized provider tables
---      (LOCID.STAGING_OPTIMIZED — correct types + clustering keys).
+--   2. Creates Secure Views over LOCID.STAGING with inline VARIANT→VARCHAR
+--      casts for the hex columns.
 --   3. Grants REFERENCE_USAGE on LOCID so the package can query at runtime.
 --   4. Grants SELECT on each view to the package share, making them visible
 --      to every installed app instance.

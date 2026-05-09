@@ -28,7 +28,7 @@ This guide walks through deploying the LocID Native App on LocID's own Snowflake
 |-------|-------|
 | Key access setup | (manual — see below) |
 | Role setup | `db/locid/provider/00_roles.sql` |
-| Optimize provider tables | `db/locid/provider/01_optimize_tables.sql` |
+| Add clustering keys | `db/locid/provider/01_optimize_tables.sql` |
 | Grant access | `db/locid/provider/02_grant_access.sql` |
 | Share to app package | `db/locid/provider/03_share_to_pkg.sql` |
 
@@ -137,18 +137,18 @@ snow stage list-files @LOCID_PKG.APP_SCHEMA.APP_STAGE \
     --connection locid --role LOCID_APP_ADMIN
 ```
 
-### 3.3 Optimize provider tables (one-time)
+### 3.3 Add clustering keys to provider tables (one-time)
 
-LocID's source tables in `LOCID.STAGING` have `START_IP_INT_HEX` / `END_IP_INT_HEX` as VARIANT and lack clustering keys. This script:
-- Creates `LOCID.STAGING_OPTIMIZED` views with inline `VARIANT→VARCHAR` casts (for debugging)
-- Adds clustering keys to the source tables directly (needed for query performance at 58B+ rows)
+LocID's source tables in `LOCID.STAGING` lack clustering keys. Without clustering, full table scans on 58B+ rows make the encrypt procedure run indefinitely.
 
 ```bash
 cd <repository-root>
 snow sql --connection locid -f "db/locid/provider/01_optimize_tables.sql"
 ```
 
-> **Clustering note:** Initial reclustering on tables with billions of rows may take hours to days via Snowflake's Automatic Clustering service. Queries will progressively improve as reclustering progresses.
+This adds clustering keys: `LOCID_BUILDS(build_dt)`, `LOCID_BUILDS_IPV4_EXPLODED(ip_address, build_dt)`.
+
+> **Note:** This is a metadata-only operation. Snowflake's Automatic Clustering reclusters in the background — queries improve progressively as it completes.
 
 ### 3.4 Grant access
 

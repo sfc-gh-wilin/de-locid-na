@@ -793,26 +793,11 @@ The **provider** bears all auto-fulfillment costs. Consumers pay nothing extra b
 
 The stored procedures depend on specific column types and clustering keys on the provider tables. If these are missing, jobs will either fail silently (IPv6 returns 0 matches) or run indefinitely (full table scans).
 
-**Strategy:** At 58B+ and 253B+ rows, copying tables via CTAS is impractical. Instead:
+**Strategy:** At 58B+ and 253B+ rows, copying tables is impractical. Instead:
 1. Secure Views in the app package cast `VARIANT→VARCHAR` inline at query time (zero storage cost)
-2. Clustering keys are added to the source tables directly for micro-partition pruning
+2. Clustering keys are added to the source tables for micro-partition pruning
 
-**Column type requirement — `LOCID_BUILDS`:**
-
-| Column | Required Type | Symptom if VARIANT |
-|--------|--------------|-------------------|
-| `START_IP_INT_HEX` | `VARCHAR` | IPv6 matching returns 0 rows (SUBSTR on VARIANT → NULL) |
-| `END_IP_INT_HEX` | `VARCHAR` | Same — the hex-prefix range join fails silently |
-
-**Clustering key requirements:**
-
-| Table | Clustering Key | Why |
-|-------|---------------|-----|
-| `LOCID_BUILDS` | `(build_dt)` | Date-range filter via `LOCID_BUILD_DATES`; enables micro-partition pruning |
-| `LOCID_BUILDS_IPV4_EXPLODED` | `(ip_address, build_dt)` | IPv4 equi-join predicate; without this, full scan on millions of rows |
-| `LOCID_BUILD_DATES` | `(build_dt)` | Small table; good practice for partition alignment |
-
-> **Setup script:** `db/locid/provider/01_optimize_tables.sql` creates views in `LOCID.STAGING_OPTIMIZED` (for debugging) and adds clustering to the source tables. The Secure Views in `03_share_to_pkg.sql` handle the `VARIANT→VARCHAR` cast inline.
+> **Setup script:** `db/locid/provider/01_optimize_tables.sql` adds clustering keys. The Secure Views in `03_share_to_pkg.sql` handle the `VARIANT→VARCHAR` cast inline.
 
 ### General Performance Notes
 
