@@ -793,13 +793,16 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 
 For production Encrypt/Decrypt jobs:
 
-- **< 10M rows** — Small or Medium standard warehouse
-- **10M – 100M rows** — Medium Snowpark-optimized warehouse recommended
-- **100M – 1B rows** — Large or X-Large Snowpark-optimized warehouse
+- **< 1M rows** — Medium Snowpark-optimized warehouse
+- **1M – 10M rows** — Medium or Large Snowpark-optimized warehouse
+- **10M – 100M rows** — Large Snowpark-optimized warehouse
+- **100M – 1B rows** — X-Large Snowpark-optimized warehouse
 - **> 1B rows** — X-Large or larger; consider partitioning input into batches
 
-> Snowpark-optimized warehouses allocate more memory per node for Python UDF execution,
-> reducing spill-to-disk and improving throughput for the vectorized batch handlers.
+> The IP matching phase (SQL joins against the LocID data lake) dominates runtime at all row
+> counts. Snowpark-optimized warehouses improve both Python UDF execution and join parallelism.
+> IPv6-dominant workloads run ~40% slower than IPv4-dominant due to multi-pass CIDR range
+> comparison vs the IPv4 exploded equi-join.
 
 ### What LocID Has Provided
 

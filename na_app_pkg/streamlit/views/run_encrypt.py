@@ -39,9 +39,9 @@ st.header(":material/lock: Run Encrypt")
 st.caption("Match IP + timestamp data against the LocID data lake.")
 st.info(
     "**Warehouse tip:** For best performance, use a Snowpark-optimized warehouse.  \n"
-    "**< 10M rows** → Small/Medium  |  "
-    "**10M–100M rows** → Medium Snowpark-optimized  |  "
-    "**100M+ rows** → Large+ Snowpark-optimized",
+    "**< 1M rows** → Medium Snowpark-optimized  |  "
+    "**1M–10M rows** → Medium/Large Snowpark-optimized  |  "
+    "**10M+ rows** → Large+ Snowpark-optimized",
     icon="💡",
 )
 st.divider()

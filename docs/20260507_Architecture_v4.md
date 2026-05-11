@@ -805,7 +805,7 @@ The stored procedures depend on specific column types and clustering keys on the
 - **Clustering** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the IPv4 equi-join.
 - **Search Optimization Service** candidate on the IPv4 exploded table for equality predicate on `ip_address`.
 - IPv6 temp tables: materialized as transient tables within the job transaction to avoid recompute.
-- Warehouse sizing recommendation: Medium or Large for large batch jobs given the multi-pass IPv6 matching.
+- Warehouse sizing recommendation: Medium Snowpark-optimized minimum; Large Snowpark-optimized for 1M+ rows. The IP matching phase dominates runtime — IPv6 workloads run ~40% slower than IPv4.
 
 ---
 
@@ -868,6 +868,15 @@ Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 
 > **Interpretation:** D (production WHL) is **5.7× faster** than A (Scala scalar, warm JVM) at 50M rows. All Python approaches (B, C, D) cluster in the 20–26s range — the `@vectorized` batch dispatch effectively eliminates the Python/SQL boundary overhead. D is slightly slower than C because it performs real SHA-1 UUID5 with object construction vs C's pure-C numpy polynomial hash.
 
 > **Note on JVM cold-start (historical):** The Scala path showed a 209s first-run penalty (JVM init + JAR load) before settling to ~113s steady-state. This concern is eliminated with the Python path — Python UDFs have no equivalent cold-start overhead.
+
+**Client account benchmark — MEDIUM Snowpark-optimized, 1M rows, fully clustered tables (2026-05-11)**
+
+| Test | Rows | Match (s) | UDF (s) | Write (s) | Total (s) | Notes |
+|------|------|:---------:|:-------:|:---------:|:---------:|-------|
+| IPv4-dominant | 1,000,000 | 777 | 29 | 0.4 | 808 | 100% match rate; T0: 95K, T1: 905K |
+| IPv6-dominant | 1,000,000 | 1,097 | 13 | 0.3 | 1,113 | 100% match rate; T0: 68, T1: 999.9K |
+
+> **Key finding:** The IP matching phase (SQL joins) accounts for 95–98% of total runtime. The UDF phase is negligible at 1M rows. IPv6 matching runs ~40% slower than IPv4 due to multi-pass CIDR range comparison vs the IPv4 exploded equi-join. Warehouse sizing primarily benefits the match phase parallelism, not UDF execution at this row count.
 
 ### What LocID Has Provided
 

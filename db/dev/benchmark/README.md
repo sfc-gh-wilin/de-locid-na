@@ -116,13 +116,14 @@ doc's 5–10× estimate for production workloads at scale.
 
 For production Encrypt/Decrypt jobs, the warehouse size depends on input row count:
 
-- **< 10M rows** — Small or Medium standard warehouse (completes in seconds)
-- **10M – 100M rows** — Medium Snowpark-optimized warehouse recommended (~25s for 50M)
-- **100M – 1B rows** — Large or X-Large Snowpark-optimized warehouse
+- **< 1M rows** — Medium Snowpark-optimized warehouse
+- **1M – 10M rows** — Medium or Large Snowpark-optimized warehouse
+- **10M – 100M rows** — Large Snowpark-optimized warehouse (~25s UDF phase for 50M)
+- **100M – 1B rows** — X-Large Snowpark-optimized warehouse
 - **> 1B rows** — X-Large or larger; consider partitioning input into batches
 
-> Snowpark-optimized warehouses allocate more memory per node for Python UDF execution,
-> reducing spill-to-disk and improving throughput for the vectorized batch handlers.
+> The IP matching phase (SQL joins against the LocID data lake) dominates runtime at all row
+> counts. Snowpark-optimized warehouses improve both Python UDF execution and join parallelism.
 
 > **Setup runtime.** Generating 50M rows in `01_setup.sql` takes ~10–20 minutes on an XS
 > warehouse. Run on a larger warehouse to reduce setup time if needed.
