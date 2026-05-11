@@ -8,7 +8,7 @@ to the user.
 
 Log level threshold is read from APP_CONFIG (config_key='log_level').
 Messages below the configured threshold are silently discarded.
-Severity order: DEBUG < PERF/TELEMETRY < INFO < WARNING < ERROR
+Severity order: DEBUG < TELEMETRY < INFO < WARNING < ERROR
 
 Usage:
     from utils import logger
@@ -22,12 +22,11 @@ from typing import Optional
 
 import snowflake.snowpark as snowpark
 
-_LEVELS = {"DEBUG", "PERF", "TELEMETRY", "INFO", "WARNING", "ERROR"}
+_LEVELS = {"DEBUG", "TELEMETRY", "INFO", "WARNING", "ERROR"}
 
 # Severity ranking — higher number = more severe
 _SEVERITY = {
     "DEBUG":     0,
-    "PERF":      1,
     "TELEMETRY": 1,
     "INFO":      2,
     "WARNING":   3,
@@ -63,8 +62,8 @@ def _get_threshold(session: snowpark.Session) -> int:
         ).collect()
         if rows and rows[0][0]:
             val = rows[0][0].upper().strip()
-            if val == "PERF/TELEMETRY":
-                _cached_threshold = _SEVERITY["PERF"]
+            if val == "PERF/TELEMETRY" or val == "TELEMETRY":
+                _cached_threshold = _SEVERITY["TELEMETRY"]
             else:
                 _cached_threshold = _SEVERITY.get(val, _SEVERITY["INFO"])
         else:
@@ -116,10 +115,6 @@ def error(
     exc: Optional[BaseException] = None,
 ) -> None:
     _log(session, "ERROR", source, message, exc)
-
-
-def perf(session: snowpark.Session, source: str, message: str) -> None:
-    _log(session, "PERF", source, message)
 
 
 def telemetry(session: snowpark.Session, source: str, message: str) -> None:

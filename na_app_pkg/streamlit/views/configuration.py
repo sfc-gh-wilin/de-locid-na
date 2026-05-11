@@ -243,15 +243,15 @@ st.subheader(":material/filter_list: Log Level")
 st.caption(
     "Controls which messages are written to APP_LOGS. "
     "Messages below the selected severity are discarded. "
-    "Severity order: DEBUG < PERF/TELEMETRY < INFO < WARNING < ERROR"
+    "Severity order: DEBUG < TELEMETRY < INFO < WARNING < ERROR"
 )
 
-_LOG_LEVELS = ["DEBUG", "PERF/TELEMETRY", "INFO", "WARNING", "ERROR"]
+_LOG_LEVELS = ["DEBUG", "TELEMETRY", "INFO", "WARNING", "ERROR"]
 _current_level = (config.get("log_level") or "INFO").upper().strip()
 if _current_level not in _LOG_LEVELS:
-    # Normalize stored values like "PERF" or "TELEMETRY" to the display label
-    if _current_level in ("PERF", "TELEMETRY"):
-        _current_level = "PERF/TELEMETRY"
+    # Normalize legacy stored value "PERF/TELEMETRY" to the current label
+    if _current_level in ("PERF", "PERF/TELEMETRY"):
+        _current_level = "TELEMETRY"
     else:
         _current_level = "INFO"
 

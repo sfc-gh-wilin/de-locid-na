@@ -323,17 +323,6 @@ def _log_job(session, job_id, operation, rows_in, rows_matched, rows_out,
     ).collect()
 
 
-def _log_perf(session, job_id: str, phases: dict) -> None:
-    """Write phase-level timing to APP_SCHEMA.APP_LOGS. Non-blocking."""
-    try:
-        msg = json.dumps({'job_id': job_id, 'phases': phases})
-        session.sql(
-            "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
-            params=['PERF', 'locid_decrypt._log_perf', msg]
-        ).collect()
-    except Exception:
-        pass  # Perf logging must not abort the job
-
 
 # =============================================================================
 # Main handler
@@ -474,7 +463,6 @@ def decrypt_handler(
         runtime_s = round(time.time() - start_ts, 2)
         phases['match_s'] = phases.get('decode_s', 0)
         phases['total_s'] = runtime_s
-        _log_perf(session, job_id, phases)
 
         # ------------------------------------------------------------------
         # Step 7: Log to JOB_LOG
@@ -506,7 +494,6 @@ def decrypt_handler(
     except Exception as exc:
         runtime_s = round(time.time() - start_ts, 2)
         phases['total_s'] = runtime_s
-        _log_perf(session, job_id, phases)
         _log_job(
             session, job_id, 'DECRYPT', rows_in, rows_matched, rows_out,
             runtime_s, 'FAILED', str(exc), input_table_name,
