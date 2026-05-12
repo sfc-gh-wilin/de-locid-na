@@ -36,14 +36,27 @@ sid = _session_id()
 
 st.header(":material/lock_open: Run Decrypt")
 st.caption("Decode TX_CLOC values back to STABLE_CLOC and geo context.")
-st.info(
-    "**Warehouse tip:** For best performance, use a Snowpark-optimized warehouse.  \n"
-    "**< 1M rows** → Medium Snowpark-optimized  |  "
-    "**1M–10M rows** → Medium/Large Snowpark-optimized  |  "
-    "**10M+ rows** → Large+ Snowpark-optimized  \n"
-    "For concurrent jobs, set MAX_CLUSTER_COUNT = 2–3 (multi-cluster).",
-    icon="💡",
-)
+with st.expander("💡 Warehouse tip", expanded=False):
+    st.markdown(
+        "**For best performance, use a Snowpark-optimized warehouse.**\n\n"
+        "| Row count | Recommendation |\n"
+        "|-----------|---------------|\n"
+        "| < 1M rows | Medium Snowpark-optimized |\n"
+        "| 1M–10M rows | Medium/Large Snowpark-optimized |\n"
+        "| 10M+ rows | Large+ Snowpark-optimized |\n\n"
+        "For concurrent jobs, set `MAX_CLUSTER_COUNT = 2–3` (multi-cluster).\n\n"
+        "**Recommended warehouse DDL:**\n"
+        "```sql\n"
+        "CREATE OR REPLACE WAREHOUSE LOCID_WH\n"
+        "    WAREHOUSE_SIZE = 'LARGE'\n"
+        "    WAREHOUSE_TYPE = 'SNOWPARK-OPTIMIZED'\n"
+        "    MIN_CLUSTER_COUNT = 1\n"
+        "    MAX_CLUSTER_COUNT = 3\n"
+        "    SCALING_POLICY = 'STANDARD'\n"
+        "    AUTO_SUSPEND = 300\n"
+        "    AUTO_RESUME = TRUE;\n"
+        "```"
+    )
 st.divider()
 
 
