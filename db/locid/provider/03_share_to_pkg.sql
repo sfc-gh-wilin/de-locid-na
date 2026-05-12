@@ -45,6 +45,10 @@ GRANT USAGE ON SCHEMA LOCID_SHARE
 --         Note: Secure Views in an app package cannot reference other views —
 --         they must reference base tables directly. The VARIANT→VARCHAR cast
 --         is applied inline here.
+--
+--         If START_IP_INT_HEX and END_IP_INT_HEX have already been converted
+--         to VARCHAR (see 01_optimize_tables.sql), the ::VARCHAR casts below
+--         are harmless no-ops but can be removed for clarity.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS AS
 SELECT

@@ -23,6 +23,35 @@ USE ROLE ACCOUNTADMIN;
 
 
 -- =============================================================================
+-- (Optional) Convert VARIANT columns to VARCHAR for better performance
+--
+-- If START_IP_INT_HEX and END_IP_INT_HEX are VARIANT, converting them to
+-- VARCHAR eliminates the need for inline casts in the Secure Views
+-- (03_share_to_pkg.sql) and improves join/filter performance.
+--
+-- Skip this section if the columns are already VARCHAR.
+-- =============================================================================
+
+-- Check current data types first:
+-- DESCRIBE TABLE LOCID.STAGING.LOCID_BUILDS;
+
+-- To convert (creates a new table — requires sufficient storage temporarily):
+--
+-- ALTER TABLE LOCID.STAGING.LOCID_BUILDS ADD COLUMN START_IP_INT_HEX_V2 VARCHAR;
+-- ALTER TABLE LOCID.STAGING.LOCID_BUILDS ADD COLUMN END_IP_INT_HEX_V2 VARCHAR;
+--
+-- UPDATE LOCID.STAGING.LOCID_BUILDS
+--     SET START_IP_INT_HEX_V2 = START_IP_INT_HEX::VARCHAR,
+--         END_IP_INT_HEX_V2   = END_IP_INT_HEX::VARCHAR;
+--
+-- ALTER TABLE LOCID.STAGING.LOCID_BUILDS DROP COLUMN START_IP_INT_HEX;
+-- ALTER TABLE LOCID.STAGING.LOCID_BUILDS DROP COLUMN END_IP_INT_HEX;
+--
+-- ALTER TABLE LOCID.STAGING.LOCID_BUILDS RENAME COLUMN START_IP_INT_HEX_V2 TO START_IP_INT_HEX;
+-- ALTER TABLE LOCID.STAGING.LOCID_BUILDS RENAME COLUMN END_IP_INT_HEX_V2 TO END_IP_INT_HEX;
+
+
+-- =============================================================================
 -- Add clustering keys matching the stored procedure's access patterns
 -- =============================================================================
 
