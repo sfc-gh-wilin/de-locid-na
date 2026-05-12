@@ -40,7 +40,8 @@ st.info(
     "**Warehouse tip:** For best performance, use a Snowpark-optimized warehouse.  \n"
     "**< 1M rows** → Medium Snowpark-optimized  |  "
     "**1M–10M rows** → Medium/Large Snowpark-optimized  |  "
-    "**10M+ rows** → Large+ Snowpark-optimized",
+    "**10M+ rows** → Large+ Snowpark-optimized  \n"
+    "For concurrent jobs, set MAX_CLUSTER_COUNT = 2–3 (multi-cluster).",
     icon="💡",
 )
 st.divider()

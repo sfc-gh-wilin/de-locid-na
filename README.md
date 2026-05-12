@@ -804,6 +804,32 @@ For production Encrypt/Decrypt jobs:
 > IPv6-dominant workloads run ~40% slower than IPv4-dominant due to multi-pass CIDR range
 > comparison vs the IPv4 exploded equi-join.
 
+#### Multi-Cluster Warehouses (Concurrent Jobs)
+
+Multi-cluster warehouses (scale-out) add additional clusters to handle **concurrent** encrypt/decrypt jobs. They do **not** speed up a single job — for that, increase warehouse size (scale-up).
+
+| Scenario | Recommendation |
+|----------|---------------|
+| Single user, one job at a time | Single-cluster (default) — multi-cluster adds no benefit |
+| 2+ concurrent jobs (multiple users or scheduled + manual) | Set `MAX_CLUSTER_COUNT = 2–3` with `SCALING_POLICY = 'STANDARD'` |
+
+**Recommended warehouse DDL:**
+
+```sql
+CREATE OR REPLACE WAREHOUSE LOCID_WH
+    WAREHOUSE_SIZE = 'LARGE'
+    WAREHOUSE_TYPE = 'SNOWPARK-OPTIMIZED'
+    MIN_CLUSTER_COUNT = 1
+    MAX_CLUSTER_COUNT = 3
+    SCALING_POLICY = 'STANDARD'
+    AUTO_SUSPEND = 300
+    AUTO_RESUME = TRUE;
+```
+
+#### Compute Pools (Not Applicable)
+
+Snowflake Compute Pools (SPCS) are for long-running container services and Streamlit container runtimes. They **cannot** accelerate the LocID encrypt/decrypt stored procedures, which execute as SQL queries on virtual warehouses. Compute Pools are not relevant for this workload.
+
 ### What LocID Has Provided
 
 LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl` — a pure-Python wheel implementing all encoding operations previously provided by `encode-lib` (Scala JAR). The wheel is staged to `@APP_STAGE/lib/` via `snow app deploy` and referenced by all Python vectorized UDFs via `IMPORTS`.

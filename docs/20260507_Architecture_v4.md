@@ -806,6 +806,21 @@ The stored procedures depend on specific column types and clustering keys on the
 - **Search Optimization Service** candidate on the IPv4 exploded table for equality predicate on `ip_address`.
 - IPv6 temp tables: materialized as transient tables within the job transaction to avoid recompute.
 - Warehouse sizing recommendation: Medium Snowpark-optimized minimum; Large Snowpark-optimized for 1M+ rows. The IP matching phase dominates runtime — IPv6 workloads run ~40% slower than IPv4.
+- **Multi-cluster warehouses:** Scale-out (adding clusters) helps when 2+ encrypt/decrypt jobs run concurrently. It does not speed up a single job — use a larger warehouse size (scale-up) for that. Recommend `MAX_CLUSTER_COUNT = 2–3` with `SCALING_POLICY = 'STANDARD'` if concurrent usage is expected.
+- **Compute Pools (SPCS):** Not applicable to the encrypt/decrypt stored procedures. Compute Pools are for container services and Streamlit container runtimes — they cannot accelerate SQL-based query workloads.
+
+**Recommended warehouse DDL:**
+
+```sql
+CREATE OR REPLACE WAREHOUSE LOCID_WH
+    WAREHOUSE_SIZE = 'LARGE'
+    WAREHOUSE_TYPE = 'SNOWPARK-OPTIMIZED'
+    MIN_CLUSTER_COUNT = 1
+    MAX_CLUSTER_COUNT = 3
+    SCALING_POLICY = 'STANDARD'
+    AUTO_SUSPEND = 300
+    AUTO_RESUME = TRUE;
+```
 
 ---
 

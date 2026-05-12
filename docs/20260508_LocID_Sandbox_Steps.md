@@ -19,7 +19,7 @@ This guide walks through deploying the LocID Native App on LocID's own Snowflake
 | Provider Database | `LOCID` (existing — do not modify) |
 | Provider Tables | `LOCID.STAGING.LOCID_BUILDS`, `LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED`, `LOCID.STAGING.LOCID_BUILD_DATES` |
 | Snow CLI connection | `locid` |
-| Warehouse | `COMPUTE_WH` |
+| Warehouse | `SNOWPARK_OPT_M_WH` |
 | Username | `WLIN` |
 
 **File references used in this guide:**
@@ -91,7 +91,7 @@ snow connection test -c locid
 Create the two custom deployment roles. This only needs to run once.
 
 The file `db/locid/provider/00_roles.sql` is pre-configured with:
-- Warehouse: `COMPUTE_WH`
+- Warehouse: `SNOWPARK_OPT_M_WH`
 - Username: `WLIN`
 
 ```bash
