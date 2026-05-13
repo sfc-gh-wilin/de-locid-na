@@ -379,6 +379,14 @@ USE ROLE LOCID_APP_ADMIN;
 DROP APPLICATION PACKAGE IF EXISTS LOCID_PKG;
 ```
 
+```sql
+USE ROLE ACCOUNTADMIN;
+
+-- Drop roles (only if fully decommissioning)
+DROP ROLE IF EXISTS LOCID_APP_INSTALLER;
+DROP ROLE IF EXISTS LOCID_APP_ADMIN;
+```
+
 ---
 
 ## Appendix B — Managing Output Tables

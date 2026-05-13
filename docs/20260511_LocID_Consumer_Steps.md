@@ -12,10 +12,10 @@ This guide walks a consumer through installing, configuring, and testing the Loc
 
 **Accounts:**
 
-| Role | Account | Notes |
-|------|---------|-------|
+| Role | Account                     | Notes |
+|------|-----------------------------|-------|
 | Provider (LocID) | `JZAEQUY-QOC14949` | Owns `LOCID_PKG` |
-| Consumer | `SFPSCOGS-WLIN_AWS_W2` | Installs `LOCID_APP` |
+| Consumer | `JZAEQUY-LOCID_CUST_ACCT_1` | Installs `LOCID_APP` |
 
 > **For other consumers:** Replace the consumer account identifier with your own.
 
@@ -86,12 +86,14 @@ In Snowsight on the **provider** account:
 3. Enter a name: `LocID for Snowflake`
 4. Under "Who can discover the listing" → select **Only specified consumers**
 5. Click **Add Data Product** → choose `LOCID_PKG`
-6. In "Add consumer accounts" → add the consumer's org.account (e.g., `SFPSCOGS.WLIN_AWS_W2`)
-7. Click **Publish**
+6. Select `Free` for **Access**
+7. In "Add consumer accounts" → add the consumer's org.account (e.g., `JZAEQUY.LOCID_CUST_ACCT_1`)
+8. Add **Description**
+8. Click **Publish**
 
 ### 0.7 Verify listing is visible
 
-In Snowsight on the consumer account, navigate to **Data Products → Apps** and confirm "LocID for Snowflake" appears.
+In Snowsight on the consumer account, navigate to **Catalog → Apps** and confirm "LocID for Snowflake" appears.
 
 ---
 
@@ -331,6 +333,13 @@ DROP APPLICATION IF EXISTS LOCID_APP CASCADE;
 
 -- Drop test data
 DROP DATABASE IF EXISTS LOCID_TEST;
+```
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+-- Drop the installer role (only if fully decommissioning)
+DROP ROLE IF EXISTS LOCID_APP_INSTALLER;
 ```
 
 ---
