@@ -10,7 +10,7 @@
 --   2. Fetch base_locid_secret + scheme_secret from LocID Central (cached)
 --   3. IPv4 matching — equi-join via LOCID_BUILDS_IPV4_EXPLODED
 --   4. IPv6 matching — 6-pass cascading hex-prefix range join
---   5. Call LOCID_TXCLOC_ENCRYPT + LOCID_STABLE_CLOC per matched row
+--   5. Call LOCID_TXCLOC_ENCRYPT (with geo context) + LOCID_STABLE_CLOC per matched row
 --   6. Apply entitlement filter on output columns
 --   7. CREATE OR REPLACE TABLE → customer output table
 --   8. Log run to APP_SCHEMA.JOB_LOG
@@ -98,7 +98,13 @@ def _get_secrets(session) -> dict:
     if not (cached and cached[1] and time.time() - cached[1].timestamp() < 3600):
         # Cache stale or missing — delegate refresh to LOCID_FETCH_LICENSE
         # (proc writes fresh secrets to LOCID_BASE/SCHEME_SECRET and stripped JSON to APP_CONFIG)
-        session.call("APP_SCHEMA.LOCID_FETCH_LICENSE", "")
+        try:
+            session.call("APP_SCHEMA.LOCID_FETCH_LICENSE", "")
+        except Exception as exc:
+            raise RuntimeError(
+                "License refresh failed. Check network connectivity to LocID Central "
+                "and verify your license is still valid."
+            ) from exc
         cached = _get_config(session, 'cached_license')
         if not cached or not cached[0]:
             raise RuntimeError("License not configured. Complete the Setup Wizard first.")
@@ -111,7 +117,10 @@ def _get_secrets(session) -> dict:
     data     = json.loads(cached[0])
     lic_info = data.get('license', {})
     k_row    = _get_config(session, 'api_key_id')
-    sel_id   = int(k_row[0]) if k_row and k_row[0] else None
+    try:
+        sel_id = int(k_row[0].strip()) if k_row and k_row[0] else None
+    except (ValueError, AttributeError):
+        sel_id = None
 
     entry = None
     for item in data.get('access', []):
@@ -236,7 +245,7 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
     if not api_key_val or not lic_key_val:
         return
 
-    identifier = f"{lic_key_val}_{job_id}"
+    identifier = f"{lic_key_val[:4]}****_{job_id}"
     ts_ms      = int(time.time() * 1000)
     client_str = str(client_id)
     base = {'identifier': identifier, 'source': 'snowflake-native-app',
@@ -445,7 +454,8 @@ def encrypt_handler(
                 lb.locid_country,      lb.locid_country_code,
                 lb.locid_region,       lb.locid_region_code,
                 lb.locid_city,         lb.locid_city_code,
-                lb.locid_postal_code,  lb.build_dt
+                lb.locid_postal_code,  lb.locid_horizontal_accuracy,
+                lb.build_dt
             FROM inp i
             JOIN {DATES} b
                 ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN b.start_dt AND b.end_dt
@@ -455,6 +465,7 @@ def encrypt_handler(
                 ON l.build_dt = lb.build_dt
                AND l.start_ip = lb.start_ip
                AND l.end_ip   = lb.end_ip
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY lb.build_dt DESC) = 1
         """).collect()
         phases['ipv4_match_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
@@ -527,7 +538,8 @@ def encrypt_handler(
                 locid_country VARCHAR,      locid_country_code VARCHAR,
                 locid_region  VARCHAR,      locid_region_code  VARCHAR,
                 locid_city    VARCHAR,      locid_city_code    VARCHAR,
-                locid_postal_code VARCHAR,  build_dt DATE
+                locid_postal_code VARCHAR,  locid_horizontal_accuracy VARCHAR,
+                build_dt DATE
             )
         """).collect()
 
@@ -579,7 +591,8 @@ def encrypt_handler(
                     l.locid_country,      l.locid_country_code,
                     l.locid_region,       l.locid_region_code,
                     l.locid_city,         l.locid_city_code,
-                    l.locid_postal_code,  l.build_dt
+                    l.locid_postal_code,  l.locid_horizontal_accuracy,
+                    l.build_dt
                 FROM inp i
                 JOIN builds l
                     ON  i.build_dt = l.build_dt
@@ -616,12 +629,29 @@ def encrypt_handler(
         active_cols = [c for c in entitled if c in requested]
 
         # Map output column name → SQL expression over _locid_matched columns
+        # TX_CLOC: uses OBJECT_CONSTRUCT to build JSON with geo context fields.
+        #   OBJECT_CONSTRUCT automatically drops NULL-valued keys, so absent geo
+        #   fields produce clean JSON. NetAcuity numeric codes must be VARCHAR.
         # STABLE_CLOC: for the encrypt path both client IDs are the same value
         # (publisher = consumer; see developer-integration-guide.md)
         COL_SQL = {
             'tx_cloc': (
                 f"APP_CODE.LOCID_TXCLOC_ENCRYPT("
-                f"  encrypted_locid, {base_key}, {scheme_key}, _ts, {client_id}::INT)"
+                f"  OBJECT_CONSTRUCT("
+                f"    'base_loc_id',         APP_CODE.LOCID_BASE_DECRYPT(encrypted_locid, {base_key}),"
+                f"    'timestamp',           _ts,"
+                f"    'enc_client_id',       {client_id},"
+                f"    'country',             locid_country,"
+                f"    'region',              locid_region,"
+                f"    'city',                locid_city,"
+                f"    'postal_code',         locid_postal_code,"
+                f"    'country_code',        locid_country_code::VARCHAR,"
+                f"    'region_code',         locid_region_code::VARCHAR,"
+                f"    'city_code',           locid_city_code::VARCHAR,"
+                f"    'horizontal_accuracy', locid_horizontal_accuracy::VARCHAR,"
+                f"    'tier',                tier"
+                f"  )::VARCHAR,"
+                f"  {scheme_key})"
             ),
             'stable_cloc': (
                 f"APP_CODE.LOCID_STABLE_CLOC("

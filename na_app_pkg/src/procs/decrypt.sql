@@ -17,14 +17,15 @@
 --   7. Log run to APP_SCHEMA.JOB_LOG
 --   8. POST usage statistics to LocID Central
 --
--- Geo context limitation:
---   Geo context fields (country, region, city, postal code) are NOT embedded in
---   TX_CLOC. In the decrypt path they are returned as NULL. A future version may
---   recover them via a secondary lookup, but this is de-scoped from v1.
+-- Geo context:
+--   Geo context fields (country, region, city, postal code, codes) are now
+--   embedded in TX_CLOC at encrypt time. The decrypt path extracts them from
+--   the decoded payload. TX_CLOCs produced before the geo context update will
+--   return NULL for these fields (absent fields decode as NULL).
 --
 -- Tier for STABLE_CLOC:
---   Tier is not embedded in TX_CLOC. The procedure defaults to 'T0' (rooftop).
---   A future version may accept tier as a parameter.
+--   Tier is extracted from the decoded TX_CLOC payload. Falls back to 'T0'
+--   if not present (backwards compat with pre-geo TX_CLOCs).
 -- =============================================================================
 
 -- Consumer references used by this procedure (declared in manifest.yml):
@@ -93,7 +94,13 @@ def _get_secrets(session) -> dict:
     cached = _get_config(session, 'cached_license')
     if not (cached and cached[1] and time.time() - cached[1].timestamp() < 3600):
         # Cache stale or missing — delegate refresh to LOCID_FETCH_LICENSE
-        session.call("APP_SCHEMA.LOCID_FETCH_LICENSE", "")
+        try:
+            session.call("APP_SCHEMA.LOCID_FETCH_LICENSE", "")
+        except Exception as exc:
+            raise RuntimeError(
+                "License refresh failed. Check network connectivity to LocID Central "
+                "and verify your license is still valid."
+            ) from exc
         cached = _get_config(session, 'cached_license')
         if not cached or not cached[0]:
             raise RuntimeError("License not configured. Complete the Setup Wizard first.")
@@ -106,7 +113,10 @@ def _get_secrets(session) -> dict:
     data     = json.loads(cached[0])
     lic_info = data.get('license', {})
     k_row    = _get_config(session, 'api_key_id')
-    sel_id   = int(k_row[0]) if k_row and k_row[0] else None
+    try:
+        sel_id = int(k_row[0].strip()) if k_row and k_row[0] else None
+    except (ValueError, AttributeError):
+        sel_id = None
 
     entry = None
     for item in data.get('access', []):
@@ -229,7 +239,7 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
     if not api_key_val or not lic_key_val:
         return
 
-    identifier = f"{lic_key_val}_{job_id}"
+    identifier = f"{lic_key_val[:4]}****_{job_id}"
     ts_ms      = int(time.time() * 1000)
     client_str = str(client_id)
     base = {'identifier': identifier, 'source': 'snowflake-native-app',
@@ -419,22 +429,23 @@ def decrypt_handler(
         #   plaintext location_id from LOCID_TXCLOC_DECRYPT.
         #   - dec_client_id = license client_id (the consumer)
         #   - enc_client_id = enc_client_id embedded in the TX_CLOC
-        #   - tier defaults to 'T0' — not recoverable from TX_CLOC in v1.
-        # Geo context: not embedded in TX_CLOC; returned as NULL in v1.
+        #   - tier is extracted from the decoded TX_CLOC payload.
+        # Geo context: extracted from TX_CLOC if embedded at encrypt time.
         COL_SQL = {
             'stable_cloc': (
                 f"APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN("
                 f"  _decoded:location_id::VARCHAR, {ns_guid}, "
-                f"  {client_id}::INT, _decoded:enc_client_id::INT, 'T0')"
+                f"  {client_id}::INT, _decoded:enc_client_id::INT, "
+                f"  COALESCE(_decoded:tier::VARCHAR, 'T0'))"
             ),
-            # Geo context columns: not available in decrypt path (v1)
-            'locid_country':      'NULL::VARCHAR',
-            'locid_country_code': 'NULL::VARCHAR',
-            'locid_region':       'NULL::VARCHAR',
-            'locid_region_code':  'NULL::VARCHAR',
-            'locid_city':         'NULL::VARCHAR',
-            'locid_city_code':    'NULL::VARCHAR',
-            'locid_postal_code':  'NULL::VARCHAR',
+            # Geo context columns: extracted from decoded TX_CLOC payload
+            'locid_country':      '_decoded:country::VARCHAR',
+            'locid_country_code': '_decoded:country_code::VARCHAR',
+            'locid_region':       '_decoded:region::VARCHAR',
+            'locid_region_code':  '_decoded:region_code::VARCHAR',
+            'locid_city':         '_decoded:city::VARCHAR',
+            'locid_city_code':    '_decoded:city_code::VARCHAR',
+            'locid_postal_code':  '_decoded:postal_code::VARCHAR',
         }
 
         select_exprs = [f"_id AS {id_col}"] + [

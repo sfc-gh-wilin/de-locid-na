@@ -10,6 +10,8 @@ LocID Native App — Run Decrypt (View 4)
 """
 
 import json
+import time
+from datetime import datetime, timezone
 
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
@@ -55,6 +57,12 @@ with st.expander("💡 Warehouse tip", expanded=False):
         "    SCALING_POLICY = 'STANDARD'\n"
         "    AUTO_SUSPEND = 300\n"
         "    AUTO_RESUME = TRUE;\n"
+        "\n"
+        "-- Grant usage to your app installer role:\n"
+        "GRANT USAGE ON WAREHOUSE LOCID_WH TO ROLE LOCID_APP_INSTALLER;\n"
+        "\n"
+        "-- Grant usage to the application (required for Streamlit UI):\n"
+        "GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;\n"
         "```"
     )
 st.divider()
@@ -188,6 +196,18 @@ if step == 1:
             "grant and bind **Input Table for Decrypt**.",
             icon="⚠️",
         )
+        with st.expander("Can't find your table in the picker?"):
+            st.markdown(
+                "Snowsight's table picker cannot browse tables inside the **app's own database**. "
+                "If your input table lives in the app database, bind it via SQL instead:\n\n"
+                "```sql\n"
+                "CALL <app_database>.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
+                "    'DECRYPT_INPUT_TABLE', 'ADD',\n"
+                "    SYSTEM$REFERENCE('TABLE', '<db>.<schema>.<table>', 'PERSISTENT', 'SELECT')\n"
+                ");\n"
+                "```\n\n"
+                "See the **SQL Guide** page for full details and required grants."
+            )
 
 # ---------------------------------------------------------------------------
 # Step 2 — Map Columns
@@ -247,6 +267,27 @@ elif step == 3:
 # ---------------------------------------------------------------------------
 elif step == 4:
     st.subheader(":material/play_arrow: Step 4 — Review & Run")
+
+    # --- Warehouse confirmation ---
+    try:
+        _cur_wh = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
+    except Exception:
+        _cur_wh = None
+
+    if _cur_wh:
+        st.info(
+            f"**Active warehouse:** `{_cur_wh}`\n\n"
+            "To switch warehouses, use the warehouse selector in the **top-right corner** "
+            "of Snowsight. The app will restart and run on the newly selected warehouse.",
+            icon=":material/warehouse:",
+        )
+    else:
+        st.warning(
+            "The app is running on the warehouse selected in the **top-right corner** of Snowsight. "
+            "To switch warehouses, change it there — the app will restart on the newly selected warehouse.",
+            icon=":material/warehouse:",
+        )
+
     st.write(f"**Input table:** `{st.session_state.get('dec_input_table')}`")
     st.write(
         f"**Columns mapped:** ID={st.session_state.get('dec_col_id')}, "
@@ -257,6 +298,16 @@ elif step == 4:
         "Output will be written to an auto-named table in APP_SCHEMA "
         "(e.g. LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
     )
+    with st.expander("How to abort a running job", expanded=False):
+        st.markdown(
+            "**From this page:** Navigate away or close the browser tab. "
+            "Note: the underlying query may continue running on the warehouse until it completes.\n\n"
+            "**From Snowsight (recommended):**\n"
+            "1. Open **Monitoring → Query History**\n"
+            "2. Find the running `CALL LOCID_DECRYPT(…)` query (status: Running)\n"
+            "3. Click the **Cancel** (✕) button in SQL TEXT column\n\n"
+            "This immediately cancels the job on the warehouse."
+        )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -265,7 +316,9 @@ elif step == 4:
             st.rerun()
     with col2:
         if st.button(":material/play_arrow: Run Job", type="primary"):
-            with st.spinner("Running LocID Decrypt job…"):
+            t_start = time.time()
+            with st.status("Running LocID Decrypt job…", expanded=True) as job_status:
+                st.write(f"**Started at:** {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC")
                 try:
                     logger.info(session, "run_decrypt.run_job",
                                 f"Job started: input={st.session_state.dec_input_table}")
@@ -275,11 +328,15 @@ elif step == 4:
                         st.session_state.dec_col_txclo,
                         st.session_state.dec_output_cols,
                     )
+                    elapsed = time.time() - t_start
                     result = json.loads(raw) if isinstance(raw, str) else raw
                     status = result.get("status", "UNKNOWN")
                     if status == "SUCCESS":
+                        job_status.update(
+                            label=f"Job complete — elapsed {elapsed:.1f}s",
+                            state="complete", expanded=True,
+                        )
                         st.success(
-                            f"Job complete — "
                             f"{result.get('rows_out', 0):,} rows decoded "
                             f"out of {result.get('rows_in', 0):,} "
                             f"in {result.get('runtime_s', 0):.1f}s",
@@ -289,18 +346,29 @@ elif step == 4:
                         st.caption(f"Job ID: {result.get('job_id', '—')}")
                         logger.info(session, "run_decrypt.run_job",
                                     f"Job SUCCESS: id={result.get('job_id')}, "
-                                    f"rows_out={result.get('rows_out')}")
+                                    f"rows_out={result.get('rows_out')}, "
+                                    f"elapsed={elapsed:.1f}s")
+                        # Reset for next run; discard heavy state
+                        for key in ("dec_input_columns",):
+                            st.session_state.pop(key, None)
+                        st.session_state.dec_step = 1
                     else:
+                        elapsed = time.time() - t_start
+                        job_status.update(
+                            label=f"Job failed — elapsed {elapsed:.1f}s",
+                            state="error", expanded=True,
+                        )
                         err = result.get("error", status)
                         show_error(f"Job failed — {err}")
                         logger.error(session, "run_decrypt.run_job",
                                      f"Job FAILED: {err}")
                 except Exception as e:
+                    elapsed = time.time() - t_start
+                    job_status.update(
+                        label=f"Job error — elapsed {elapsed:.1f}s",
+                        state="error", expanded=True,
+                    )
                     logger.error(session, "run_decrypt.run_job",
                                  "Job threw an exception", exc=e)
-                    show_error("Decrypt job failed unexpectedly.", detail=e)
-
-            # Reset for next run; discard heavy state
-            for key in ("dec_input_columns",):
-                st.session_state.pop(key, None)
-            st.session_state.dec_step = 1
+                    show_error(f"Decrypt job failed unexpectedly (elapsed: {elapsed:.1f}s).",
+                               detail=e)

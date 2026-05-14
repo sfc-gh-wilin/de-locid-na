@@ -10,6 +10,7 @@ LocID Native App — Run Encrypt (View 3)
 """
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 
 import streamlit as st
@@ -56,6 +57,12 @@ with st.expander("💡 Warehouse tip", expanded=False):
         "    SCALING_POLICY = 'STANDARD'\n"
         "    AUTO_SUSPEND = 300\n"
         "    AUTO_RESUME = TRUE;\n"
+        "\n"
+        "-- Grant usage to your app installer role:\n"
+        "GRANT USAGE ON WAREHOUSE LOCID_WH TO ROLE LOCID_APP_INSTALLER;\n"
+        "\n"
+        "-- Grant usage to the application (required for Streamlit UI):\n"
+        "GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;\n"
         "```"
     )
 st.divider()
@@ -64,6 +71,11 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _quote_id(name: str) -> str:
+    """Double-quote a Snowflake identifier to handle spaces/special chars safely."""
+    return '"' + name.replace('"', '""') + '"'
+
+
 def _get_bound_table(ref_name: str) -> str | None:
     """Return FQN of the currently bound table for ref_name, or None.
 
@@ -134,18 +146,20 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
     All cutoff math uses UTC. Never blocks the job.
     """
     result: dict = {}
+    q_ip = _quote_id(ip_col)
+    q_ts = _quote_id(ts_col)
     try:
         ip_rows = session.sql(f"""
             SELECT
-                SUM(IFF({ip_col} IS NULL, 1, 0))                           AS null_ip,
-                SUM(IFF({ip_col} IS NOT NULL
-                        AND NOT {ip_col} LIKE '%:%'
-                        AND {ip_col} LIKE '%.%.%.%', 1, 0))                AS cnt_v4,
-                SUM(IFF({ip_col} LIKE '%:%', 1, 0))                        AS cnt_v6,
-                SUM(IFF({ip_col} IS NOT NULL
-                        AND NOT {ip_col} LIKE '%:%'
-                        AND NOT {ip_col} LIKE '%.%.%.%', 1, 0))            AS cnt_bad
-            FROM (SELECT {ip_col} FROM {table} LIMIT 1000)
+                SUM(IFF({q_ip} IS NULL, 1, 0))                           AS null_ip,
+                SUM(IFF({q_ip} IS NOT NULL
+                        AND NOT {q_ip} LIKE '%:%'
+                        AND {q_ip} LIKE '%.%.%.%', 1, 0))                AS cnt_v4,
+                SUM(IFF({q_ip} LIKE '%:%', 1, 0))                        AS cnt_v6,
+                SUM(IFF({q_ip} IS NOT NULL
+                        AND NOT {q_ip} LIKE '%:%'
+                        AND NOT {q_ip} LIKE '%.%.%.%', 1, 0))            AS cnt_bad
+            FROM (SELECT {q_ip} FROM {table} LIMIT 1000)
         """).collect()[0]
         result["null_ip"] = int(ip_rows[0] or 0)
         result["cnt_v4"]  = int(ip_rows[1] or 0)
@@ -158,11 +172,11 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
 
     try:
         if ts_fmt == "epoch_ms":
-            ts_expr = f"FLOOR({ts_col}::DOUBLE / 1000.0)::BIGINT"
+            ts_expr = f"FLOOR({q_ts}::DOUBLE / 1000.0)::BIGINT"
         elif ts_fmt == "timestamp":
-            ts_expr = f"DATE_PART(epoch_second, {ts_col}::TIMESTAMP_NTZ)::BIGINT"
+            ts_expr = f"DATE_PART(epoch_second, {q_ts}::TIMESTAMP_NTZ)::BIGINT"
         else:   # epoch_sec (default)
-            ts_expr = f"{ts_col}::BIGINT"
+            ts_expr = f"{q_ts}::BIGINT"
 
         # UTC cutoff — 52 weeks back from now
         cutoff_epoch = int(
@@ -172,7 +186,7 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
             SELECT
                 MIN({ts_expr})                              AS ts_min,
                 MAX({ts_expr})                              AS ts_max,
-                SUM(IFF({ts_col} IS NULL, 1, 0))           AS null_ts,
+                SUM(IFF({q_ts} IS NULL, 1, 0))           AS null_ts,
                 SUM(IFF({ts_expr} < {cutoff_epoch}, 1, 0)) AS stale_cnt
             FROM {table}
         """).collect()[0]
@@ -231,7 +245,7 @@ def _show_validation(v: dict) -> None:
         if v.get("null_ts"):
             st.warning(f"{v['null_ts']:,} NULL timestamp value(s) — will be skipped.",
                        icon="⚠️")
-        if v["ts_min"] and v["stale_count"] == 0:
+        if v["ts_min"] is not None and v["stale_count"] == 0:
             st.success("Timestamp range looks good — all values within the 52-week window.",
                        icon="✅")
 
@@ -301,6 +315,18 @@ if step == 1:
             "grant and bind **Input Table for Encrypt**.",
             icon="⚠️",
         )
+        with st.expander("Can't find your table in the picker?"):
+            st.markdown(
+                "Snowsight's table picker cannot browse tables inside the **app's own database**. "
+                "If your input table lives in the app database, bind it via SQL instead:\n\n"
+                "```sql\n"
+                "CALL <app_database>.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
+                "    'ENCRYPT_INPUT_TABLE', 'ADD',\n"
+                "    SYSTEM$REFERENCE('TABLE', '<db>.<schema>.<table>', 'PERSISTENT', 'SELECT')\n"
+                ");\n"
+                "```\n\n"
+                "See the **SQL Guide** page for full details and required grants."
+            )
 
 # ---------------------------------------------------------------------------
 # Step 2 — Map Columns
@@ -401,6 +427,27 @@ elif step == 3:
 # ---------------------------------------------------------------------------
 elif step == 4:
     st.subheader(":material/play_arrow: Step 4 — Review & Run")
+
+    # --- Warehouse confirmation ---
+    try:
+        _cur_wh = session.sql("SELECT CURRENT_WAREHOUSE()").collect()[0][0]
+    except Exception:
+        _cur_wh = None
+
+    if _cur_wh:
+        st.info(
+            f"**Active warehouse:** `{_cur_wh}`\n\n"
+            "To switch warehouses, use the warehouse selector in the **top-right corner** "
+            "of Snowsight. The app will restart and run on the newly selected warehouse.",
+            icon=":material/warehouse:",
+        )
+    else:
+        st.warning(
+            "The app is running on the warehouse selected in the **top-right corner** of Snowsight. "
+            "To switch warehouses, change it there — the app will restart on the newly selected warehouse.",
+            icon=":material/warehouse:",
+        )
+
     st.write(f"**Input table:** `{st.session_state.get('enc_input_table')}`")
     st.write(
         f"**Columns mapped:** ID={st.session_state.get('enc_col_id')}, "
@@ -412,6 +459,16 @@ elif step == 4:
         "Output will be written to an auto-named table in APP_SCHEMA "
         "(e.g. LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
     )
+    with st.expander("How to abort a running job", expanded=False):
+        st.markdown(
+            "**From this page:** Navigate away or close the browser tab. "
+            "Note: the underlying query may continue running on the warehouse until it completes.\n\n"
+            "**From Snowsight (recommended):**\n"
+            "1. Open **Monitoring → Query History**\n"
+            "2. Find the running `CALL LOCID_ENCRYPT(…)` query (status: Running)\n"
+            "3. Click the **Cancel** (✕) button in SQL TEXT column\n\n"
+            "This immediately cancels the job on the warehouse."
+        )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -420,7 +477,9 @@ elif step == 4:
             st.rerun()
     with col2:
         if st.button(":material/play_arrow: Run Job", type="primary"):
-            with st.spinner("Running LocID Encrypt job…"):
+            t_start = time.time()
+            with st.status("Running LocID Encrypt job…", expanded=True) as job_status:
+                st.write(f"**Started at:** {datetime.now(timezone.utc).strftime('%H:%M:%S')} UTC")
                 try:
                     logger.info(session, "run_encrypt.run_job",
                                 f"Job started: input={st.session_state.enc_input_table}")
@@ -432,11 +491,15 @@ elif step == 4:
                         st.session_state.enc_ts_fmt,
                         st.session_state.enc_output_cols,
                     )
+                    elapsed = time.time() - t_start
                     result = json.loads(raw) if isinstance(raw, str) else raw
                     status = result.get("status", "UNKNOWN")
                     if status == "SUCCESS":
+                        job_status.update(
+                            label=f"Job complete — elapsed {elapsed:.1f}s",
+                            state="complete", expanded=True,
+                        )
                         st.success(
-                            f"Job complete — "
                             f"{result.get('rows_matched', 0):,} rows matched "
                             f"out of {result.get('rows_in', 0):,} "
                             f"in {result.get('runtime_s', 0):.1f}s",
@@ -446,18 +509,29 @@ elif step == 4:
                         st.caption(f"Job ID: {result.get('job_id', '—')}")
                         logger.info(session, "run_encrypt.run_job",
                                     f"Job SUCCESS: id={result.get('job_id')}, "
-                                    f"matched={result.get('rows_matched')}")
+                                    f"matched={result.get('rows_matched')}, "
+                                    f"elapsed={elapsed:.1f}s")
+                        # Reset wizard for next run; discard heavy state
+                        for key in ("enc_input_columns", "enc_validation", "enc_validation_cols"):
+                            st.session_state.pop(key, None)
+                        st.session_state.enc_step = 1
                     else:
+                        elapsed = time.time() - t_start
+                        job_status.update(
+                            label=f"Job failed — elapsed {elapsed:.1f}s",
+                            state="error", expanded=True,
+                        )
                         err = result.get("error", status)
                         show_error(f"Job failed — {err}")
                         logger.error(session, "run_encrypt.run_job",
                                      f"Job FAILED: {err}")
                 except Exception as e:
+                    elapsed = time.time() - t_start
+                    job_status.update(
+                        label=f"Job error — elapsed {elapsed:.1f}s",
+                        state="error", expanded=True,
+                    )
                     logger.error(session, "run_encrypt.run_job",
                                  "Job threw an exception", exc=e)
-                    show_error("Encrypt job failed unexpectedly.", detail=e)
-
-            # Reset wizard for next run; discard heavy state
-            for key in ("enc_input_columns", "enc_validation", "enc_validation_cols"):
-                st.session_state.pop(key, None)
-            st.session_state.enc_step = 1
+                    show_error(f"Encrypt job failed unexpectedly (elapsed: {elapsed:.1f}s).",
+                               detail=e)

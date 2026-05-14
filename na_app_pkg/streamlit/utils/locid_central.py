@@ -58,6 +58,10 @@ def fetch_license(session: snowpark.Session, license_key: str) -> dict[str, Any]
 
     data = json.loads(raw) if isinstance(raw, str) else raw
     logger.info(session, "locid_central.fetch_license", "License fetched and cached")
+
+    # Strip cryptographic secrets — they are stored in Snowflake SECRET objects
+    # by the proc and must not linger in Streamlit session_state.
+    data.pop('secrets', None)
     return data
 
 

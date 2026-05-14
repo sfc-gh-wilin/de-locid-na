@@ -38,11 +38,13 @@ This guide walks through deploying the LocID Native App on LocID's own Snowflake
 
 ### Tools
 
-| Tool | Purpose |
-|------|---------|
-| Snow CLI (`snow`) | Run SQL files, upload files to stage, manage app deployment |
-| Snowsight (browser) | Run ad-hoc SQL, use the Streamlit app |
-| OpenSSL | Generate key pair for JWT authentication |
+| Tool | Purpose | Minimum Version |
+|------|---------|-----------------|
+| Snow CLI (`snow`) | Run SQL files, upload files to stage, manage app deployment | **3.17+** (older versions like 3.1 have incompatibilities with `manifest_version: 2` and release channels) |
+| Snowsight (browser) | Run ad-hoc SQL, use the Streamlit app | — |
+| OpenSSL | Generate key pair for JWT authentication | — |
+
+> **Important:** Run `snow --version` to check. If below 3.17, upgrade via `pip install snowflake-cli --upgrade` or `pipx upgrade snowflake-cli`. Many errors in sections 3.6–3.7 (release channels, debug mode) are resolved by upgrading Snow CLI.
 
 ---
 

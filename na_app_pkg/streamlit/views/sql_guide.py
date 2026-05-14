@@ -55,6 +55,11 @@ with tab_ui:
         "> If the permissions page appeared when the app was first launched, "
         "these bindings may already be set."
     )
+    st.warning(
+        "**Note:** The Snowsight table picker cannot browse tables inside the app's own database. "
+        "If you need to bind a table from the app database, use the **SQL** tab instead.",
+        icon="ℹ️",
+    )
 
 with tab_sql:
     st.markdown(

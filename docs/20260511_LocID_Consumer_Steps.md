@@ -136,15 +136,32 @@ SHOW ROLES LIKE 'LOCID_APP_INSTALLER';
 
 In Snowsight on the consumer account:
 
-1. Navigate to **Data Products → Apps**
-2. Find **LocID for Snowflake**
-3. Click **Get**
-4. Choose database name: `LOCID_APP`
-5. Review and approve the **Required Permissions**:
+1. **Switch to the `LOCID_APP_INSTALLER` role** (bottom-left role selector in Snowsight)
+2. Navigate to **Data Products → Apps**
+3. Find **LocID for Snowflake**
+4. Click **Get**
+5. Choose database name: `LOCID_APP`
+6. Review and approve the **Required Permissions**:
    - External access to `central.locid.com` (license validation + usage reporting)
-6. Click **Activate**
+7. Click **Activate**
 
-### 2.2 Verify installation
+> **Important:** You must use the `LOCID_APP_INSTALLER` role when installing. This role owns the application and has the required `CREATE APPLICATION` privilege.
+
+### 2.2 Grant warehouse to the application
+
+The Streamlit UI runs under the application's own context. Grant warehouse usage to the application so it can power the Streamlit interface:
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+
+GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION LOCID_APP;
+```
+
+> **Why both grants?**
+> - `GRANT USAGE ON WAREHOUSE ... TO ROLE LOCID_APP_INSTALLER` — allows the role to call stored procedures (Encrypt/Decrypt) and run SQL against the app.
+> - `GRANT USAGE ON WAREHOUSE ... TO APPLICATION LOCID_APP` — allows the Streamlit UI (which runs as the application object with owner's rights) to use the warehouse.
+
+### 2.3 Verify installation
 
 In Snowsight, navigate to **Data Products → Apps**. Confirm `LOCID_APP` appears with status **Ready**.
 
@@ -401,3 +418,32 @@ CALL LOCID_APP.APP_SCHEMA.LOCID_PURGE_OUTPUTS(NULL);
 -- Or specify custom retention (e.g., 30 days)
 CALL LOCID_APP.APP_SCHEMA.LOCID_PURGE_OUTPUTS(30);
 ```
+
+---
+
+## Appendix D — Troubleshooting
+
+### "No warehouse found for the Streamlit object"
+
+The application needs warehouse access granted directly. Run:
+
+```sql
+GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION LOCID_APP;
+```
+
+Then re-open the app. See [Phase 2.2](#22-grant-warehouse-to-the-application) for details.
+
+### "Exceeded maximum number of inbound queries allowed for this instance: 298"
+
+This is a transient Streamlit-in-Snowflake throttling error. It occurs when too many queries are queued on a single app instance — typically caused by rapid page refreshes during troubleshooting.
+
+**Resolution:**
+1. Close the browser tab completely
+2. Wait 60 seconds for the query queue to drain
+3. Re-open the app
+
+This is not a configuration issue — no code or grant changes are needed.
+
+### "Schema 'LOCID_APP.LOCID_SHARE' does not exist or not authorized"
+
+The provider's shared data lake is not accessible. This is a provider-side deployment issue — contact LocID support to verify the data share is properly linked to your app version.

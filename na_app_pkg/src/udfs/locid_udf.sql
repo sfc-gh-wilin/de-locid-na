@@ -13,8 +13,8 @@
 -- UDFs created (all Python vectorized, @vectorized batch dispatch):
 --   1. LOCID_BASE_ENCRYPT    — admin helper: encrypt raw base LocID string
 --   2. LOCID_BASE_DECRYPT    — admin helper: decrypt base64 ciphertext
---   3. LOCID_TXCLOC_ENCRYPT  — production: encrypted_locid (from share) → TX_CLOC
---   4. LOCID_TXCLOC_DECRYPT  — production: TX_CLOC → JSON (location_id, timestamp, enc_client_id)
+--   3. LOCID_TXCLOC_ENCRYPT  — production: JSON (flat geo fields) → TX_CLOC
+--   4. LOCID_TXCLOC_DECRYPT  — production: TX_CLOC → JSON (all encoded fields incl. geo)
 --   5. LOCID_STABLE_CLOC     — production: encrypted_locid (from share) → STABLE_CLOC UUID
 --   6. LOCID_STABLE_CLOC_FROM_PLAIN — decrypt path: plaintext base LocID → STABLE_CLOC UUID
 --
@@ -23,8 +23,8 @@
 --
 --   base_locid_secret  → APP_CONFIG 'base_locid_secret' (fetched from license endpoint secrets)
 --                        Base64-URL encoded, ~ as alternate padding.
---                        Used by: BaseLocIdEncryption  (UDFs 1, 2, 3, 5)
---                        Parameter name in UDFs: key_str (UDF 1/2), base_locid_key (UDF 3/5)
+--                        Used by: BaseLocIdEncryption  (UDFs 1, 2, 5)
+--                        Parameter name in UDFs: key_str (UDF 1/2), base_locid_key (UDF 5)
 --
 --   scheme_secret      → APP_CONFIG 'scheme_secret' (fetched from license endpoint secrets)
 --                        Same encoding as base_locid_secret.
@@ -126,33 +126,34 @@ $$;
 
 -- =============================================================================
 -- 3. LOCID_TXCLOC_ENCRYPT  (production)
---    Takes encrypted_locid from LOCID_BUILDS, decrypts to base LocID, then
---    encodes as TX_CLOC using EncScheme0.
+--    Encrypts a flat JSON document into a TX_CLOC string.
 --
---    Workflow:
---      1. Decrypt ENCRYPTED_LOCID using BASE_LOCID_KEY → raw base LocID string
---      2. Build TxCloc JSON: {base_loc_id, timestamp, enc_client_id, tier:'T0'}
---      3. Encode via EncScheme0 using SCHEME_KEY → TX_CLOC string ending in ".0"
+--    Input JSON (tx_cloc_json) — flat object with:
+--      REQUIRED: base_loc_id (string), timestamp (int epoch sec),
+--                enc_client_id (int), tier (string "T0"|"T1")
+--      OPTIONAL: country, region, city, postal_code,
+--                country_code, region_code, city_code  (NetAcuity numeric
+--                  codes — must be VARCHAR, not NUMBER),
+--                horizontal_accuracy, alt_id, homebiz_type
+--      Omitted optional fields are absent from JSON (NULL ↔ absent).
+--      alt_id present silently overrides tier to "T0".
 --
---    Input:  encrypted_locid  — base64-URL encrypted locid from LOCID_BUILDS
---            base_locid_key   — key used to encrypt the base locid at ingest time
---            scheme_key       — EncScheme0 key
---            timestamp_sec    — Unix timestamp in seconds (BIGINT)
---            client_id        — encClientId for TxCloc (INT)
+--    scheme_key:   AES key in any base64 variant (16/24/32 bytes raw)
+--    returns:      base64-encoded TX CLOC ending in ".0"
+--
+--    The encrypt proc builds tx_cloc_json via OBJECT_CONSTRUCT (which
+--    automatically drops NULL-valued keys), then calls this UDF.
 -- =============================================================================
 CREATE OR REPLACE FUNCTION APP_CODE.LOCID_TXCLOC_ENCRYPT(
-    ENCRYPTED_LOCID  VARCHAR,
-    BASE_LOCID_KEY   VARCHAR,
-    SCHEME_KEY       VARCHAR,
-    TIMESTAMP_SEC    BIGINT,
-    CLIENT_ID        INT
+    TX_CLOC_JSON VARCHAR,
+    SCHEME_KEY   VARCHAR
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
 IMPORTS = ('/lib/mb_locid_encoding-0.0.0-py3-none-any.whl')
 PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
-HANDLER = 'txcloc_encrypt_batch'
+HANDLER = 'encrypt_batch'
 AS $$
 import os, sys, glob
 for _dir in list(sys.path):
@@ -161,64 +162,13 @@ for _dir in list(sys.path):
             if _whl not in sys.path:
                 sys.path.insert(0, _whl)
 
-import json
-import math
 import pandas as pd
 from _snowflake import vectorized
-from locid import _base64
-from locid.encryption import BaseLocIdEncryption
-from locid.scheme0 import EncScheme0, _decode_key_b64
-
-# Module-scope caches — persist across batches in the same worker process
-_baselocid_cache = {}
-_scheme_cache = {}
-
-def _opt(v):
-    if v is None:
-        return None
-    if isinstance(v, float) and math.isnan(v):
-        return None
-    return v
-
-def _get_baselocid(key):
-    cached = _baselocid_cache.get(key)
-    if cached is None:
-        cached = BaseLocIdEncryption(_decode_key_b64(key))
-        _baselocid_cache[key] = cached
-    return cached
-
-def _get_scheme(key):
-    cached = _scheme_cache.get(key)
-    if cached is None:
-        cached = EncScheme0(key)
-        _scheme_cache[key] = cached
-    return cached
+from locid import snowflake as locid_sf
 
 @vectorized(input=pd.DataFrame)
-def txcloc_encrypt_batch(df: pd.DataFrame) -> pd.Series:
-    """
-    df columns: [encrypted_locid, base_locid_key, scheme_key, timestamp_sec, client_id]
-    """
-    base_cipher = _get_baselocid(df.iloc[0, 1])
-    scheme = _get_scheme(df.iloc[0, 2])
-    out = []
-    for i in range(len(df)):
-        enc_locid = _opt(df.iloc[i, 0])
-        if enc_locid is None:
-            out.append(None)
-            continue
-        # 1. Decrypt encrypted_locid → raw base LocID
-        plaintext = base_cipher.decrypt(_base64.decode(enc_locid)).decode('utf-8')
-        # 2. Build JSON for encode_json (tier='T0' — encrypt path has no geo context)
-        tx_json = json.dumps({
-            'base_loc_id': plaintext,
-            'timestamp': int(df.iloc[i, 3]),
-            'enc_client_id': int(df.iloc[i, 4]),
-            'tier': 'T0'
-        }, separators=(',', ':'))
-        # 3. Encode via EncScheme0
-        out.append(scheme.encode_json(tx_json))
-    return pd.Series(out, index=df.index)
+def encrypt_batch(df: pd.DataFrame) -> pd.Series:
+    return locid_sf.encrypt_tx_cloc(df.iloc[:, 0], df.iloc[:, 1])
 $$;
 
 
