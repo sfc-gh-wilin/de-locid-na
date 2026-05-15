@@ -248,6 +248,9 @@ Customer Input Table (via reference binding)
          │
          ├─ 4. Call UDFs per matched row:
          │       LOCID_TXCLOC_ENCRYPT → TX_CLOC
+         │         (geo context fields from the IP match — country, region, city,
+         │          postal_code, country_code, region_code, city_code — are included
+         │          in the TX_CLOC JSON payload so they are recoverable at decrypt time)
          │       LOCID_STABLE_CLOC → STABLE_CLOC
          │
          ├─ 5. Apply entitlement filter on output columns
@@ -275,9 +278,10 @@ Customer Input Table (via reference binding)
          │       Resolve selected API key metadata from APP_CONFIG
          │
          ├─ 3. Call UDFs per row:
-         │       LOCID_TXCLOC_DECRYPT → base_loc_id + metadata (JSON)
+         │       LOCID_TXCLOC_DECRYPT → base_loc_id + metadata + geo context (JSON)
+         │         (geo fields are recovered from the TX_CLOC payload if they were
+         │          included at encrypt time; extracted via PARSE_JSON)
          │       LOCID_STABLE_CLOC_FROM_PLAIN → STABLE_CLOC
-         │       (Geo context columns: NULL in v1 — not available from TX_CLOC decode)
          │
          ├─ 4. Apply entitlement filter on output columns
          │
@@ -394,15 +398,21 @@ Validation is **advisory** — warnings are shown but the job can still proceed:
 Columns the customer is not entitled to are shown greyed out with a tooltip explaining why.
 
 **Step 4 — Review & Run**
-- Summary card: input table, row count, selected columns
+- Summary card: input table, mapped columns, selected output columns
+- **Warehouse confirmation:** Shows the active warehouse name (or a generic reminder to confirm the warehouse in the top-right corner of Snowsight; user can switch there and the app restarts)
+- **How to abort a running job:** Expandable section — navigate away, or cancel via Monitoring → Query History in Snowsight
 - **Run Job** button
 
 **During execution:**
-- Spinner with status message
+- `st.status()` panel with start time (UTC) and running animation
+- Elapsed time shown on completion/failure
 
 **On completion:**
-- Result summary: rows in, rows matched, rows written, unmatched count, runtime
+- Result summary: rows in, rows matched, rows written, unmatched count, runtime, elapsed time
 - Output table name displayed (auto-generated in APP_SCHEMA)
+
+**Table binding note:**
+- If no table is bound, a "Can't find your table in the picker?" expander explains that Snowsight cannot browse the app's own database and provides the SQL workaround via `REGISTER_SINGLE_CALLBACK`
 
 ---
 
@@ -424,16 +434,18 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 | Column | Entitlement Required | Default |
 |--------|---------------------|---------|
 | STABLE_CLOC | `allow_stable` | ✓ |
-| Country / Country Code | `allow_geo_context` | shown but returns NULL in v1 |
-| Region / Region Code | `allow_geo_context` | shown but returns NULL in v1 |
-| City / City Code | `allow_geo_context` | shown but returns NULL in v1 |
-| Postal Code | `allow_geo_context` | shown but returns NULL in v1 |
+| Country / Country Code | `allow_geo_context` | ✓ (if included at encrypt time) |
+| Region / Region Code | `allow_geo_context` | ✓ (if included at encrypt time) |
+| City / City Code | `allow_geo_context` | ✓ (if included at encrypt time) |
+| Postal Code | `allow_geo_context` | ✓ (if included at encrypt time) |
 
-> **Note:** Geo context columns are not available in v1 of the Decrypt path. TX_CLOC decoding does not yield geo fields — they are returned as NULL. This will be addressed in a future version.
+> **Note:** Geo context columns are recovered from the TX_CLOC payload. They are only available if the TX_CLOC was produced by the LocID Encrypt procedure (which embeds geo fields from the IP match). TX_CLOCs produced without geo context will return NULL for these columns.
 
 **On completion:**
-- Result summary: rows in, rows decoded, rows written, runtime
+- Result summary: rows in, rows decoded, rows written, runtime, elapsed time
 - Output table name displayed (auto-generated in APP_SCHEMA)
+
+Step 4 mirrors the Encrypt page: warehouse confirmation, abort instructions, `st.status()` panel with start time (UTC) and elapsed time on completion.
 
 ---
 
@@ -470,11 +482,10 @@ Columns the customer is not entitled to are shown greyed out with a tooltip expl
 
 **Sections:**
 - **Role note** — `GRANT APPLICATION ROLE <app>.APP_ADMIN TO ROLE <your_role>` with live app name pre-filled
-- **Step 1** — Grant `SELECT` on input table to the application
-- **Step 2** — Reference binding: Snowsight UI tab + SQL tab (`CALL register_single_callback(...)`)
-- **Step 3** — `CALL LOCID_ENCRYPT(...)` with expandable parameter reference
-- **Step 4** — `CALL LOCID_DECRYPT(...)` with expandable parameter reference
-- **Step 5** — Query `APP_SCHEMA.JOB_LOG` to monitor job status
+- **Step 1** — Bind input tables: Snowsight UI tab (with note that the table picker cannot browse the app's own database) + SQL tab (`CALL register_single_callback(...)`)
+- **Step 2** — `CALL LOCID_ENCRYPT(...)` with expandable parameter reference
+- **Step 3** — `CALL LOCID_DECRYPT(...)` with expandable parameter reference
+- **Step 4** — Query `APP_SCHEMA.JOB_LOG` to check job history
 - **Scheduling example** — Snowflake Task snippet for automated jobs
 
 ---
@@ -615,6 +626,15 @@ GRANT USAGE ON WAREHOUSE <customer_warehouse> TO ROLE LOCID_APP_INSTALLER;
 -- Assign to user(s) who install and manage the app
 GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
 ```
+
+**Post-install: Grant warehouse to the application (required for Streamlit UI):**
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+GRANT USAGE ON WAREHOUSE <customer_warehouse> TO APPLICATION LOCID_APP;
+```
+
+> **Why both grants?** The role grant allows the installer to call stored procedures. The application grant allows the Streamlit UI (which runs as the application object with owner's rights) to use the warehouse.
 
 After installation, the app's `setup.sql` creates all internal objects (schemas, tables, UDFs, stored procedures) within the app container. One additional post-install step is required: the consumer must approve the `LOCID_CENTRAL_EAI_SPEC` app specification so the EAI can make outbound HTTPS calls. The Setup Wizard (Screen E) provides the exact SQL.
 
