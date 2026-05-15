@@ -425,7 +425,7 @@ CALL LOCID_APP.APP_SCHEMA.LOCID_PURGE_OUTPUTS(30);
 
 ### "No warehouse found for the Streamlit object"
 
-The application needs warehouse access granted directly. Run:
+Run:
 
 ```sql
 GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION LOCID_APP;

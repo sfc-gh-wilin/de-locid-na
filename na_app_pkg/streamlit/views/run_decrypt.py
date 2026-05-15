@@ -61,7 +61,7 @@ with st.expander("💡 Warehouse tip", expanded=False):
         "-- Grant usage to your app installer role:\n"
         "GRANT USAGE ON WAREHOUSE LOCID_WH TO ROLE LOCID_APP_INSTALLER;\n"
         "\n"
-        "-- Grant usage to the application (required for Streamlit UI):\n"
+        "-- Grant usage to the application:\n"
         "GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;\n"
         "```"
     )
