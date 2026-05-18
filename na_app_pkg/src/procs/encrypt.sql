@@ -508,6 +508,8 @@ def encrypt_handler(
         """).collect()
 
         # 4-b: Relevant IPv6 build rows, pre-filtered to date range of this job
+        # ORDER BY start_ip_int_hex ensures micro-partitions are sorted for the
+        # BETWEEN range join — enables pruning even on the transient table.
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_BUILDS} AS
             SELECT l.*
@@ -519,6 +521,7 @@ def encrypt_handler(
                     ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
             ) rel_dates ON l.build_dt = rel_dates.build_dt
             WHERE l.start_ip LIKE '%:%'
+            ORDER BY l.start_ip_int_hex
         """).collect()
 
         # 4-c: Pre-join each input row to its matching build_dt
@@ -547,6 +550,11 @@ def encrypt_handler(
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_SEEN} (_ip VARCHAR)
         """).collect()
+
+        # Count distinct IPv6 IPs for early-exit check
+        v6_ip_count = session.sql(
+            f"SELECT COUNT(DISTINCT _ip) FROM {TBL_V6_DATED}"
+        ).collect()[0][0]
 
         for pass_num, prefix in enumerate([12, 10, 8, 6, 4, 0]):
 
@@ -598,6 +606,7 @@ def encrypt_handler(
                     ON  i.build_dt = l.build_dt
                     {pfx_inp_cond}
                     AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+                QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
             """).collect()
 
             # Update accumulator with IPs matched so far (for next pass anti-join)
@@ -606,6 +615,14 @@ def encrypt_handler(
                 SELECT DISTINCT _ip FROM {TBL_IPV6}
                 EXCEPT SELECT _ip FROM {TBL_V6_SEEN}
             """).collect()
+
+            # Early exit: skip remaining passes if all IPv6 IPs are matched
+            if v6_ip_count > 0:
+                seen_count = session.sql(
+                    f"SELECT COUNT(*) FROM {TBL_V6_SEEN}"
+                ).collect()[0][0]
+                if seen_count >= v6_ip_count:
+                    break
 
         # Combine IPv4 and IPv6 results
         session.sql(f"""

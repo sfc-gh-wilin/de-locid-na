@@ -55,9 +55,11 @@ USE ROLE ACCOUNTADMIN;
 -- Add clustering keys matching the stored procedure's access patterns
 -- =============================================================================
 
--- LOCID_BUILDS: filtered by build_dt (via LOCID_BUILD_DATES range join)
+-- LOCID_BUILDS: filtered by build_dt, then range-joined on START_IP_INT_HEX
+-- for IPv6 matching. Compound key enables micro-partition pruning on both
+-- the date filter AND the hex BETWEEN range join.
 ALTER TABLE LOCID.STAGING.LOCID_BUILDS
-    CLUSTER BY (BUILD_DT);
+    CLUSTER BY (BUILD_DT, START_IP_INT_HEX);
 
 -- LOCID_BUILDS_IPV4_EXPLODED: equi-joined on ip_address, filtered by build_dt
 ALTER TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED

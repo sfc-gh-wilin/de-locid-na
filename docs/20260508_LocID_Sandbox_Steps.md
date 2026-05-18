@@ -175,7 +175,7 @@ cd <repository-root>
 snow sql --connection locid -f "db/locid/provider/01_optimize_tables.sql"
 ```
 
-This adds clustering keys: `LOCID_BUILDS(build_dt)`, `LOCID_BUILDS_IPV4_EXPLODED(ip_address, build_dt)`.
+This adds clustering keys: `LOCID_BUILDS(build_dt, start_ip_int_hex)`, `LOCID_BUILDS_IPV4_EXPLODED(ip_address, build_dt)`.
 
 > **Note:** This is a metadata-only operation. Snowflake's Automatic Clustering reclusters in the background — queries improve progressively as it completes.
 

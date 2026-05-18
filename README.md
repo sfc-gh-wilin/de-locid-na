@@ -743,11 +743,13 @@ The stored procedures depend on specific column types and clustering keys on the
 
 ### General Performance Notes
 
-- **Clustering keys** on `LOCID_BUILDS`: `(build_dt)` — aligns with the date-range filter on `LOCID_BUILD_DATES`.
+- **Clustering keys** on `LOCID_BUILDS`: `(build_dt, start_ip_int_hex)` — compound key enables micro-partition pruning on both the date filter AND the IPv6 hex BETWEEN range join.
 - **Clustering keys** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the equi-join.
 - **Search Optimization Service (SOS)** candidate on IPv4 exploded table for equality predicate on `ip_address`.
-- IPv6 temp tables: consider materializing as transient tables within the job transaction to avoid recompute.
-- Warehouse sizing recommendation: M or L for large batch jobs given the multi-pass IPv6 matching.
+- **IPv6 intermediate table ordering:** The per-job `TBL_V6_BUILDS` transient table is created with `ORDER BY start_ip_int_hex` for range-join pruning.
+- **IPv6 early-exit:** After each prefix pass, the loop checks if all distinct IPv6 IPs have been matched and breaks early — avoids unnecessary wide-range passes.
+- **IPv6 network blocks** (e.g., `2806:108E:E:D03A::`) are fully supported. `PARSE_IP` expands `::` to zeros; the resulting hex is matched via the same BETWEEN range join as full device addresses.
+- Warehouse sizing recommendation: M or L Snowpark-optimized for large batch jobs given the multi-pass IPv6 matching.
 
 ---
 
@@ -1194,8 +1196,9 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 
 | Item | Status |
 |------|--------|
-| encode-lib JAR — switching to Scala UDF | ✓ Resolved 2026-04-15. JAR delivered: `encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar` (Scala 2.13 / Java 17). Approach changed from `LANGUAGE JAVA` + SnowflakeHandler wrapper to `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with inline handlers. Dev UDFs (`db/dev/provider/06_udfs.sql`) and native app UDFs (`na_app_pkg/src/udfs/locid_udf.sql`) both updated. |
-| AES key derivation (test vs. production) | ✓ Resolved 2026-04-15/16. Production derivation confirmed: `secret.replaceAll("~","=")` → `Base64.getUrlDecoder().decode()` → AES key bytes. All `toKey()` handlers in `06_udfs.sql` and `locid_udf.sql` updated to production mode. Cross-compatibility test: `08_cross_compat_test.sql`. |
+| encode-lib JAR — switching to Scala UDF | ✓ Resolved 2026-04-15. JAR delivered: `encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar` (Scala 2.13 / Java 17). Approach changed from `LANGUAGE JAVA` + SnowflakeHandler wrapper to `LANGUAGE SCALA RUNTIME_VERSION = '2.13'` with inline handlers. Dev UDFs (`db/dev/provider/06_udfs.sql`) updated. **Superseded** by Python vectorized UDFs (2026-05-05) — see below. |
+| AES key derivation (test vs. production) | ✓ Resolved 2026-04-15/16. Production derivation confirmed: `secret.replaceAll("~","=")` → `Base64.getUrlDecoder().decode()` → AES key bytes. Dev Scala UDFs (`db/dev/provider/06_udfs.sql`) retain this pattern for benchmark reference. Production UDFs now read keys from Snowflake SECRETs — no key derivation in SQL. |
+| Secret-backed UDFs (crypto key leak fix) | ✓ Completed (2026-05-17). All 5 crypto-using UDFs in `na_app_pkg/src/udfs/locid_udf.sql` now use `SECRETS` + `EXTERNAL_ACCESS_INTEGRATIONS` — keys never appear in query history. Encrypt/Decrypt procs no longer embed keys in SQL. Performance validated: zero per-row overhead (secret read once per worker process, cached at module scope). |
 | IPv6 matching SQL | ✓ Implemented (2026-04-20). Optimised 6-pass cascading hex-prefix range join implemented in `na_app_pkg/src/procs/encrypt.sql`. Key optimisations vs. reference POC: ip_hex pre-computed once (not 6×), LOCID_BUILDS scanned once (date-filtered pre-materialisation), prefix filter applied before range join, single accumulator anti-join per pass. |
 | HomeBiz_Type entitlement details | De-scoped from v1 (2026-04-16). No solid spec yet. Retained as a future entitlement flag (`allow_homebiz`); will be scoped and implemented in a subsequent version. |
 | Additional FC50 columns / new entitlements | Pending LocID R&D spike outcome |
