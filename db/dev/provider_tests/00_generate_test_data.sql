@@ -18,6 +18,7 @@
 -- GENERATED DATA SCHEMA:
 --   IPv4: 10.0.0.0 – 10.9.9.0 (/24 subnets, 100 blocks)
 --   IPv6: 2001:DB8:1:1:: – 2001:DB8:1:10:: (/64 subnets, 10 blocks, RFC 3849 documentation prefix)
+--         Host addresses (::1) and network block addresses (::) both tested
 --   Build date:         CURRENT_DATE - 14  (dynamic — always within 52-week freshness window)
 --   Customer event ts:  CURRENT_DATE - 12  (2 days into the build week; never triggers stale warning)
 --   All rows produce valid LOCID_TXCLOC_ENCRYPT / LOCID_STABLE_CLOC output
@@ -309,7 +310,29 @@ FROM gen;
 
 
 -- ---------------------------------------------------------------------------
--- STEP 8: CONSUMER_TEST.NA_TEST_INPUT — IPv4 + IPv6 rows (110 rows)
+-- STEP 7c: CUSTOMER_TEST_INPUT — IPv6 network block rows (10 rows)
+--
+-- Network block addresses (:: suffix, no host portion) matching the same
+-- LOCID_BUILDS /64 subnets from STEP 5b. These represent the network address
+-- itself (all-zeros host bits) — validates that the encrypt proc correctly
+-- matches network blocks via PARSE_IP expansion and BETWEEN range join.
+--
+-- Timestamps start at 20:00:00 on $test_event_dt — after IPv6 host rows.
+-- ---------------------------------------------------------------------------
+INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
+WITH gen AS (
+    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
+    FROM TABLE(GENERATOR(rowcount => 10))
+)
+SELECT
+    'GEN_V6NB_' || LPAD(rn::VARCHAR, 4, '0')                                  AS id,
+    '2001:DB8:1:' || rn::VARCHAR || '::'                                        AS ip_address,
+    DATEADD('minute', rn * 10, DATEADD('hour', 20, $test_event_dt::TIMESTAMP_NTZ)) AS ts
+FROM gen;
+
+
+-- ---------------------------------------------------------------------------
+-- STEP 8: CONSUMER_TEST.NA_TEST_INPUT — IPv4 + IPv6 rows (120 rows)
 --
 -- Simulates the consumer-owned input table.
 -- Creates the schema and table inline — no need to run
@@ -324,7 +347,7 @@ CREATE OR REPLACE TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (
     ip_addr     VARCHAR          NOT NULL,
     event_ts    TIMESTAMP_NTZ(9) NOT NULL
 )
-COMMENT = 'Sandbox consumer input: 110-row sample (100 IPv4 + 10 IPv6) for Native App Encrypt testing';
+COMMENT = 'Sandbox consumer input: 120-row sample (100 IPv4 + 10 IPv6 host + 10 IPv6 network block) for Native App Encrypt testing';
 
 INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 WITH gen AS (
@@ -337,7 +360,7 @@ SELECT
     DATEADD('minute', rn * 10, DATEADD('hour', 8, $test_event_dt::TIMESTAMP_NTZ))  AS event_ts
 FROM gen;
 
--- IPv6 consumer input (10 rows) — mirrors CUSTOMER_TEST_INPUT IPv6 rows (STEP 7b)
+-- IPv6 consumer input (10 rows) — mirrors CUSTOMER_TEST_INPUT IPv6 host rows (STEP 7b)
 INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
@@ -347,6 +370,18 @@ SELECT
     'GEN_V6_' || LPAD(rn::VARCHAR, 4, '0')                                    AS row_id,
     '2001:DB8:1:' || rn::VARCHAR || '::1'                                      AS ip_addr,
     DATEADD('minute', rn * 10, DATEADD('hour', 18, $test_event_dt::TIMESTAMP_NTZ)) AS event_ts
+FROM gen;
+
+-- IPv6 network block consumer input (10 rows) — mirrors STEP 7c
+INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
+WITH gen AS (
+    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
+    FROM TABLE(GENERATOR(rowcount => 10))
+)
+SELECT
+    'GEN_V6NB_' || LPAD(rn::VARCHAR, 4, '0')                                  AS row_id,
+    '2001:DB8:1:' || rn::VARCHAR || '::'                                        AS ip_addr,
+    DATEADD('minute', rn * 10, DATEADD('hour', 20, $test_event_dt::TIMESTAMP_NTZ)) AS event_ts
 FROM gen;
 
 
@@ -364,11 +399,11 @@ UNION ALL
 SELECT 'NA_TEST_INPUT'              AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
 ORDER BY 1;
 -- Expected:
---   CUSTOMER_TEST_INPUT          110  (100 IPv4 + 10 IPv6)
+--   CUSTOMER_TEST_INPUT          120  (100 IPv4 + 10 IPv6 host + 10 IPv6 network block)
 --   LOCID_BUILD_DATES              5
 --   LOCID_BUILDS                 110  (100 IPv4 + 10 IPv6)
 --   LOCID_BUILDS_IPV4_EXPLODED   100  (IPv4 only)
---   NA_TEST_INPUT                110  (100 IPv4 + 10 IPv6)
+--   NA_TEST_INPUT                120  (100 IPv4 + 10 IPv6 host + 10 IPv6 network block)
 
 -- Spot-check IPv4: verify all 100 IPv4 IPs match LOCID_BUILDS_IPV4_EXPLODED
 SELECT COUNT(*) AS matched_ipv4
@@ -376,7 +411,7 @@ FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT c
 JOIN LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED e ON e.ip_address = c.ip_address;
 -- Expected: 100
 
--- Spot-check IPv6: verify all 10 IPv6 IPs fall within a LOCID_BUILDS IPv6 range
+-- Spot-check IPv6: verify all 20 IPv6 IPs (host + network block) match a LOCID_BUILDS range
 SELECT COUNT(*) AS matched_ipv6
 FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT c
 JOIN LOCID_DEV.STAGING.LOCID_BUILDS lb
@@ -384,4 +419,4 @@ JOIN LOCID_DEV.STAGING.LOCID_BUILDS lb
  AND GET_PATH(PARSE_IP(c.ip_address, 'INET'), 'hex_ipv6')
        BETWEEN lb.start_ip_int_hex AND lb.end_ip_int_hex
 WHERE c.ip_address LIKE '%:%';
--- Expected: 10
+-- Expected: 20  (10 host addresses + 10 network blocks — both fall within /64 ranges)
