@@ -88,7 +88,34 @@ snow connection test -c locid
 
 ---
 
-## Phase 2 — Role Setup (one-time, ACCOUNTADMIN)
+## Phase 2 — Create Warehouse (one-time, ACCOUNTADMIN)
+
+The LocID encrypt/decrypt procedures require a **Snowpark-optimized** warehouse. Create one if it does not already exist:
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+CREATE WAREHOUSE IF NOT EXISTS SNOWPARK_OPT_M_WH
+    WAREHOUSE_SIZE = 'MEDIUM'
+    WAREHOUSE_TYPE = 'SNOWPARK-OPTIMIZED'
+    MIN_CLUSTER_COUNT = 1
+    MAX_CLUSTER_COUNT = 3
+    SCALING_POLICY = 'STANDARD'
+    AUTO_SUSPEND = 300
+    AUTO_RESUME = TRUE;
+```
+
+| Row Count | Recommended Size |
+|-----------|-----------------|
+| < 1M rows | Medium Snowpark-optimized |
+| 1M–10M rows | Medium/Large Snowpark-optimized |
+| 10M+ rows | Large+ Snowpark-optimized |
+
+> **Note:** For concurrent jobs, set `MAX_CLUSTER_COUNT = 2–3` (multi-cluster). Adjust `WAREHOUSE_SIZE` based on your input row counts.
+
+---
+
+## Phase 3 — Role Setup (one-time, ACCOUNTADMIN)
 
 Create the two custom deployment roles. This only needs to run once.
 
@@ -110,9 +137,9 @@ Expected: two rows — `LOCID_APP_ADMIN` and `LOCID_APP_INSTALLER`.
 
 ---
 
-## Phase 3 — Deploy Native App
+## Phase 4 — Deploy Native App
 
-### 3.1 Pre-requisite — mb-locid-encoding WHL in `src/lib/`
+### 4.1 Pre-requisite — mb-locid-encoding WHL in `src/lib/`
 
 The WHL is not checked in to git. Place it once before the first deploy:
 
@@ -121,7 +148,7 @@ ls na_app_pkg/src/lib/
 # Expected: mb_locid_encoding-0.0.0-py3-none-any.whl
 ```
 
-### 3.2 Deploy app package (Snow CLI)
+### 4.2 Deploy app package (Snow CLI)
 
 `snow app deploy` creates `LOCID_PKG` (if missing) and uploads all artifacts to `@APP_SCHEMA.APP_STAGE`:
 
@@ -139,7 +166,7 @@ snow stage list-files @LOCID_PKG.APP_SCHEMA.APP_STAGE \
     --connection locid --role LOCID_APP_ADMIN
 ```
 
-### 3.3 Add clustering keys to provider tables (one-time)
+### 4.3 Add clustering keys to provider tables (one-time)
 
 LocID's source tables in `LOCID.STAGING` lack clustering keys. Without clustering, full table scans on 58B+ rows make the encrypt procedure run indefinitely.
 
@@ -152,7 +179,7 @@ This adds clustering keys: `LOCID_BUILDS(build_dt)`, `LOCID_BUILDS_IPV4_EXPLODED
 
 > **Note:** This is a metadata-only operation. Snowflake's Automatic Clustering reclusters in the background — queries improve progressively as it completes.
 
-### 3.4 Grant access
+### 4.4 Grant access
 
 The Secure Views in the app package reference `LOCID.STAGING` tables directly. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on those tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
 
@@ -163,7 +190,7 @@ snow sql --connection locid -f "db/locid/provider/02_grant_access.sql"
 
 This also grants `LOCID_APP_INSTALLER` read access to the POC test input tables for reference binding.
 
-### 3.5 Share provider data into app package
+### 4.5 Share provider data into app package
 
 Once `LOCID_PKG` exists, run the provider data sharing script. This creates `LOCID_SHARE` inside the app package and exposes the three provider tables as Secure Views.
 
@@ -182,7 +209,7 @@ snow sql --connection locid --role LOCID_APP_ADMIN \
 
 > **Re-run when needed:** If the provider source tables are recreated, re-run this file so the Secure Views and grants stay in sync.
 
-### 3.6 Create app version
+### 4.6 Create app version
 
 ```bash
 cd na_app_pkg
@@ -191,7 +218,7 @@ snow app version create v1_0 --force --skip-git-check --connection locid
 
 `--force` overwrites any existing `v1_0` version. `--skip-git-check` suppresses the uncommitted-files warning.
 
-### 3.7 Install the application
+### 4.7 Install the application
 
 ```bash
 cd na_app_pkg
@@ -206,7 +233,7 @@ snow app run --version v1_0 --connection locid
 
 ---
 
-## Phase 4 — App Setup Wizard
+## Phase 5 — App Setup Wizard
 
 Open the app in Snowsight: **Data Products → Apps → LOCID_APP**.
 
@@ -235,7 +262,7 @@ Expected keys: `api_key`, `api_key_id`, `cached_license`, `client_id`, `license_
 
 ---
 
-## Phase 5 — Test Encrypt
+## Phase 6 — Test Encrypt
 
 Test input tables already exist in the `LOCID` database:
 
@@ -244,7 +271,7 @@ Test input tables already exist in the `LOCID` database:
 | `LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV4` | 1M | IPv4 |
 | `LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV6` | 1M | IPv6 |
 
-### 5.1 Bind the input table
+### 6.1 Bind the input table
 
 **Option A — Streamlit UI (recommended):**
 
@@ -265,7 +292,7 @@ CALL LOCID_APP.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(
 
 > To test IPv6 instead, replace with `LOCID.POC.CUSTOMER_TEST_INPUT_1M_IPV6`.
 
-### 5.2 Run the Encrypt job
+### 6.2 Run the Encrypt job
 
 Open **Run Encrypt** from the sidebar.
 
@@ -291,9 +318,9 @@ SELECT * FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> LIMIT 
 
 ---
 
-## Phase 6 — Test Decrypt
+## Phase 7 — Test Decrypt
 
-### 6.1 Bind the decrypt input table
+### 7.1 Bind the decrypt input table
 
 Bind the Encrypt output table as input for Decrypt:
 
@@ -307,7 +334,7 @@ CALL LOCID_APP.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(
 );
 ```
 
-### 6.2 Run the Decrypt job
+### 7.2 Run the Decrypt job
 
 Open **Run Decrypt** from the sidebar.
 
@@ -318,7 +345,7 @@ Open **Run Decrypt** from the sidebar.
 
 Click **Run Job**.
 
-### 6.3 Verify STABLE_CLOC consistency
+### 7.3 Verify STABLE_CLOC consistency
 
 ```sql
 SELECT
@@ -335,7 +362,7 @@ LIMIT 20;
 
 ---
 
-## Phase 7 — Verify Job History
+## Phase 8 — Verify Job History
 
 ```sql
 SELECT *
@@ -359,9 +386,23 @@ snow app deploy --connection locid
 # 2. Add a new patch to the existing version
 snow app version create v1_0 --force --skip-git-check --connection locid
 
-# 3. Upgrade the running app
+# 3. Upgrade the running app (provider account test)
 snow app run --version v1_0 --connection locid
 ```
+
+After verifying the update works on the provider account, push it to consumers:
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+
+ALTER APPLICATION PACKAGE LOCID_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    SET DEFAULT RELEASE DIRECTIVE
+    VERSION = v1_0
+    PATCH = <new_patch_number>;
+```
+
+> **Note:** Replace `<new_patch_number>` with the patch number output by `snow app version create` in step 2. Consumers on the DEFAULT channel will automatically pick up the new patch on their next app refresh.
 
 ---
 

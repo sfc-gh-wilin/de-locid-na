@@ -315,18 +315,19 @@ if step == 1:
             "grant and bind **Input Table for Encrypt**.",
             icon="⚠️",
         )
-        with st.expander("Can't find your table in the picker?"):
-            st.markdown(
-                "Snowsight's table picker cannot browse tables inside the **app's own database**. "
-                "If your input table lives in the app database, bind it via SQL instead:\n\n"
-                "```sql\n"
-                "CALL <app_database>.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
-                "    'ENCRYPT_INPUT_TABLE', 'ADD',\n"
-                "    SYSTEM$REFERENCE('TABLE', '<db>.<schema>.<table>', 'PERSISTENT', 'SELECT')\n"
-                ");\n"
-                "```\n\n"
-                "See the **SQL Guide** page for full details and required grants."
-            )
+
+    with st.expander("Can't find your table in the picker?"):
+        st.markdown(
+            "Snowsight's table picker cannot browse tables inside the **app's own database**. "
+            "If your input table lives in the app database, bind it via SQL instead:\n\n"
+            "```sql\n"
+            "CALL <app_database>.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
+            "    'ENCRYPT_INPUT_TABLE', 'ADD',\n"
+            "    SYSTEM$REFERENCE('TABLE', '<db>.<schema>.<table>', 'PERSISTENT', 'SELECT')\n"
+            ");\n"
+            "```\n\n"
+            "See the **SQL Guide** page for full details and required grants."
+        )
 
 # ---------------------------------------------------------------------------
 # Step 2 — Map Columns
