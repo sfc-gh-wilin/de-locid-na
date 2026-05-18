@@ -632,7 +632,7 @@ GRANT USAGE ON WAREHOUSE <customer_warehouse> TO ROLE LOCID_APP_INSTALLER;
 GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
 ```
 
-**Post-install: Grant warehouse to the application (required for Streamlit UI):**
+**Post-install: Grant warehouse to the application:**
 
 ```sql
 USE ROLE LOCID_APP_INSTALLER;
@@ -845,6 +845,12 @@ CREATE OR REPLACE WAREHOUSE LOCID_WH
     SCALING_POLICY = 'STANDARD'
     AUTO_SUSPEND = 300
     AUTO_RESUME = TRUE;
+
+-- Grant usage to your app installer role:
+GRANT USAGE ON WAREHOUSE LOCID_WH TO ROLE LOCID_APP_INSTALLER;
+
+-- Grant usage to the application:
+GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;
 ```
 
 ---

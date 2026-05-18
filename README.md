@@ -946,7 +946,7 @@ GRANT USAGE ON WAREHOUSE <customer_warehouse> TO ROLE LOCID_APP_INSTALLER;
 GRANT ROLE LOCID_APP_INSTALLER TO USER <username>;
 ```
 
-**Post-install: Grant warehouse to the application (required for Streamlit UI):**
+**Post-install: Grant warehouse to the application:**
 
 ```sql
 USE ROLE LOCID_APP_INSTALLER;
@@ -1210,5 +1210,3 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | Python package for vectorized UDFs | ✓ Completed (2026-05-05). LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl`. All UDFs migrated to Python vectorized — benchmarked at 5.7× throughput vs Scala scalar at 50M rows. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
 | SQL-only workflow for consumers | ✓ Implemented (2026-04-28). SQL Guide view (View 5) added to Streamlit app — step-by-step instructions for running `LOCID_ENCRYPT` / `LOCID_DECRYPT` via SQL with live app name. Jobs submitted via SQL are tracked in Job History identically to UI jobs. |
 | Log retention for JOB_LOG / APP_LOGS | ✓ Implemented (2026-04-28). `LOCID_PURGE_LOGS()` stored procedure reads `log_retention_days` from APP_CONFIG (default 30 days) and deletes old rows. Called opportunistically at the start of each job and available on-demand via the Log Retention section in Configuration (View 6). |
-
-

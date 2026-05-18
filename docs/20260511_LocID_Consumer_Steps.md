@@ -122,7 +122,35 @@ GRANT ROLE LOCID_APP_INSTALLER TO USER <your_username>;
 GRANT ROLE LOCID_APP_INSTALLER TO ROLE SYSADMIN;
 ```
 
-### 1.2 Verify the role
+### 1.2 Create a dedicated warehouse (recommended)
+
+For best performance, use a **Snowpark-optimized** warehouse:
+
+```sql
+USE ROLE ACCOUNTADMIN;
+
+CREATE OR REPLACE WAREHOUSE LOCID_WH
+    WAREHOUSE_SIZE = 'LARGE'
+    WAREHOUSE_TYPE = 'SNOWPARK-OPTIMIZED'
+    MIN_CLUSTER_COUNT = 1
+    MAX_CLUSTER_COUNT = 3
+    SCALING_POLICY = 'STANDARD'
+    AUTO_SUSPEND = 300
+    AUTO_RESUME = TRUE;
+
+-- Grant usage to the installer role
+GRANT USAGE ON WAREHOUSE LOCID_WH TO ROLE LOCID_APP_INSTALLER;
+```
+
+| Row Count | Recommended Size |
+|-----------|-----------------|
+| < 1M rows | Medium Snowpark-optimized |
+| 1M–10M rows | Medium/Large Snowpark-optimized |
+| 10M+ rows | Large+ Snowpark-optimized |
+
+> **Note:** If you already have a Snowpark-optimized warehouse, you can use it instead — just grant usage to the `LOCID_APP_INSTALLER` role (see 1.1 above).
+
+### 1.3 Verify the role
 
 ```sql
 SHOW ROLES LIKE 'LOCID_APP_INSTALLER';
@@ -154,7 +182,11 @@ The Streamlit UI runs under the application's own context. Grant warehouse usage
 ```sql
 USE ROLE LOCID_APP_INSTALLER;
 
-GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION LOCID_APP;
+-- If using the recommended warehouse from section 1.2:
+GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;
+
+-- Or if using an existing warehouse:
+-- GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION LOCID_APP;
 ```
 
 > **Why both grants?**
