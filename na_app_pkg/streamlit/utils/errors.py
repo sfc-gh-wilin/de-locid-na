@@ -22,10 +22,16 @@ def show_error(summary: str, detail: Optional[object] = None, icon: str = "❌")
         summary: Short, human-readable description shown prominently.
         detail:  Full error or traceback (exception or string). Hidden in an
                  expander so power users can inspect it without overwhelming
-                 everyone else.
+                 everyone else. If already inside an expander/status, shows
+                 inline as a code block to avoid nesting errors.
         icon:    Streamlit icon string (default "❌").
     """
     st.error(summary, icon=icon)
     if detail is not None:
-        with st.expander("Error details"):
+        try:
+            with st.expander("Error details"):
+                st.code(str(detail), language=None)
+        except st.errors.StreamlitAPIException:
+            # Inside a status/expander — show inline instead of nesting
+            st.caption("Error details:")
             st.code(str(detail), language=None)

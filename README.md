@@ -138,12 +138,15 @@ APP_SCHEMA.LOCID_PURGE_OUTPUTS(INTEGER)   -- Drop output tables older than outpu
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
-APP_CODE.LOCID_BASE_ENCRYPT(LOC_ID, KEY_STR)                                           -- Encrypt raw base LocID (AES-GCM) → URL-safe base64
-APP_CODE.LOCID_BASE_DECRYPT(ENCRYPTED_LOC_ID, KEY_STR)                                 -- Decrypt base64 ciphertext → raw base LocID
-APP_CODE.LOCID_TXCLOC_ENCRYPT(ENCRYPTED_LOCID, BASE_LOCID_KEY, SCHEME_KEY, TIMESTAMP_SEC, CLIENT_ID) -- Generate TX_CLOC from encrypted base LocID
-APP_CODE.LOCID_TXCLOC_DECRYPT(TX_CLOC, SCHEME_KEY)                                     -- Decode TX_CLOC → VARCHAR JSON: {base_loc_id, timestamp, enc_client_id}
-APP_CODE.LOCID_STABLE_CLOC(ENCRYPTED_LOCID, BASE_LOCID_KEY, NAMESPACE_GUID, CLIENT_ID, ENC_CLIENT_ID, TIER) -- Generate STABLE_CLOC from encrypted base LocID
-APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(BASE_LOC_ID, NAMESPACE_GUID, DEC_CLIENT_ID, ENC_CLIENT_ID, TIER)     -- Generate STABLE_CLOC from plain base LocID (decrypt path)
+-- All crypto-using UDFs declare EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI) and
+-- SECRETS = ('alias' = APP_SCHEMA.LOCID_*_SECRET). Keys are read inside the handler via
+-- _snowflake.get_generic_secret_string('alias') — never passed as SQL parameters.
+APP_CODE.LOCID_BASE_ENCRYPT(LOC_ID)                                                     -- Encrypt raw base LocID (AES-GCM) → URL-safe base64; key from LOCID_BASE_SECRET
+APP_CODE.LOCID_BASE_DECRYPT(ENCRYPTED_LOC_ID)                                           -- Decrypt base64 ciphertext → raw base LocID; key from LOCID_BASE_SECRET
+APP_CODE.LOCID_TXCLOC_ENCRYPT(TX_CLOC_JSON)                                             -- JSON (flat geo fields) → TX_CLOC; key from LOCID_SCHEME_SECRET
+APP_CODE.LOCID_TXCLOC_DECRYPT(TX_CLOC)                                                  -- Decode TX_CLOC → VARCHAR JSON: {base_loc_id, timestamp, enc_client_id, geo...}; key from LOCID_SCHEME_SECRET
+APP_CODE.LOCID_STABLE_CLOC(ENCRYPTED_LOCID, NAMESPACE_GUID, CLIENT_ID, ENC_CLIENT_ID, TIER) -- Generate STABLE_CLOC from encrypted base LocID; key from LOCID_BASE_SECRET
+APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(BASE_LOC_ID, NAMESPACE_GUID, DEC_CLIENT_ID, ENC_CLIENT_ID, TIER)     -- Generate STABLE_CLOC from plain base LocID (decrypt path; no key — pure SHA-1/UUID5)
 ```
 
 ---
@@ -160,14 +163,14 @@ Key functions:
 
 | UDF | Inputs | Output | Notes |
 |-----|--------|--------|-------|
-| `LOCID_BASE_ENCRYPT` | `loc_id`, `key_str` | `encrypted_locid` (VARCHAR) | AES-encrypts plain base LocID for storage |
-| `LOCID_BASE_DECRYPT` | `encrypted_loc_id`, `key_str` | `locid` (VARCHAR) | Decrypts stored base LocID to plain form |
-| `LOCID_TXCLOC_ENCRYPT` | `encrypted_locid`, `base_locid_key`, `scheme_key`, `timestamp_sec`, `client_id` | `tx_cloc` (VARCHAR) | Decrypts base LocID, re-encrypts as TX_CLOC |
-| `LOCID_TXCLOC_DECRYPT` | `tx_cloc`, `scheme_key` | VARCHAR (JSON: {base_loc_id, timestamp, enc_client_id}) | Decodes TX_CLOC → base LocID + metadata |
-| `LOCID_STABLE_CLOC` | `encrypted_locid`, `base_locid_key`, `namespace_guid`, `client_id`, `enc_client_id`, `tier` | `stable_cloc` (VARCHAR) | Produces stable UUID-format CLOC from stored encrypted LocID |
-| `LOCID_STABLE_CLOC_FROM_PLAIN` | `base_loc_id`, `namespace_guid`, `dec_client_id`, `enc_client_id`, `tier` | `stable_cloc` (VARCHAR) | As above, accepts plain (unencrypted) base LocID (decrypt path) |
+| `LOCID_BASE_ENCRYPT` | `loc_id` | `encrypted_locid` (VARCHAR) | AES-encrypts plain base LocID; key from LOCID_BASE_SECRET |
+| `LOCID_BASE_DECRYPT` | `encrypted_loc_id` | `locid` (VARCHAR) | Decrypts stored base LocID; key from LOCID_BASE_SECRET |
+| `LOCID_TXCLOC_ENCRYPT` | `tx_cloc_json` | `tx_cloc` (VARCHAR) | JSON → TX_CLOC; key from LOCID_SCHEME_SECRET |
+| `LOCID_TXCLOC_DECRYPT` | `tx_cloc` | VARCHAR (JSON: {base_loc_id, timestamp, enc_client_id, geo...}) | Decodes TX_CLOC → base LocID + metadata + geo; key from LOCID_SCHEME_SECRET |
+| `LOCID_STABLE_CLOC` | `encrypted_locid`, `namespace_guid`, `client_id`, `enc_client_id`, `tier` | `stable_cloc` (VARCHAR) | Produces stable UUID-format CLOC; key from LOCID_BASE_SECRET |
+| `LOCID_STABLE_CLOC_FROM_PLAIN` | `base_loc_id`, `namespace_guid`, `dec_client_id`, `enc_client_id`, `tier` | `stable_cloc` (VARCHAR) | As above, accepts plain base LocID (decrypt path; no key — pure SHA-1/UUID5) |
 
-Crypto keys (`scheme_key`, `base_locid_key`) are retrieved from LocID Central at job start, passed into UDFs — never stored in plaintext in tables.
+Crypto keys are stored in Snowflake `GENERIC_STRING` SECRET objects (`LOCID_BASE_SECRET`, `LOCID_SCHEME_SECRET`) and read by UDFs via their `SECRETS` clause + `_snowflake.get_generic_secret_string()`. Keys are **never** passed as SQL parameters or exposed in query history.
 
 ### TxCloc Constructor (confirmed from local JAR testing)
 
@@ -274,9 +277,9 @@ Customer Input Table (via reference binding)
          │
          ├─ 1. Entitlement check — verify allow_encrypt + requested output columns
          │
-         ├─ 2. Fetch secrets from Snowflake SECRETs (base_locid_key, scheme_key, api_key)
-         │       Resolve selected API key metadata from APP_CONFIG:
-         │       namespace_guid, provider_id, client_id → used for STABLE_CLOC
+          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
+          │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
+          │       never read into proc variables or embedded in SQL.
          │
          ├─ 3. IP Matching (see matching strategy below)
          │       → unique_id, encrypted_locid, tier, geo_context, build_dt
@@ -309,8 +312,8 @@ Customer Input Table (via reference binding)
          │
          ├─ 1. Entitlement check — verify allow_decrypt + requested output columns
          │
-         ├─ 2. Fetch secrets from Snowflake SECRETs (scheme_key, api_key)
-         │       Resolve selected API key metadata from APP_CONFIG
+          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
+          │       Crypto secrets are bound directly to UDFs via SECRETS clauses.
          │
          ├─ 3. Call UDFs per row:
          │       LOCID_TXCLOC_DECRYPT → base_loc_id + metadata + geo context (JSON)
@@ -776,7 +779,7 @@ Benchmark context (Snowflake engineering guidance): Python vectorized UDFs typic
 Snowflake auto-tunes the vectorized batch size to approximately **1,000–8,192 rows per batch** per worker node. The throughput gain for this specific workload comes from two sources:
 
 - **Fewer dispatch crossings** — the Python–SQL boundary is crossed `ceil(N / batch_size)` times instead of `N` times.
-- **Amortised key setup** — `scheme_key` and `base_locid_key` are constants per query. A vectorized handler initialises cipher objects once per batch (or once per worker via `_scheme_cache`) instead of once per row.
+- **Amortised key setup** — Crypto keys are read from Snowflake SECRETs once per worker process and cached as a module-scope `_KEY_SERIES`. The cipher object is initialised once per worker (not once per row or per batch).
 
 | Row count    | Measured/expected improvement vs. Scala scalar UDFs        |
 |--------------|------------------------------------------------------------|

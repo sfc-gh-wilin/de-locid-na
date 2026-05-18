@@ -7,8 +7,8 @@
 --
 -- Workflow:
 --   1. Validate entitlement (allow_decrypt)
---   2. Fetch scheme_secret (+ base_locid_secret, client_id, namespace_guid)
---      from LocID Central (cached)
+--   2. Fetch license context (client_id, namespace_guid) from LocID Central (cached)
+--      Crypto secrets are bound directly to UDFs via SECRETS clauses — never embedded in SQL.
 --   3. Decode each TX_CLOC via LOCID_TXCLOC_DECRYPT into a temp table
 --      → location_id (plaintext), timestamp, enc_client_id
 --   4. Generate STABLE_CLOC via LOCID_STABLE_CLOC_FROM_PLAIN (if entitled)
@@ -45,10 +45,8 @@ RUNTIME_VERSION = '3.11'
 EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
 PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
-    'license_key'   = APP_SCHEMA.LOCID_LICENSE_KEY,
-    'api_key'       = APP_SCHEMA.LOCID_API_KEY,
-    'base_secret'   = APP_SCHEMA.LOCID_BASE_SECRET,
-    'scheme_secret' = APP_SCHEMA.LOCID_SCHEME_SECRET
+    'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY,
+    'api_key'     = APP_SCHEMA.LOCID_API_KEY
 )
 HANDLER = 'decrypt_handler'
 AS $$
@@ -87,9 +85,13 @@ def _get_config(session, key: str):
     return rows[0] if rows else None
 
 
-def _get_secrets(session) -> dict:
-    """Return license secrets. Refreshes via LOCID_FETCH_LICENSE if cache is > 1 hour old.
-    Crypto secrets are read from Snowflake SECRETs via _snowflake module — never from APP_CONFIG.
+def _get_license_context(session) -> dict:
+    """Return non-secret license context (client_id, namespace_guid).
+
+    Refreshes via LOCID_FETCH_LICENSE if the cached license is older than 1 hour
+    or missing. LOCID_FETCH_LICENSE writes/refreshes the crypto secrets directly
+    into APP_SCHEMA.LOCID_BASE_SECRET and LOCID_SCHEME_SECRET; this proc no
+    longer reads those values — the UDFs do, via their SECRETS clauses.
     """
     cached = _get_config(session, 'cached_license')
     if not (cached and cached[1] and time.time() - cached[1].timestamp() < 3600):
@@ -104,10 +106,6 @@ def _get_secrets(session) -> dict:
         cached = _get_config(session, 'cached_license')
         if not cached or not cached[0]:
             raise RuntimeError("License not configured. Complete the Setup Wizard first.")
-
-    # Read crypto secrets from Snowflake SECRETs (never from APP_CONFIG)
-    base_locid_secret = _snowflake.get_generic_secret_string('base_secret')
-    scheme_secret     = _snowflake.get_generic_secret_string('scheme_secret')
 
     # Read non-secret fields from stripped cached JSON
     data     = json.loads(cached[0])
@@ -132,10 +130,8 @@ def _get_secrets(session) -> dict:
         )
 
     return {
-        'base_locid_secret': base_locid_secret,
-        'scheme_secret':     scheme_secret,
-        'client_id':         int(lic_info.get('client_id', 0)),
-        'namespace_guid':    entry.get('namespace_guid', ''),
+        'client_id':      int(lic_info.get('client_id', 0)),
+        'namespace_guid': entry.get('namespace_guid', ''),
     }
 
 
@@ -146,7 +142,10 @@ def _check_entitlement(session, flag: str) -> None:
 
     data  = json.loads(cached[0])
     k_row = _get_config(session, 'api_key_id')
-    sel   = int(k_row[0]) if k_row and k_row[0] else None
+    try:
+        sel = int(k_row[0].strip()) if k_row and k_row[0] else None
+    except (ValueError, AttributeError):
+        sel = None
 
     for item in data.get('access', []):
         if item.get('status') == 'ACTIVE':
@@ -190,7 +189,10 @@ def _entitled_cols(session, operation: str) -> list:
     if cached and cached[0]:
         data  = json.loads(cached[0])
         k_row = _get_config(session, 'api_key_id')
-        sel   = int(k_row[0]) if k_row and k_row[0] else None
+        try:
+            sel = int(k_row[0].strip()) if k_row and k_row[0] else None
+        except (ValueError, AttributeError):
+            sel = None
         for item in data.get('access', []):
             if item.get('status') == 'ACTIVE' and (sel is None or item.get('api_key_id') == sel):
                 active_flags = {
@@ -383,13 +385,13 @@ def decrypt_handler(
         input_table_name = _resolve_ref_name(session, 'DECRYPT_INPUT_TABLE')
 
         # ------------------------------------------------------------------
-        # Step 2: Fetch secrets from LocID Central (cached)
+        # Step 2: Fetch license context (client_id, namespace_guid).
+        # Crypto secrets are bound directly to the UDFs (see locid_udf.sql)
+        # and are NEVER read into proc-local variables or embedded in SQL.
         # ------------------------------------------------------------------
-        sec        = _get_secrets(session)
-        scheme_key = _sql_lit(sec['scheme_secret'])
-        base_key   = _sql_lit(sec['base_locid_secret'])
+        sec        = _get_license_context(session)
         client_id  = sec['client_id']
-        ns_guid    = _sql_lit(sec['namespace_guid'])
+        ns_guid    = _sql_lit(sec['namespace_guid'])   # non-secret identifier
 
         rows_in = session.sql("SELECT COUNT(*) FROM reference('DECRYPT_INPUT_TABLE')").collect()[0][0]
         phases['secrets_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
@@ -399,6 +401,9 @@ def decrypt_handler(
         #
         # Results are cached in a temp table to avoid re-running the UDF
         # three times (once per extracted field).
+        #
+        # LOCID_TXCLOC_DECRYPT reads scheme_secret from APP_SCHEMA.LOCID_SCHEME_SECRET
+        # via its UDF-level SECRETS clause — no key is passed as an argument.
         # ------------------------------------------------------------------
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_DECODED} AS
@@ -406,7 +411,7 @@ def decrypt_handler(
                 {id_col}       AS _id,
                 {txcloc_col}   AS _txcloc,
                 PARSE_JSON(
-                    APP_CODE.LOCID_TXCLOC_DECRYPT({txcloc_col}, {scheme_key})
+                    APP_CODE.LOCID_TXCLOC_DECRYPT({txcloc_col})
                 ) AS _decoded
             FROM reference('DECRYPT_INPUT_TABLE')
             WHERE {txcloc_col} IS NOT NULL

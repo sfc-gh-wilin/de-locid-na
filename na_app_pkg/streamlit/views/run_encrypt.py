@@ -188,7 +188,7 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
                 MAX({ts_expr})                              AS ts_max,
                 SUM(IFF({q_ts} IS NULL, 1, 0))           AS null_ts,
                 SUM(IFF({ts_expr} < {cutoff_epoch}, 1, 0)) AS stale_cnt
-            FROM {table}
+            FROM (SELECT {q_ts} FROM {table} TABLESAMPLE (100000 ROWS))
         """).collect()[0]
         result["ts_min"]      = ts_rows[0]
         result["ts_max"]      = ts_rows[1]
@@ -535,3 +535,8 @@ elif step == 4:
                                  "Job threw an exception", exc=e)
                     show_error(f"Encrypt job failed unexpectedly (elapsed: {elapsed:.1f}s).",
                                detail=e)
+
+else:
+    # Invalid step state — reset to prevent blank page
+    st.session_state.enc_step = 1
+    st.rerun()

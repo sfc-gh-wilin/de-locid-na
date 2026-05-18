@@ -113,12 +113,15 @@ APP_SCHEMA.LOCID_PURGE_OUTPUTS(INTEGER)     -- Drop output tables older than out
 APP_SCHEMA.LOCID_APP                        -- Streamlit application object
 
 -- APP_CODE (versioned schema): Python vectorized UDFs — required by Snowflake for UDFs with WHL IMPORTS
-APP_CODE.LOCID_BASE_ENCRYPT(LOC_ID, KEY_STR)                                           -- Encrypt raw base LocID (AES-GCM) → URL-safe base64
-APP_CODE.LOCID_BASE_DECRYPT(ENCRYPTED_LOC_ID, KEY_STR)                                 -- Decrypt base64 ciphertext → raw base LocID
-APP_CODE.LOCID_TXCLOC_ENCRYPT(ENCRYPTED_LOCID, BASE_LOCID_KEY, SCHEME_KEY, TIMESTAMP_SEC, CLIENT_ID) -- Generate TX_CLOC from encrypted base LocID
-APP_CODE.LOCID_TXCLOC_DECRYPT(TX_CLOC, SCHEME_KEY)                                     -- Decode TX_CLOC → VARCHAR JSON: {base_loc_id, timestamp, enc_client_id}
-APP_CODE.LOCID_STABLE_CLOC(ENCRYPTED_LOCID, BASE_LOCID_KEY, NAMESPACE_GUID, CLIENT_ID, ENC_CLIENT_ID, TIER) -- Generate STABLE_CLOC from encrypted base LocID
-APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(BASE_LOC_ID, NAMESPACE_GUID, DEC_CLIENT_ID, ENC_CLIENT_ID, TIER)     -- Generate STABLE_CLOC from plain base LocID (decrypt path)
+-- All crypto-using UDFs declare EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI) and
+-- SECRETS = ('alias' = APP_SCHEMA.LOCID_*_SECRET). Keys are read inside the handler via
+-- _snowflake.get_generic_secret_string('alias') — never passed as SQL parameters.
+APP_CODE.LOCID_BASE_ENCRYPT(LOC_ID)                                                     -- Encrypt raw base LocID (AES-GCM) → URL-safe base64; key from LOCID_BASE_SECRET
+APP_CODE.LOCID_BASE_DECRYPT(ENCRYPTED_LOC_ID)                                           -- Decrypt base64 ciphertext → raw base LocID; key from LOCID_BASE_SECRET
+APP_CODE.LOCID_TXCLOC_ENCRYPT(TX_CLOC_JSON)                                             -- JSON (flat geo fields) → TX_CLOC; key from LOCID_SCHEME_SECRET
+APP_CODE.LOCID_TXCLOC_DECRYPT(TX_CLOC)                                                  -- Decode TX_CLOC → VARCHAR JSON: {base_loc_id, timestamp, enc_client_id, geo...}; key from LOCID_SCHEME_SECRET
+APP_CODE.LOCID_STABLE_CLOC(ENCRYPTED_LOCID, NAMESPACE_GUID, CLIENT_ID, ENC_CLIENT_ID, TIER) -- Generate STABLE_CLOC from encrypted base LocID; key from LOCID_BASE_SECRET
+APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN(BASE_LOC_ID, NAMESPACE_GUID, DEC_CLIENT_ID, ENC_CLIENT_ID, TIER)     -- Generate STABLE_CLOC from plain base LocID (decrypt path; no key needed — pure SHA-1/UUID5)
 ```
 
 ### Python Vectorized UDF Design
@@ -239,9 +242,10 @@ Customer Input Table (via reference binding)
          │
          ├─ 1. Entitlement check — verify allow_encrypt + requested output columns
          │
-         ├─ 2. Fetch secrets from Snowflake SECRETs (base_locid_key, scheme_key, api_key)
-         │       Resolve selected API key metadata from APP_CONFIG:
-         │       namespace_guid, provider_id, client_id → used for STABLE_CLOC
+          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
+          │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
+          │       never read into proc variables or embedded in SQL.
+          │       Resolve selected API key metadata: namespace_guid, client_id → used for STABLE_CLOC
          │
          ├─ 3. IP Matching (IPv4 equi-join + IPv6 cascading prefix join)
          │       → unique_id, encrypted_locid, tier, geo_context, build_dt
@@ -274,8 +278,9 @@ Customer Input Table (via reference binding)
          │
          ├─ 1. Entitlement check — verify allow_decrypt + requested output columns
          │
-         ├─ 2. Fetch secrets from Snowflake SECRETs (scheme_key, api_key)
-         │       Resolve selected API key metadata from APP_CONFIG
+          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
+          │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
+          │       never read into proc variables or embedded in SQL.
          │
          ├─ 3. Call UDFs per row:
          │       LOCID_TXCLOC_DECRYPT → base_loc_id + metadata + geo context (JSON)
@@ -931,16 +936,17 @@ LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl` — a pure-Python whe
 ### Production UDF Example
 
 ```sql
--- LOCID_TXCLOC_DECRYPT — Python vectorized (WHL delivery)
+-- LOCID_TXCLOC_DECRYPT — Python vectorized (WHL delivery, secret-backed)
 CREATE OR REPLACE FUNCTION APP_CODE.LOCID_TXCLOC_DECRYPT(
-    TX_CLOC    VARCHAR,
-    SCHEME_KEY VARCHAR
+    TX_CLOC  VARCHAR
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('/lib/mb_locid_encoding-0.0.0-py3-none-any.whl')
+IMPORTS  = ('/lib/mb_locid_encoding-0.0.0-py3-none-any.whl')
 PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
+EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
+SECRETS = ('scheme_key' = APP_SCHEMA.LOCID_SCHEME_SECRET)
 HANDLER = 'decrypt_batch'
 AS $$
 import os, sys, glob
@@ -950,13 +956,19 @@ for _dir in list(sys.path):
             if _whl not in sys.path:
                 sys.path.insert(0, _whl)
 
+import _snowflake
 import pandas as pd
 from _snowflake import vectorized
 from locid import snowflake as locid_sf
 
+_KEY_SERIES = None
+
 @vectorized(input=pd.DataFrame)
 def decrypt_batch(df: pd.DataFrame) -> pd.Series:
-    return locid_sf.decrypt_tx_cloc(df.iloc[:, 0], df.iloc[:, 1])
+    global _KEY_SERIES
+    if _KEY_SERIES is None:
+        _KEY_SERIES = pd.Series([_snowflake.get_generic_secret_string('scheme_key')])
+    return locid_sf.decrypt_tx_cloc(df.iloc[:, 0], _KEY_SERIES)
 $$;
 ```
 

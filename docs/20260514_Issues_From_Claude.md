@@ -8,7 +8,7 @@ Response to issues identified by Claude AI code review on the LocID Native App.
 
 | # | Severity | Issue | Resolution |
 |---|----------|-------|------------|
-| 1 | Critical | Crypto keys in query history | Acknowledged — v1 trade-off (see notes) |
+| 1 | Critical | Crypto keys in query history | **Fixed** |
 | 2 | High | License key in telemetry body | **Fixed** |
 | 3 | High | fetch_license returns raw secrets | **Fixed** |
 | 4 | High | IPv4 join duplicate rows | **Fixed** |
@@ -21,11 +21,23 @@ Response to issues identified by Claude AI code review on the LocID Native App.
 | 11 | Medium | Misleading license refresh error | **Fixed** |
 | 12 | Low | Falsy ts_min == 0 | **Fixed** |
 
-**8 fixed, 1 acknowledged, 3 dismissed.**
+**9 fixed, 3 dismissed.**
 
 ---
 
 ## Fixed Issues
+
+### Bug 1 — Crypto keys in query history (Critical)
+
+**Problem:** AES keys were passed as SQL string literals to UDF calls and appeared in `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`.
+
+**Fix:** Migrated all crypto-using UDFs to secret-backed mode. Each UDF now declares `EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)` and `SECRETS = ('alias' = APP_SCHEMA.LOCID_*_SECRET)`, reading keys via `_snowflake.get_generic_secret_string()` inside the handler. The key parameters have been removed from UDF signatures entirely. The encrypt/decrypt stored procedures no longer read or embed crypto secrets — only non-secret license context (`client_id`, `namespace_guid`) is used.
+
+**Note:** This is a forward-only fix. Historical `QUERY_HISTORY` rows containing keys persist for up to 365 days. Post-deploy key rotation at LocID Central is recommended for complete remediation.
+
+**Files:** `src/udfs/locid_udf.sql`, `src/procs/encrypt.sql`, `src/procs/decrypt.sql`
+
+---
 
 ### Bug 2 — License key in telemetry body (High)
 
@@ -104,23 +116,6 @@ Response to issues identified by Claude AI code review on the LocID Native App.
 **Fix:** Changed to `if v["ts_min"] is not None`, which correctly handles zero-valued timestamps.
 
 **Files:** `run_encrypt.py`
-
----
-
-## Acknowledged — v1 Trade-off
-
-### Bug 1 — Crypto keys in query history (Critical)
-
-**Problem:** AES keys are passed as SQL string literals to UDF calls and appear in `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY`.
-
-**Assessment:** This is a known v1 design trade-off, documented in the source code. Snowflake does not currently support the `SECRETS` clause on scalar UDFs — only on stored procedures. The keys must be passed as arguments to `LOCID_TXCLOC_ENCRYPT` / `LOCID_TXCLOC_DECRYPT` UDFs.
-
-**Mitigations in place:**
-- Keys are never persisted in any table (transient in-query only)
-- Access to `QUERY_HISTORY` requires `ACCOUNTADMIN` role
-- Keys rotate on license refresh
-
-**Future:** When Snowflake adds SECRET support for UDFs, we will migrate to that approach. This is tracked for v2.
 
 ---
 

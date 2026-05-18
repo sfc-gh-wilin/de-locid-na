@@ -190,7 +190,10 @@ st.caption(
     "Cleanup runs automatically at the start of each Encrypt / Decrypt job."
 )
 
-_current_retention = int(config.get("log_retention_days") or 30)
+try:
+    _current_retention = int(config.get("log_retention_days") or 30)
+except (TypeError, ValueError):
+    _current_retention = 30
 
 with st.form("log_retention_form"):
     new_days = st.number_input(

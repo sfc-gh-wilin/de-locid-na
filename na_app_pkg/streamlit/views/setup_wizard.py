@@ -248,7 +248,7 @@ elif step == "H":
         }
 
         def _key_label(entry):
-            key_hint = entry.get("api_key", "")[:8] or entry.get("api_key_hint", "????")
+            key_hint = entry.get("api_key_hint") or (entry.get("api_key", "")[:8]) or "????"
             key_id = entry.get("api_key_id")
             granted = [lbl for flag, lbl in ENTITLEMENT_LABELS.items() if entry.get(flag) is True]
             denied = [lbl for flag, lbl in ENTITLEMENT_LABELS.items() if entry.get(flag) is not True]

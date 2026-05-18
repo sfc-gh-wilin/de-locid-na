@@ -7,7 +7,8 @@
 --
 -- Workflow:
 --   1. Validate entitlement (allow_encrypt)
---   2. Fetch base_locid_secret + scheme_secret from LocID Central (cached)
+--   2. Fetch license context (client_id, namespace_guid) from LocID Central (cached)
+--      Crypto secrets are bound directly to UDFs via SECRETS clauses — never embedded in SQL.
 --   3. IPv4 matching — equi-join via LOCID_BUILDS_IPV4_EXPLODED
 --   4. IPv6 matching — 6-pass cascading hex-prefix range join
 --   5. Call LOCID_TXCLOC_ENCRYPT (with geo context) + LOCID_STABLE_CLOC per matched row
@@ -41,10 +42,8 @@ RUNTIME_VERSION = '3.11'
 EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
 PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
-    'license_key'   = APP_SCHEMA.LOCID_LICENSE_KEY,
-    'api_key'       = APP_SCHEMA.LOCID_API_KEY,
-    'base_secret'   = APP_SCHEMA.LOCID_BASE_SECRET,
-    'scheme_secret' = APP_SCHEMA.LOCID_SCHEME_SECRET
+    'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY,
+    'api_key'     = APP_SCHEMA.LOCID_API_KEY
 )
 HANDLER = 'encrypt_handler'
 AS $$
@@ -90,9 +89,13 @@ def _get_config(session, key: str):
     return rows[0] if rows else None
 
 
-def _get_secrets(session) -> dict:
-    """Return license secrets. Refreshes via LOCID_FETCH_LICENSE if cache is > 1 hour old.
-    Crypto secrets are read from Snowflake SECRETs via _snowflake module — never from APP_CONFIG.
+def _get_license_context(session) -> dict:
+    """Return non-secret license context (client_id, namespace_guid).
+
+    Refreshes via LOCID_FETCH_LICENSE if the cached license is older than 1 hour
+    or missing. LOCID_FETCH_LICENSE writes/refreshes the crypto secrets directly
+    into APP_SCHEMA.LOCID_BASE_SECRET and LOCID_SCHEME_SECRET; this proc no
+    longer reads those values — the UDFs do, via their SECRETS clauses.
     """
     cached = _get_config(session, 'cached_license')
     if not (cached and cached[1] and time.time() - cached[1].timestamp() < 3600):
@@ -108,10 +111,6 @@ def _get_secrets(session) -> dict:
         cached = _get_config(session, 'cached_license')
         if not cached or not cached[0]:
             raise RuntimeError("License not configured. Complete the Setup Wizard first.")
-
-    # Read crypto secrets from Snowflake SECRETs (never from APP_CONFIG)
-    base_locid_secret = _snowflake.get_generic_secret_string('base_secret')
-    scheme_secret     = _snowflake.get_generic_secret_string('scheme_secret')
 
     # Read non-secret fields from stripped cached JSON
     data     = json.loads(cached[0])
@@ -136,10 +135,8 @@ def _get_secrets(session) -> dict:
         )
 
     return {
-        'base_locid_secret': base_locid_secret,
-        'scheme_secret':     scheme_secret,
-        'client_id':         int(lic_info.get('client_id', 0)),
-        'namespace_guid':    entry.get('namespace_guid', ''),
+        'client_id':      int(lic_info.get('client_id', 0)),
+        'namespace_guid': entry.get('namespace_guid', ''),
     }
 
 
@@ -151,7 +148,10 @@ def _check_entitlement(session, flag: str) -> None:
 
     data  = json.loads(cached[0])
     k_row = _get_config(session, 'api_key_id')
-    sel   = int(k_row[0]) if k_row and k_row[0] else None
+    try:
+        sel = int(k_row[0].strip()) if k_row and k_row[0] else None
+    except (ValueError, AttributeError):
+        sel = None
 
     for item in data.get('access', []):
         if item.get('status') == 'ACTIVE':
@@ -196,7 +196,10 @@ def _entitled_cols(session, operation: str) -> list:
     if cached and cached[0]:
         data  = json.loads(cached[0])
         k_row = _get_config(session, 'api_key_id')
-        sel   = int(k_row[0]) if k_row and k_row[0] else None
+        try:
+            sel = int(k_row[0].strip()) if k_row and k_row[0] else None
+        except (ValueError, AttributeError):
+            sel = None
         for item in data.get('access', []):
             if item.get('status') == 'ACTIVE' and (sel is None or item.get('api_key_id') == sel):
                 active_flags = {
@@ -405,16 +408,13 @@ def encrypt_handler(
         input_table_name = _resolve_ref_name(session, 'ENCRYPT_INPUT_TABLE')
 
         # ------------------------------------------------------------------
-        # Step 2: Fetch secrets from LocID Central (cached)
-        # NOTE: Secrets are embedded in UDF calls as SQL string literals and
-        #       will appear in Snowflake query history. They are not persisted
-        #       in any table. This is an acceptable v1 trade-off.
+        # Step 2: Fetch license context (client_id, namespace_guid).
+        # Crypto secrets are bound directly to the UDFs (see locid_udf.sql)
+        # and are NEVER read into proc-local variables or embedded in SQL.
         # ------------------------------------------------------------------
-        sec        = _get_secrets(session)
-        base_key   = _sql_lit(sec['base_locid_secret'])
-        scheme_key = _sql_lit(sec['scheme_secret'])
-        client_id  = sec['client_id']          # int — embedded directly
-        ns_guid    = _sql_lit(sec['namespace_guid'])
+        sec       = _get_license_context(session)
+        client_id = sec['client_id']                  # int — embedded directly
+        ns_guid   = _sql_lit(sec['namespace_guid'])   # non-secret identifier
 
         rows_in = session.sql("SELECT COUNT(*) FROM reference('ENCRYPT_INPUT_TABLE')").collect()[0][0]
 
@@ -628,17 +628,19 @@ def encrypt_handler(
         requested = set(output_cols) if output_cols else set(entitled)
         active_cols = [c for c in entitled if c in requested]
 
-        # Map output column name → SQL expression over _locid_matched columns
+        # Map output column name → SQL expression over _locid_matched columns.
         # TX_CLOC: uses OBJECT_CONSTRUCT to build JSON with geo context fields.
         #   OBJECT_CONSTRUCT automatically drops NULL-valued keys, so absent geo
         #   fields produce clean JSON. NetAcuity numeric codes must be VARCHAR.
         # STABLE_CLOC: for the encrypt path both client IDs are the same value
         # (publisher = consumer; see developer-integration-guide.md)
+        #
+        # Crypto keys are NOT embedded — the UDFs read them from secrets.
         COL_SQL = {
             'tx_cloc': (
                 f"APP_CODE.LOCID_TXCLOC_ENCRYPT("
                 f"  OBJECT_CONSTRUCT("
-                f"    'base_loc_id',         APP_CODE.LOCID_BASE_DECRYPT(encrypted_locid, {base_key}),"
+                f"    'base_loc_id',         APP_CODE.LOCID_BASE_DECRYPT(encrypted_locid),"
                 f"    'timestamp',           _ts,"
                 f"    'enc_client_id',       {client_id},"
                 f"    'country',             locid_country,"
@@ -650,12 +652,12 @@ def encrypt_handler(
                 f"    'city_code',           locid_city_code::VARCHAR,"
                 f"    'horizontal_accuracy', locid_horizontal_accuracy::VARCHAR,"
                 f"    'tier',                tier"
-                f"  )::VARCHAR,"
-                f"  {scheme_key})"
+                f"  )::VARCHAR"
+                f")"
             ),
             'stable_cloc': (
                 f"APP_CODE.LOCID_STABLE_CLOC("
-                f"  encrypted_locid, {base_key}, {ns_guid}, "
+                f"  encrypted_locid, {ns_guid}, "
                 f"  {client_id}::INT, {client_id}::INT, tier)"
             ),
             'locid_country':      'locid_country',

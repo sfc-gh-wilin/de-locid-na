@@ -150,14 +150,15 @@ def _central_refresh_label(refreshed_at) -> tuple[str, bool]:
     if not refreshed_at:
         return "Never refreshed", False
     try:
-        from snowflake.snowpark.context import get_active_session as _gas
-        rows = _gas().sql(
-            "SELECT DATEDIFF('minute', ?, CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP()))",
-            params=[refreshed_at]
-        ).collect()
-        mins = int(rows[0][0]) if rows and rows[0][0] is not None else None
-        if mins is None:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        # refreshed_at is a Snowflake TIMESTAMP — convert to UTC-aware datetime
+        if hasattr(refreshed_at, 'timestamp'):
+            refresh_ts = refreshed_at.replace(tzinfo=timezone.utc) if refreshed_at.tzinfo is None else refreshed_at
+        else:
             return "Unknown", False
+        delta = now - refresh_ts
+        mins = int(delta.total_seconds() / 60)
         fresh = mins < 1440  # 24 hours
         if mins < 2:
             return "Just now", fresh

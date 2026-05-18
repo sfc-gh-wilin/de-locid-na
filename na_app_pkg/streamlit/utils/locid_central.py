@@ -16,7 +16,6 @@ directly via their own inline _post_stats helper (unrelated to this module).
 """
 
 import json
-import time
 from typing import Any
 
 import snowflake.snowpark as snowpark
@@ -28,7 +27,8 @@ AUTO_REFRESH_TTL_SECONDS = 86400  # auto-refresh on app launch if older than 24 
 
 def _get_config(session: snowpark.Session, key: str):
     rows = session.sql(
-        "SELECT config_value, last_refreshed_at "
+        "SELECT config_value, last_refreshed_at, "
+        "DATEDIFF('second', last_refreshed_at, CURRENT_TIMESTAMP()) AS age_s "
         "FROM APP_SCHEMA.APP_CONFIG WHERE config_key = ? AND is_active = TRUE LIMIT 1",
         params=[key]
     ).collect()
@@ -82,8 +82,8 @@ def get_secrets(session: snowpark.Session) -> None:
 
     cached = _get_config(session, "cached_license")
     if cached and cached[1]:
-        age_s = time.time() - cached[1].timestamp()
-        if age_s < CACHE_TTL_SECONDS:
+        age_s = cached[2]  # DATEDIFF computed server-side — no clock skew
+        if age_s is not None and age_s < CACHE_TTL_SECONDS:
             return
 
     logger.info(session, "locid_central.get_secrets",
@@ -105,8 +105,8 @@ def ensure_fresh(session: snowpark.Session) -> bool:
 
     cached = _get_config(session, "cached_license")
     if cached and cached[1]:
-        age_s = time.time() - cached[1].timestamp()
-        if age_s < AUTO_REFRESH_TTL_SECONDS:
+        age_s = cached[2]  # DATEDIFF computed server-side — no clock skew
+        if age_s is not None and age_s < AUTO_REFRESH_TTL_SECONDS:
             return False  # still fresh
 
     try:

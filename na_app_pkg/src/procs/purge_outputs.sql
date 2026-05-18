@@ -42,7 +42,10 @@ def purge_handler(session, retention_days):
             "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
             "WHERE config_key = 'output_retention_days' AND is_active = TRUE LIMIT 1"
         ).collect()
-        retention_days = int(rows[0][0]) if rows and rows[0][0] else 90
+        try:
+            retention_days = int(rows[0][0]) if rows and rows[0][0] else 90
+        except (TypeError, ValueError):
+            retention_days = 90
 
     cutoff = datetime.utcnow() - timedelta(days=retention_days)
 
@@ -66,7 +69,7 @@ def purge_handler(session, retention_days):
             continue
 
         if tbl_ts < cutoff:
-            session.sql(f"DROP TABLE IF EXISTS APP_SCHEMA.{tbl_name}").collect()
+            session.sql(f'DROP TABLE IF EXISTS APP_SCHEMA."{tbl_name}"').collect()
             dropped.append(tbl_name)
 
     return {

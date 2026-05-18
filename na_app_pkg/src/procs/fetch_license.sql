@@ -170,11 +170,19 @@ def fetch_license_handler(session: snowpark.Session, license_id: str) -> dict:
         ).collect()
         session.sql(_UPSERT_SQL, params=["license_id_ref", lic[:4] + "-****"]).collect()
 
-    # --- Cache stripped JSON (no secrets, api_key_hint only) in APP_CONFIG ---
+    # --- Cache stripped JSON (no secrets, no api_key) in APP_CONFIG ---
     stripped = _strip_sensitive(data)
     session.sql(_UPSERT_SQL, params=["cached_license", json.dumps(stripped)]).collect()
 
-    return data
+    # Return version safe for caller: remove crypto secrets but keep api_key
+    # (wizard needs api_key to call LOCID_SET_API_KEY during onboarding).
+    safe_return = {k: v for k, v in data.items() if k != 'secrets'}
+    lic_copy = dict(safe_return.get('license', {}))
+    raw_lic_key = lic_copy.get('license_key', '')
+    if raw_lic_key:
+        lic_copy['license_key'] = raw_lic_key[:4] + '-****'
+    safe_return['license'] = lic_copy
+    return safe_return
 $$;
 
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_FETCH_LICENSE(VARCHAR)

@@ -372,3 +372,8 @@ elif step == 4:
                                  "Job threw an exception", exc=e)
                     show_error(f"Decrypt job failed unexpectedly (elapsed: {elapsed:.1f}s).",
                                detail=e)
+
+else:
+    # Invalid step state — reset to prevent blank page
+    st.session_state.dec_step = 1
+    st.rerun()
