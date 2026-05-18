@@ -91,7 +91,7 @@ if not rows:
 else:
     st.caption(f"Showing {len(rows)} job(s)")
     for row in rows:
-        job_id    = row[0]
+        job_id    = row[0] or "—"
         operation = row[1]
         run_dt    = row[2]
         rows_in   = row[3] or 0

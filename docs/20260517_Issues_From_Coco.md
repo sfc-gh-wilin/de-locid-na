@@ -1,4 +1,4 @@
-# Code Review Report — LocID Native App (2025-05-18)
+# Code Review Report — LocID Native App (2026-05-17)
 
 Security and correctness review of all source files in `na_app_pkg/` and `db/locid/`.
 
@@ -25,10 +25,10 @@ Security and correctness review of all source files in `na_app_pkg/` and `db/loc
 | Critical | 0 | -- |
 | High | 3 | 3 |
 | Medium | 6 | 6 |
-| Low | 4 | 2 |
+| Low | 4 | 3 (1 dismissed) |
 
 **Previously reported issues (20260514 Claude review): all 9 fixed.**  
-Bug 1 (crypto keys in query history) was the last remaining item — resolved 2025-05-18.
+Bug 1 (crypto keys in query history) was the last remaining item — resolved.
 
 ---
 
@@ -124,11 +124,11 @@ Bug 1 (crypto keys in query history) was the last remaining item — resolved 20
 
 ---
 
-### L-2. `job_history.py:105` — `job_id[:8]` slice on potentially NULL
+### L-2. `job_history.py:94` — `job_id[:8]` slice on potentially NULL — **FIXED**
 
 **Problem:** If `JOB_LOG.job_id` column contains NULL, `row[0][:8]` raises `TypeError`.
 
-**Fix:** `(job_id or '—')[:8]`
+**Fix applied:** `job_id = row[0] or "—"` — NULL coalesced at assignment.
 
 ---
 
@@ -140,11 +140,11 @@ Bug 1 (crypto keys in query history) was the last remaining item — resolved 20
 
 ---
 
-### L-4. `db/locid/provider/` scripts — Not fully idempotent
+### L-4. `db/locid/provider/` scripts — Not fully idempotent — **Dismissed**
 
-**Problem:** Some GRANT statements in `02_grant_access.sql` and `03_share_to_pkg.sql` do not use `IF NOT EXISTS` patterns. Re-running may produce warnings (though Snowflake GRANTs are generally idempotent).
+**Problem:** GRANT statements lack `IF NOT EXISTS`.
 
-**Fix:** Low priority — GRANTs in Snowflake don't fail on re-run, they just succeed silently. Acceptable as-is.
+**Assessment:** Snowflake GRANTs are inherently idempotent — they succeed silently on re-run. `CREATE SCHEMA IF NOT EXISTS` and `CREATE OR REPLACE SECURE VIEW` are already idempotent. No change needed.
 
 ---
 
@@ -171,7 +171,4 @@ All 9 issues from the 20260514 Claude review are resolved:
 
 ## Recommendations
 
-All High and Medium severity items have been fixed. Remaining unfixed Low items are non-blocking:
-
-1. **L-2** (NULL job_id slice) — Extremely unlikely; JOB_LOG.job_id is always populated by the app
-2. **L-4** (idempotent GRANTs) — Snowflake GRANTs don't fail on re-run; no action needed
+All issues resolved. No outstanding items.
