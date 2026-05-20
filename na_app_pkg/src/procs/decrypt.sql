@@ -378,6 +378,12 @@ def decrypt_handler(
     _pt = time.perf_counter()
 
     try:
+        # Resolve consumer table name from reference binding for logging
+        try:
+            input_table_name = _resolve_ref_name(session, 'DECRYPT_INPUT_TABLE')
+        except Exception:
+            pass  # Keep fallback value if resolution fails
+
         # Record job start immediately — visible in Job History even if cancelled
         _log_job_start(session, job_id, 'DECRYPT', input_table_name, cur_wh)
 
@@ -396,9 +402,6 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         _check_entitlement(session, 'allow_decrypt')
         phases['entitlement_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
-
-        # Resolve consumer table name from reference binding for logging
-        input_table_name = _resolve_ref_name(session, 'DECRYPT_INPUT_TABLE')
 
         # ------------------------------------------------------------------
         # Step 2: Fetch license context (client_id, namespace_guid).

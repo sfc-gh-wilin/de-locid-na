@@ -401,6 +401,12 @@ def encrypt_handler(
     _pt = time.perf_counter()
 
     try:
+        # Resolve consumer table name from reference binding for logging
+        try:
+            input_table_name = _resolve_ref_name(session, 'ENCRYPT_INPUT_TABLE')
+        except Exception:
+            pass  # Keep fallback value if resolution fails
+
         # Record job start immediately — visible in Job History even if cancelled
         _log_job_start(session, job_id, 'ENCRYPT', input_table_name, cur_wh)
 
@@ -419,9 +425,6 @@ def encrypt_handler(
         # ------------------------------------------------------------------
         _check_entitlement(session, 'allow_encrypt')
         phases['entitlement_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
-
-        # Resolve consumer table name from reference binding for logging
-        input_table_name = _resolve_ref_name(session, 'ENCRYPT_INPUT_TABLE')
 
         # ------------------------------------------------------------------
         # Step 2: Fetch license context (client_id, namespace_guid).
@@ -460,7 +463,7 @@ def encrypt_handler(
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_IPV4} AS
             WITH inp AS (
-                SELECT TO_VARCHAR({id_col}) AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
+                SELECT {id_col} AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
                 FROM reference('ENCRYPT_INPUT_TABLE')
                 WHERE {ip_col} NOT LIKE '%:%'
                   AND {ts_expr} IS NOT NULL
@@ -526,7 +529,7 @@ def encrypt_handler(
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_INP} AS
             SELECT
-                TO_VARCHAR({id_col})  AS _id,
+                {id_col}  AS _id,
                 {ip_col}  AS _ip,
                 {ts_expr} AS _ts,
                 GET_PATH(PARSE_IP({ip_col}, 'INET'), 'hex_ipv6') AS ip_hex
@@ -546,13 +549,10 @@ def encrypt_handler(
         """).collect()
 
         # 4-b: Relevant IPv6 build rows, pre-filtered by BOTH date range AND
-        # input hex prefix. Three tiers of selectivity:
-        #
-        #   1. Narrow blocks (start/end share 16-char prefix): semi-join on pfx16.
-        #      Typically reduces 700M → <1M rows — covers most device-address inputs.
-        #   2. Medium blocks (share 12-char but differ at 16-char): semi-join on pfx12.
-        #      Covers network-block inputs that span wider ranges.
-        #   3. Wide blocks (differ at 12-char): kept unconditionally (small set <4M).
+        # input hex prefix. Only materialise the NARROW blocks (16-char prefix match)
+        # which are highly selective. Medium and wide blocks are queried directly from
+        # the clustered source table in the 6-pass loop — the source table's clustering
+        # on (BUILD_DT, START_IP_INT_HEX) provides efficient pruning for range joins.
         #
         # ORDER BY start_ip_int_hex enables micro-partition pruning on BETWEEN.
         session.sql(f"""
@@ -563,34 +563,12 @@ def encrypt_handler(
                 JOIN {TBL_V6_INP} i
                     ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
             )
-            -- Narrow blocks (16-char prefix match): most selective
             SELECT l.*
             FROM {BUILDS} l
             JOIN rel_dates rd ON l.build_dt = rd.build_dt
             JOIN {TBL_V6_PFX} p ON SUBSTR(l.start_ip_int_hex, 1, 16) = p.pfx16
             WHERE l.start_ip LIKE '%:%'
               AND SUBSTR(l.start_ip_int_hex, 1, 16) = SUBSTR(l.end_ip_int_hex, 1, 16)
-
-            UNION ALL
-
-            -- Medium blocks (12-char match, 16-char mismatch): semi-join on pfx12
-            SELECT l.*
-            FROM {BUILDS} l
-            JOIN rel_dates rd ON l.build_dt = rd.build_dt
-            JOIN {TBL_V6_PFX} p ON SUBSTR(l.start_ip_int_hex, 1, 12) = p.pfx12
-            WHERE l.start_ip LIKE '%:%'
-              AND SUBSTR(l.start_ip_int_hex, 1, 12) = SUBSTR(l.end_ip_int_hex, 1, 12)
-              AND SUBSTR(l.start_ip_int_hex, 1, 16) != SUBSTR(l.end_ip_int_hex, 1, 16)
-
-            UNION ALL
-
-            -- Wide blocks (differ at 12-char): keep all (typically <1% of IPv6 rows)
-            SELECT l.*
-            FROM {BUILDS} l
-            JOIN rel_dates rd ON l.build_dt = rd.build_dt
-            WHERE l.start_ip LIKE '%:%'
-              AND SUBSTR(l.start_ip_int_hex, 1, 12) != SUBSTR(l.end_ip_int_hex, 1, 12)
-
             ORDER BY start_ip_int_hex
         """).collect()
 
@@ -650,6 +628,17 @@ def encrypt_handler(
                 pfx_build_filter = ""
                 pfx_inp_cond     = ""
 
+            # Pass 1 (prefix=12): query the pre-materialised narrow table (small, fast).
+            # Passes 2+: query the clustered source table directly — the source table's
+            # clustering on (BUILD_DT, START_IP_INT_HEX) enables efficient pruning for
+            # the BETWEEN range join without needing to materialise all medium/wide blocks.
+            if pass_num == 0:
+                builds_source = TBL_V6_BUILDS
+                builds_date_filter = ""
+            else:
+                builds_source = BUILDS
+                builds_date_filter = f"AND build_dt IN (SELECT DISTINCT build_dt FROM {TBL_V6_DATED})"
+
             session.sql(f"""
                 INSERT INTO {TBL_IPV6}
                 WITH inp AS (
@@ -660,8 +649,10 @@ def encrypt_handler(
                 ),
                 builds AS (
                     SELECT *
-                    FROM {TBL_V6_BUILDS}
-                    WHERE TRUE {pfx_build_filter}
+                    FROM {builds_source}
+                    WHERE start_ip LIKE '%:%'
+                      {builds_date_filter}
+                      {pfx_build_filter}
                 )
                 SELECT
                     i._id, i._ip, i._ts,
@@ -756,7 +747,7 @@ def encrypt_handler(
             'locid_postal_code':  'locid_postal_code',
         }
 
-        select_exprs = [f"_id AS {id_col}"] + [
+        select_exprs = [f"TO_VARCHAR(_id) AS {id_col}"] + [
             f"{COL_SQL.get(c, c)} AS {c}" for c in active_cols
         ]
 
