@@ -319,18 +319,30 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
         pass  # Stats failure must not abort the job
 
 
-def _log_job(session, job_id, operation, rows_in, rows_matched, rows_out,
-             runtime_s, status, error_msg, input_table, output_table,
-             warehouse, output_cols) -> None:
+def _log_job_start(session, job_id, operation, input_table, warehouse) -> None:
+    """Insert a STARTED row so the job is visible even if cancelled externally."""
     session.sql(
         "INSERT INTO APP_SCHEMA.JOB_LOG "
         "(job_id, operation, rows_in, rows_matched, rows_out, runtime_s, "
         " status, error_msg, input_table, output_table, warehouse, output_cols) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, NULL, NULL, NULL, NULL, 'STARTED', NULL, ?, NULL, ?, NULL)",
+        params=[job_id, operation, input_table, warehouse],
+    ).collect()
+
+
+def _log_job_end(session, job_id, rows_in, rows_matched, rows_out,
+                 runtime_s, status, error_msg, output_table,
+                 output_cols) -> None:
+    """Update the STARTED row with final outcome."""
+    session.sql(
+        "UPDATE APP_SCHEMA.JOB_LOG SET "
+        "rows_in = ?, rows_matched = ?, rows_out = ?, runtime_s = ?, "
+        "status = ?, error_msg = ?, output_table = ?, output_cols = ? "
+        "WHERE job_id = ?",
         params=[
-            job_id, operation, rows_in, rows_matched, rows_out, runtime_s,
-            status, error_msg, input_table, output_table,
-            warehouse, json.dumps(output_cols),
+            rows_in, rows_matched, rows_out, runtime_s,
+            status, error_msg, output_table, json.dumps(output_cols),
+            job_id,
         ]
     ).collect()
 
@@ -358,9 +370,6 @@ def decrypt_handler(
     # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
     output_table = f"LOCID_DECRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}"
 
-    for name in (id_col, txcloc_col):
-        _validate_id(name)
-
     # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
     # from the caller's session and cannot be queried or changed within the proc.
     cur_wh = None
@@ -369,11 +378,18 @@ def decrypt_handler(
     _pt = time.perf_counter()
 
     try:
+        # Record job start immediately — visible in Job History even if cancelled
+        _log_job_start(session, job_id, 'DECRYPT', input_table_name, cur_wh)
+
         # Opportunistic log cleanup — non-fatal; runs quickly before main work
         try:
             session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()
         except Exception:
             pass
+
+        # Validate caller-supplied identifiers before embedding in SQL
+        for name in (id_col, txcloc_col):
+            _validate_id(name)
 
         # ------------------------------------------------------------------
         # Step 1: Entitlement check
@@ -439,7 +455,7 @@ def decrypt_handler(
         COL_SQL = {
             'stable_cloc': (
                 f"APP_CODE.LOCID_STABLE_CLOC_FROM_PLAIN("
-                f"  _decoded:location_id::VARCHAR, {ns_guid}, "
+                f"  _decoded:base_loc_id::VARCHAR, {ns_guid}, "
                 f"  {client_id}::INT, _decoded:enc_client_id::INT, "
                 f"  COALESCE(_decoded:tier::VARCHAR, 'T0'))"
             ),
@@ -483,11 +499,10 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         # Step 7: Log to JOB_LOG
         # ------------------------------------------------------------------
-        _log_job(
-            session, job_id, 'DECRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None, input_table_name,
-            f"APP_SCHEMA.{output_table}",
-            cur_wh, active_cols,
+        _log_job_end(
+            session, job_id, rows_in, rows_matched, rows_out,
+            runtime_s, 'SUCCESS', None,
+            f"APP_SCHEMA.{output_table}", active_cols,
         )
 
         # ------------------------------------------------------------------
@@ -510,11 +525,10 @@ def decrypt_handler(
     except Exception as exc:
         runtime_s = round(time.time() - start_ts, 2)
         phases['total_s'] = runtime_s
-        _log_job(
-            session, job_id, 'DECRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc), input_table_name,
-            f"APP_SCHEMA.{output_table}",
-            cur_wh, [],
+        _log_job_end(
+            session, job_id, rows_in, rows_matched, rows_out,
+            runtime_s, 'FAILED', str(exc),
+            f"APP_SCHEMA.{output_table}", [],
         )
         raise RuntimeError(f'LOCID_DECRYPT failed: {exc}') from exc
 

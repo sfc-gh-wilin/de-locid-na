@@ -258,9 +258,13 @@ with act_col:
     recent = _load_recent_jobs(sid)
     if recent:
         for job in recent:
-            icon  = "✅" if job["status"] == "SUCCESS" else "❌"
+            if job["status"] == "SUCCESS":
+                icon, color = "✅", "green"
+            elif job["status"] == "STARTED":
+                icon, color = "⏳", "orange"
+            else:
+                icon, color = "❌", "red"
             rows  = f"{job['rows_out']:,}" if job["rows_out"] is not None else "—"
-            color = "green" if job["status"] == "SUCCESS" else "red"
             st.markdown(
                 f"{icon} `{job['job_id'][:8]}` &nbsp; **{job['operation']}** &nbsp; "
                 f"{rows} rows &nbsp; :{color}[{job['status']}]",

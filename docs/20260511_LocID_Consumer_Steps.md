@@ -165,17 +165,42 @@ SHOW ROLES LIKE 'LOCID_APP_INSTALLER';
 In Snowsight on the consumer account:
 
 1. **Switch to the `LOCID_APP_INSTALLER` role** (bottom-left role selector in Snowsight)
-2. Navigate to **Data Products → Apps**
-3. Find **LocID for Snowflake**
+2. Navigate to **Catalog → Apps**
+3. Find **LocID for Snowflake** (under "Recently Shared with You" or use search)
 4. Click **Get**
-5. Choose database name: `LOCID_APP`
-6. Review and approve the **Required Permissions**:
-   - External access to `central.locid.com` (license validation + usage reporting)
-7. Click **Activate**
+5. Expand **Options** at the bottom of the dialog → click the **Application name** field and change it to `LOCID_APP`
+6. Click **Get** to install
 
 > **Important:** You must use the `LOCID_APP_INSTALLER` role when installing. This role owns the application and has the required `CREATE APPLICATION` privilege.
 
-### 2.2 Grant warehouse to the application
+### 2.2 Approve network access
+
+After installation, grant the app permission to connect to LocID Central (`central.locid.com`) for license validation and usage reporting:
+
+**Option A — Snowsight UI:**
+
+1. Navigate to **Catalog → Apps**
+2. Click the app name (**LocID for Snowflake** or **LOCID_APP**)
+3. Click **Settings** (gear icon) → **Connections**
+4. Next to *LocID Central API Access*, click **…** → **Approve**
+
+**Option B — SQL:**
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+
+-- 1. Find the current sequence number:
+SHOW SPECIFICATIONS IN APPLICATION LOCID_APP;
+
+-- 2. Approve (replace N with SEQUENCE_NUMBER from above, usually 1):
+ALTER APPLICATION LOCID_APP
+    APPROVE SPECIFICATION LOCID_CENTRAL_EAI_SPEC SEQUENCE_NUMBER = N;
+
+-- 3. Grant USAGE on the integration:
+GRANT USAGE ON INTEGRATION LOCID_CENTRAL_EAI TO APPLICATION LOCID_APP;
+```
+
+### 2.3 Grant warehouse to the application
 
 The Streamlit UI runs under the application's own context. Grant warehouse usage to the application so it can power the Streamlit interface:
 
@@ -193,15 +218,15 @@ GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;
 > - `GRANT USAGE ON WAREHOUSE ... TO ROLE LOCID_APP_INSTALLER` — allows the role to call stored procedures (Encrypt/Decrypt) and run SQL against the app.
 > - `GRANT USAGE ON WAREHOUSE ... TO APPLICATION LOCID_APP` — allows the Streamlit UI (which runs as the application object with owner's rights) to use the warehouse.
 
-### 2.3 Verify installation
+### 2.4 Verify installation
 
-In Snowsight, navigate to **Data Products → Apps**. Confirm `LOCID_APP` appears with status **Ready**.
+In Snowsight, navigate to **Catalog → Apps**. Confirm `LOCID_APP` appears with status **Ready**.
 
 ---
 
 ## Phase 3 — Consumer: Setup Wizard
 
-Open the app in Snowsight: **Data Products → Apps → LOCID_APP**
+Open the app in Snowsight: **Catalog → Apps → LOCID_APP**
 
 Walk through the Setup Wizard:
 
@@ -209,9 +234,9 @@ Walk through the Setup Wizard:
 |--------|--------|
 | **A — Welcome** | Click **Get Started** |
 | **B — License key?** | Select **Yes, I have a license key** |
+| **E — Approve Network Access** | If not already approved in Phase 2.2 — approve the connection to `central.locid.com` and click **Approved — Continue** |
 | **C — Enter License Key** | Enter your LocID license key and click **Fetch License** |
 | **D — Review License** | Confirm license details and click **Continue** |
-| **E — Review Privileges** | Review and approve required permissions |
 | **F — Create App Objects** | Click **Create App Objects** |
 | **H — Select API Key** | Choose the active API key and click **Confirm** |
 | **I — Setup Complete** | Done — sidebar navigation is now active |
@@ -419,7 +444,7 @@ ALTER APPLICATION PACKAGE LOCID_PKG
 
 ### Consumer: Check installed version
 
-In Snowsight, navigate to **Data Products → Apps → LOCID_APP** — the version and patch are shown in the app details.
+In Snowsight, navigate to **Catalog → Apps → LOCID_APP** — the version and patch are shown in the app details.
 
 Or via SQL:
 
@@ -463,7 +488,7 @@ Run:
 GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION LOCID_APP;
 ```
 
-Then re-open the app. See [Phase 2.2](#22-grant-warehouse-to-the-application) for details.
+Then re-open the app. See [Phase 2.3](#23-grant-warehouse-to-the-application) for details.
 
 ### "Exceeded maximum number of inbound queries allowed for this instance: 298"
 

@@ -326,18 +326,30 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
         pass  # Stats failure must not abort the job
 
 
-def _log_job(session, job_id, operation, rows_in, rows_matched, rows_out,
-             runtime_s, status, error_msg, input_table, output_table,
-             warehouse, output_cols) -> None:
+def _log_job_start(session, job_id, operation, input_table, warehouse) -> None:
+    """Insert a STARTED row so the job is visible even if cancelled externally."""
     session.sql(
         "INSERT INTO APP_SCHEMA.JOB_LOG "
         "(job_id, operation, rows_in, rows_matched, rows_out, runtime_s, "
         " status, error_msg, input_table, output_table, warehouse, output_cols) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, NULL, NULL, NULL, NULL, 'STARTED', NULL, ?, NULL, ?, NULL)",
+        params=[job_id, operation, input_table, warehouse],
+    ).collect()
+
+
+def _log_job_end(session, job_id, rows_in, rows_matched, rows_out,
+                 runtime_s, status, error_msg, output_table,
+                 output_cols) -> None:
+    """Update the STARTED row with final outcome."""
+    session.sql(
+        "UPDATE APP_SCHEMA.JOB_LOG SET "
+        "rows_in = ?, rows_matched = ?, rows_out = ?, runtime_s = ?, "
+        "status = ?, error_msg = ?, output_table = ?, output_cols = ? "
+        "WHERE job_id = ?",
         params=[
-            job_id, operation, rows_in, rows_matched, rows_out, runtime_s,
-            status, error_msg, input_table, output_table,
-            warehouse, json.dumps(output_cols),
+            rows_in, rows_matched, rows_out, runtime_s,
+            status, error_msg, output_table, json.dumps(output_cols),
+            job_id,
         ]
     ).collect()
 
@@ -354,7 +366,7 @@ def encrypt_handler(
 
     job_id   = str(uuid.uuid4())
     start_ts = time.time()
-    rows_in = rows_matched = rows_out = 0
+    rows_in = rows_matched = rows_out = rows_skipped = 0
     input_table_name = 'reference(ENCRYPT_INPUT_TABLE)'  # fallback; resolved in try block
 
     # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
@@ -366,19 +378,16 @@ def encrypt_handler(
     job_sfx       = job_id.replace('-', '')[:12].upper()
     TBL_IPV4      = f'APP_SCHEMA._LOCID_IPV4_{job_sfx}'
     TBL_V6_INP    = f'APP_SCHEMA._LOCID_V6_INP_{job_sfx}'
+    TBL_V6_PFX    = f'APP_SCHEMA._LOCID_V6_PFX_{job_sfx}'
     TBL_V6_BUILDS = f'APP_SCHEMA._LOCID_V6_BLDS_{job_sfx}'
     TBL_V6_DATED  = f'APP_SCHEMA._LOCID_V6_DATD_{job_sfx}'
     TBL_IPV6      = f'APP_SCHEMA._LOCID_IPV6_{job_sfx}'
     TBL_V6_SEEN   = f'APP_SCHEMA._LOCID_V6_SEEN_{job_sfx}'
     TBL_MATCHED   = f'APP_SCHEMA._LOCID_MTCHD_{job_sfx}'
     _interim_tbls = [
-        TBL_IPV4, TBL_V6_INP, TBL_V6_BUILDS, TBL_V6_DATED,
+        TBL_IPV4, TBL_V6_INP, TBL_V6_PFX, TBL_V6_BUILDS, TBL_V6_DATED,
         TBL_IPV6, TBL_V6_SEEN, TBL_MATCHED,
     ]
-
-    # Validate caller-supplied identifiers before embedding in SQL
-    for name in (id_col, ip_col, ts_col):
-        _validate_id(name)
 
     # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
     # from the caller's session and cannot be queried or changed within the proc.
@@ -392,11 +401,18 @@ def encrypt_handler(
     _pt = time.perf_counter()
 
     try:
+        # Record job start immediately — visible in Job History even if cancelled
+        _log_job_start(session, job_id, 'ENCRYPT', input_table_name, cur_wh)
+
         # Opportunistic log cleanup — non-fatal; runs quickly before main work
         try:
             session.sql("CALL APP_SCHEMA.LOCID_PURGE_LOGS()").collect()
         except Exception:
             pass
+
+        # Validate caller-supplied identifiers before embedding in SQL
+        for name in (id_col, ip_col, ts_col):
+            _validate_id(name)
 
         # ------------------------------------------------------------------
         # Step 1: Entitlement check
@@ -419,12 +435,22 @@ def encrypt_handler(
         rows_in = session.sql("SELECT COUNT(*) FROM reference('ENCRYPT_INPUT_TABLE')").collect()[0][0]
 
         # Timestamp → epoch-seconds SQL expression
+        # Uses TRY_ functions so invalid values become NULL (skipped) instead of
+        # failing the entire job.
+        # Note: TRY_TO_TIMESTAMP_NTZ fails if the column is already TIMESTAMP_NTZ,
+        # so we cast through VARCHAR first to handle both string and timestamp inputs.
         if ts_format == 'epoch_ms':
-            ts_expr = f"FLOOR({ts_col}::DOUBLE / 1000.0)::BIGINT"
+            ts_expr = f"FLOOR(TRY_TO_DOUBLE({ts_col}) / 1000.0)::BIGINT"
         elif ts_format == 'timestamp':
-            ts_expr = f"DATE_PART(epoch_second, {ts_col}::TIMESTAMP_NTZ)::BIGINT"
+            ts_expr = f"DATE_PART(epoch_second, TRY_TO_TIMESTAMP_NTZ({ts_col}::VARCHAR))::BIGINT"
         else:   # epoch_sec (default)
-            ts_expr = f"{ts_col}::BIGINT"
+            ts_expr = f"TRY_TO_NUMBER({ts_col})::BIGINT"
+
+        # Count rows with valid timestamps; difference = skipped due to invalid ts
+        rows_valid_ts = session.sql(
+            f"SELECT COUNT(*) FROM reference('ENCRYPT_INPUT_TABLE') WHERE {ts_expr} IS NOT NULL"
+        ).collect()[0][0]
+        rows_skipped = rows_in - rows_valid_ts
 
         phases['secrets_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
@@ -437,6 +463,7 @@ def encrypt_handler(
                 SELECT {id_col} AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
                 FROM reference('ENCRYPT_INPUT_TABLE')
                 WHERE {ip_col} NOT LIKE '%:%'
+                  AND {ts_expr} IS NOT NULL
             ),
             rel_builds AS (
                 SELECT DISTINCT b.build_dt
@@ -505,23 +532,51 @@ def encrypt_handler(
                 GET_PATH(PARSE_IP({ip_col}, 'INET'), 'hex_ipv6') AS ip_hex
             FROM reference('ENCRYPT_INPUT_TABLE')
             WHERE {ip_col} LIKE '%:%'
+              AND {ts_expr} IS NOT NULL
         """).collect()
 
-        # 4-b: Relevant IPv6 build rows, pre-filtered to date range of this job
-        # ORDER BY start_ip_int_hex ensures micro-partitions are sorted for the
-        # BETWEEN range join — enables pruning even on the transient table.
+        # 4-a2: Distinct input hex prefixes — used to pre-filter builds so we
+        # materialize only the ~0.1% of build rows that can possibly match.
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_PFX} AS
+            SELECT DISTINCT
+                SUBSTR(ip_hex, 1, 12) AS pfx12
+            FROM {TBL_V6_INP}
+        """).collect()
+
+        # 4-b: Relevant IPv6 build rows, pre-filtered by BOTH date range AND
+        # input hex prefix. This reduces the working set from hundreds of millions
+        # to typically a few million rows, dramatically accelerating the 6-pass loop.
+        #
+        # Narrow blocks (start/end share 12-char prefix): semi-join on input pfx12.
+        # Wide blocks (start/end differ at 12-char): kept unconditionally (small set).
+        # ORDER BY start_ip_int_hex enables micro-partition pruning on BETWEEN.
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_BUILDS} AS
-            SELECT l.*
-            FROM {BUILDS} l
-            JOIN (
+            WITH rel_dates AS (
                 SELECT DISTINCT bd.build_dt
                 FROM {DATES} bd
                 JOIN {TBL_V6_INP} i
                     ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
-            ) rel_dates ON l.build_dt = rel_dates.build_dt
+            )
+            -- Narrow blocks: only those whose 12-char prefix matches an input IP
+            SELECT l.*
+            FROM {BUILDS} l
+            JOIN rel_dates rd ON l.build_dt = rd.build_dt
+            JOIN {TBL_V6_PFX} p ON SUBSTR(l.start_ip_int_hex, 1, 12) = p.pfx12
             WHERE l.start_ip LIKE '%:%'
-            ORDER BY l.start_ip_int_hex
+              AND SUBSTR(l.start_ip_int_hex, 1, 12) = SUBSTR(l.end_ip_int_hex, 1, 12)
+
+            UNION ALL
+
+            -- Wide blocks: keep all (typically <1% of IPv6 rows)
+            SELECT l.*
+            FROM {BUILDS} l
+            JOIN rel_dates rd ON l.build_dt = rd.build_dt
+            WHERE l.start_ip LIKE '%:%'
+              AND SUBSTR(l.start_ip_int_hex, 1, 12) != SUBSTR(l.end_ip_int_hex, 1, 12)
+
+            ORDER BY start_ip_int_hex
         """).collect()
 
         # 4-c: Pre-join each input row to its matching build_dt
@@ -716,11 +771,10 @@ def encrypt_handler(
         # ------------------------------------------------------------------
         # Step 8: Log to JOB_LOG
         # ------------------------------------------------------------------
-        _log_job(
-            session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None, input_table_name,
-            f"APP_SCHEMA.{output_table}",
-            cur_wh, active_cols,
+        _log_job_end(
+            session, job_id, rows_in, rows_matched, rows_out,
+            runtime_s, 'SUCCESS', None,
+            f"APP_SCHEMA.{output_table}", active_cols,
         )
 
         # ------------------------------------------------------------------
@@ -739,7 +793,7 @@ def encrypt_handler(
         _post_stats(session, job_id, client_id, rows_in,
                     rows_matched, rows_out, phases, tier_counts, 'encrypt')
 
-        return {
+        result = {
             'job_id':        job_id,
             'status':        'SUCCESS',
             'input_table':   input_table_name,
@@ -747,17 +801,22 @@ def encrypt_handler(
             'rows_in':       rows_in,
             'rows_matched':  rows_matched,
             'rows_out':      rows_out,
+            'rows_skipped_invalid_ts': rows_skipped,
             'runtime_s':     runtime_s,
         }
+        if rows_skipped > 0:
+            result['warnings'] = [
+                f"{rows_skipped} row(s) skipped due to invalid timestamp values"
+            ]
+        return result
 
     except Exception as exc:
         runtime_s = round(time.time() - start_ts, 2)
         phases['total_s'] = runtime_s
-        _log_job(
-            session, job_id, 'ENCRYPT', rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc), input_table_name,
-            f"APP_SCHEMA.{output_table}",
-            cur_wh, [],
+        _log_job_end(
+            session, job_id, rows_in, rows_matched, rows_out,
+            runtime_s, 'FAILED', str(exc),
+            f"APP_SCHEMA.{output_table}", [],
         )
         raise RuntimeError(f'LOCID_ENCRYPT failed: {exc}') from exc
     finally:

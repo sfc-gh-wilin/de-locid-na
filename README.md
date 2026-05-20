@@ -121,7 +121,7 @@ Updated weekly via an Airflow DAG on LocID's side. The Native App accesses these
 ```
 -- APP_SCHEMA (non-versioned): tables, stage, network rule, procedures, Streamlit
 APP_SCHEMA.APP_CONFIG                       -- Masked credential hints, entitlements, output column registry; full secrets in GENERIC_STRING SECRET objects
-APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, operation, run_dt, rows_in, rows_matched, rows_out, runtime_s, status, error_msg, input_table, output_table, warehouse, output_cols)
+APP_SCHEMA.JOB_LOG                          -- Job run history (job_id, operation, run_dt, rows_in, rows_matched, rows_out, runtime_s, status[STARTED|SUCCESS|FAILED], error_msg, input_table, output_table, warehouse, output_cols)
 APP_SCHEMA.APP_LOGS                         -- Diagnostic log table (log_id UUID, level, source, logged_at, session_id, message, traceback)
 APP_SCHEMA.APP_STAGE                        -- Internal stage: WHL, UDF SQL, proc SQL
 APP_SCHEMA.LOCID_CENTRAL_RULE               -- Network rule (allowlist: central.locid.com:443)
@@ -275,6 +275,8 @@ Customer Input Table (via reference binding)
          ▼
   LOCID_ENCRYPT(ID_COL, IP_COL, TS_COL, TS_FORMAT, OUTPUT_COLS)
          │
+         ├─ 0. INSERT STARTED row into JOB_LOG (visible immediately in Job History)
+         │
          ├─ 1. Entitlement check — verify allow_encrypt + requested output columns
          │
           ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
@@ -298,8 +300,11 @@ Customer Input Table (via reference binding)
          │
          ├─ 7. POST usage stats to LocID Central (via EAI)
          │
-         └─ 8. Log to JOB_LOG + opportunistic LOCID_PURGE_LOGS
+         └─ 8. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
 ```
+
+**On failure:** Step 8 updates JOB_LOG to FAILED with error message.  
+**On user cancel:** The STARTED row remains — visible in Job History as an incomplete job.
 
 ### Decrypt (TX_CLOC → STABLE_CLOC)
 
@@ -309,6 +314,8 @@ Customer Input Table (via reference binding)
          │
          ▼
   LOCID_DECRYPT(ID_COL, TXCLOC_COL, OUTPUT_COLS)
+         │
+         ├─ 0. INSERT STARTED row into JOB_LOG (visible immediately in Job History)
          │
          ├─ 1. Entitlement check — verify allow_decrypt + requested output columns
          │
@@ -328,7 +335,7 @@ Customer Input Table (via reference binding)
          │
          ├─ 6. POST usage stats to LocID Central (via EAI)
          │
-         └─ 7. Log to JOB_LOG + opportunistic LOCID_PURGE_LOGS
+         └─ 7. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
 ```
 
 ### IP Matching Strategy
@@ -342,8 +349,9 @@ joined back to locid_builds on (build_dt, start_ip, end_ip)
 **IPv6** — Optimised 6-pass cascading hex-prefix range join:
 ```
 Pre-step: materialise IPv6 input rows once (ip_hex pre-computed)
-          materialise relevant IPv6 build rows once (date-filtered)
-          pre-join each input row to its build_dt (avoids 6× DATES range join)
+           extract distinct hex prefixes from input (prefix semi-join table)
+           materialise relevant IPv6 build rows (date + prefix pre-filtered)
+           pre-join each input row to its build_dt (avoids 6× DATES range join)
 
 Pass 1: hex prefix[0:12] match + range join  → matched rows accumulated
 Pass 2: prefix[0:10], exclude matched IPs    → (single accumulator anti-join)
@@ -356,6 +364,7 @@ Pass 6: full range join on remaining rows    → (single accumulator anti-join)
 Key optimisations vs. reference POC (important for big-data performance):
 - `PARSE_IP` / `ip_hex` computed once per row (not 6×)
 - `LOCID_BUILDS` scanned once (not 6×), pre-filtered to relevant build dates
+- **Prefix semi-join pre-filter** on builds materialisation: only build rows whose 12-char hex prefix matches an input IP are materialised (narrow blocks); wide blocks (<1%) kept unconditionally. Reduces working set from ~700M to ~4-5M rows.
 - Prefix filter applied **before** the range join on the builds side (not after)
 - Single accumulator anti-join per pass (O(1)) vs. growing exclusion chain (O(passes))
 
@@ -569,17 +578,24 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 │ job_0042 │ Encrypt   │ 2026-04-08   │ 1.2M   │ 980K   │ ✓ OK   │
 │ job_0041 │ Decrypt   │ 2026-04-07   │ 450K   │ 450K   │ ✓ OK   │
 │ job_0040 │ Encrypt   │ 2026-04-05   │ 800K   │ 612K   │ ✗ FAIL │
+│ job_0039 │ Encrypt   │ 2026-04-04   │ —      │ —      │ ⏳ STRT │
 └──────────┴───────────┴──────────────┴────────┴────────┴────────┘
 ```
+
+**Job statuses:**
+- **SUCCESS** — Job completed normally
+- **FAILED** — Job hit an error (error message shown in detail)
+- **STARTED** — Job was started but never completed — likely cancelled by the user from Snowsight or terminated by a session timeout
 
 **Expandable row detail (click any row):**
 - Input table, output table, warehouse used
 - Runtime breakdown (matching, UDF, write)
 - Error message with guidance if status is FAIL
+- Warning for STARTED jobs: "This job was started but never completed"
 - Output column list used for the job
 
 **Actions:**
-- Filter by: Operation (Encrypt / Decrypt), Status (Success / Failed), Date range
+- Filter by: Operation (Encrypt / Decrypt), Status (Success / Failed / Started), Date range
 - Re-run: button to pre-fill Run Encrypt / Run Decrypt with the same settings as a previous job
 - Download: export job log as CSV
 
@@ -746,10 +762,12 @@ The stored procedures depend on specific column types and clustering keys on the
 - **Clustering keys** on `LOCID_BUILDS`: `(build_dt, start_ip_int_hex)` — compound key enables micro-partition pruning on both the date filter AND the IPv6 hex BETWEEN range join.
 - **Clustering keys** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the equi-join.
 - **Search Optimization Service (SOS)** candidate on IPv4 exploded table for equality predicate on `ip_address`.
+- **IPv6 prefix semi-join:** The builds materialisation step pre-filters to only rows whose 12-char hex prefix matches an input IP. This reduces the working set from ~700M to ~4-5M rows for typical workloads.
 - **IPv6 intermediate table ordering:** The per-job `TBL_V6_BUILDS` transient table is created with `ORDER BY start_ip_int_hex` for range-join pruning.
 - **IPv6 early-exit:** After each prefix pass, the loop checks if all distinct IPv6 IPs have been matched and breaks early — avoids unnecessary wide-range passes.
 - **IPv6 network blocks** (e.g., `2806:108E:E:D03A::`) are fully supported. `PARSE_IP` expands `::` to zeros; the resulting hex is matched via the same BETWEEN range join as full device addresses.
-- Warehouse sizing recommendation: M or L Snowpark-optimized for large batch jobs given the multi-pass IPv6 matching.
+- **Invalid timestamps:** Rows with unparseable timestamps are gracefully skipped (using `TRY_TO_*` functions), not failed. The result includes a `rows_skipped_invalid_ts` count and a warning in the Streamlit UI.
+- Warehouse sizing recommendation: M or L Snowpark-optimized for large batch jobs.
 
 ---
 
@@ -1213,3 +1231,7 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | Python package for vectorized UDFs | ✓ Completed (2026-05-05). LocID delivered `mb_locid_encoding-0.0.0-py3-none-any.whl`. All UDFs migrated to Python vectorized — benchmarked at 5.7× throughput vs Scala scalar at 50M rows. See [Roadmap: Python Package for Vectorized UDFs](#roadmap-python-package-for-vectorized-udfs). |
 | SQL-only workflow for consumers | ✓ Implemented (2026-04-28). SQL Guide view (View 5) added to Streamlit app — step-by-step instructions for running `LOCID_ENCRYPT` / `LOCID_DECRYPT` via SQL with live app name. Jobs submitted via SQL are tracked in Job History identically to UI jobs. |
 | Log retention for JOB_LOG / APP_LOGS | ✓ Implemented (2026-04-28). `LOCID_PURGE_LOGS()` stored procedure reads `log_retention_days` from APP_CONFIG (default 30 days) and deletes old rows. Called opportunistically at the start of each job and available on-demand via the Log Retention section in Configuration (View 6). |
+| Decrypt `location_id` field bug | ✓ Fixed (2026-05-19). Decrypt STABLE_CLOC was referencing `_decoded:location_id` (non-existent) instead of `_decoded:base_loc_id`. All decrypted rows now produce correct STABLE_CLOC values. |
+| Invalid timestamp handling | ✓ Fixed (2026-05-19). Encrypt now uses `TRY_TO_*` functions for timestamp parsing. Rows with invalid timestamps are skipped gracefully instead of failing the entire job. Result includes `rows_skipped_invalid_ts` count. |
+| Failed job tracking in Job History | ✓ Fixed (2026-05-20). Job procedures now INSERT a STARTED row at the beginning, then UPDATE to SUCCESS/FAILED on completion. Jobs cancelled via Snowsight or terminated by session timeout remain as STARTED in Job History — all started jobs are now visible. |
+| IPv6 performance — prefix semi-join | ✓ Optimised (2026-05-20). Added prefix semi-join pre-filter to IPv6 builds materialisation. Reduces working set from ~700M to ~4-5M rows by only materialising build rows whose 12-char hex prefix matches an input IP. Expected ~100-150× speedup for the IPv6 matching phase. |

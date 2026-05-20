@@ -208,23 +208,24 @@ with st.form("log_retention_form"):
     purge_clicked = col_purge.form_submit_button(":material/delete_forever: Purge Now")
 
 if save_clicked:
-    try:
-        session.sql(
-            "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
-            "USING (SELECT 'log_retention_days' AS k, ? AS v) AS s ON t.config_key = s.k "
-            "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
-            "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
-            params=[str(new_days)],
-        ).collect()
-        _load_config.clear()
-        logger.info(session, "configuration.log_retention",
-                    f"log_retention_days updated to {new_days}")
-        st.success(f"Retention period saved: {new_days} day(s).", icon="✅")
-        time.sleep(1)
-        st.rerun()
-    except Exception as e:
-        logger.error(session, "configuration.log_retention", "Save failed", exc=e)
-        show_error("Save failed.", detail=e)
+    with st.spinner("Saving…"):
+        try:
+            session.sql(
+                "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
+                "USING (SELECT 'log_retention_days' AS k, ? AS v) AS s ON t.config_key = s.k "
+                "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
+                "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
+                params=[str(new_days)],
+            ).collect()
+            _load_config.clear()
+            logger.info(session, "configuration.log_retention",
+                        f"log_retention_days updated to {new_days}")
+            st.success(f"Retention period saved: {new_days} day(s).", icon="✅")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            logger.error(session, "configuration.log_retention", "Save failed", exc=e)
+            show_error("Save failed.", detail=e)
 
 if purge_clicked:
     with st.spinner("Purging old logs…"):
@@ -266,23 +267,24 @@ new_level = st.selectbox(
 )
 
 if st.button(":material/save: Save Log Level", key="save_log_level"):
-    try:
-        session.sql(
-            "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
-            "USING (SELECT 'log_level' AS k, ? AS v) AS s ON t.config_key = s.k "
-            "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
-            "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
-            params=[new_level],
-        ).collect()
-        _load_config.clear()
-        logger.info(session, "configuration.log_level",
-                    f"log_level updated to {new_level}")
-        st.success(f"Log level saved: {new_level}", icon="✅")
-        time.sleep(1)
-        st.rerun()
-    except Exception as e:
-        logger.error(session, "configuration.log_level", "Save failed", exc=e)
-        show_error("Save failed.", detail=e)
+    with st.spinner("Saving…"):
+        try:
+            session.sql(
+                "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
+                "USING (SELECT 'log_level' AS k, ? AS v) AS s ON t.config_key = s.k "
+                "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
+                "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
+                params=[new_level],
+            ).collect()
+            _load_config.clear()
+            logger.info(session, "configuration.log_level",
+                        f"log_level updated to {new_level}")
+            st.success(f"Log level saved: {new_level}", icon="✅")
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            logger.error(session, "configuration.log_level", "Save failed", exc=e)
+            show_error("Save failed.", detail=e)
 
 st.divider()
 

@@ -38,8 +38,9 @@ sid = _session_id()
 
 st.header(":material/lock: Run Encrypt")
 st.caption("Match IP + timestamp data against the LocID data lake.")
-with st.expander("💡 Warehouse tip", expanded=False):
+with st.expander("💡 Tips", expanded=False):
     st.markdown(
+        "#### Warehouse\n\n"
         "**For best performance, use a Snowpark-optimized warehouse.**\n\n"
         "| Row count | Recommendation |\n"
         "|-----------|---------------|\n"
@@ -63,6 +64,35 @@ with st.expander("💡 Warehouse tip", expanded=False):
         "\n"
         "-- Grant usage to the application:\n"
         "GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;\n"
+        "```\n\n"
+        "---\n\n"
+        "#### Can't find your table in the picker?\n\n"
+        "Snowsight's table picker cannot browse tables inside the **app's own database**. "
+        "If your input table lives in the app database, bind it via SQL instead:\n\n"
+        "```sql\n"
+        "CALL <app_database>.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
+        "    'ENCRYPT_INPUT_TABLE', 'ADD',\n"
+        "    SYSTEM$REFERENCE('TABLE', '<db>.<schema>.<table>', 'PERSISTENT', 'SELECT')\n"
+        ");\n"
+        "```\n\n"
+        "See the **SQL Guide** page for full details and required grants.\n\n"
+        "---\n\n"
+        "#### How to abort a running job\n\n"
+        "**From Snowsight:**\n"
+        "1. Open **Monitoring → Query History**\n"
+        "2. Filter by Status = **Running** and your username\n"
+        "3. Find the long-running query (SQL text shows `<redacted>` for Native App jobs)\n"
+        "4. Click the query row → click **Cancel** (✕) button\n\n"
+        "**From SQL:**\n"
+        "```sql\n"
+        "-- Find your running query ID:\n"
+        "SELECT query_id, start_time, total_elapsed_time/1000 AS elapsed_s\n"
+        "FROM TABLE(information_schema.query_history())\n"
+        "WHERE execution_status = 'RUNNING'\n"
+        "ORDER BY start_time DESC;\n"
+        "\n"
+        "-- Cancel it:\n"
+        "SELECT SYSTEM$CANCEL_QUERY('<query_id>');\n"
         "```"
     )
 st.divider()
@@ -316,19 +346,6 @@ if step == 1:
             icon="⚠️",
         )
 
-    with st.expander("Can't find your table in the picker?"):
-        st.markdown(
-            "Snowsight's table picker cannot browse tables inside the **app's own database**. "
-            "If your input table lives in the app database, bind it via SQL instead:\n\n"
-            "```sql\n"
-            "CALL <app_database>.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(\n"
-            "    'ENCRYPT_INPUT_TABLE', 'ADD',\n"
-            "    SYSTEM$REFERENCE('TABLE', '<db>.<schema>.<table>', 'PERSISTENT', 'SELECT')\n"
-            ");\n"
-            "```\n\n"
-            "See the **SQL Guide** page for full details and required grants."
-        )
-
 # ---------------------------------------------------------------------------
 # Step 2 — Map Columns
 # ---------------------------------------------------------------------------
@@ -460,16 +477,6 @@ elif step == 4:
         "Output will be written to an auto-named table in APP_SCHEMA "
         "(e.g. LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
     )
-    with st.expander("How to abort a running job", expanded=False):
-        st.markdown(
-            "**From this page:** Navigate away or close the browser tab. "
-            "Note: the underlying query may continue running on the warehouse until it completes.\n\n"
-            "**From Snowsight (recommended):**\n"
-            "1. Open **Monitoring → Query History**\n"
-            "2. Find the running `CALL LOCID_ENCRYPT(…)` query (status: Running)\n"
-            "3. Click the **Cancel** (✕) button in SQL TEXT column\n\n"
-            "This immediately cancels the job on the warehouse."
-        )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -506,6 +513,12 @@ elif step == 4:
                             f"in {result.get('runtime_s', 0):.1f}s",
                             icon="✅"
                         )
+                        if result.get('rows_skipped_invalid_ts', 0) > 0:
+                            st.warning(
+                                f"{result['rows_skipped_invalid_ts']:,} row(s) skipped "
+                                f"due to invalid timestamp values.",
+                                icon="⚠️"
+                            )
                         st.info(f"Output table: `{result.get('output_table', '—')}`")
                         st.caption(f"Job ID: {result.get('job_id', '—')}")
                         logger.info(session, "run_encrypt.run_job",
@@ -534,6 +547,23 @@ elif step == 4:
                     )
                     logger.error(session, "run_encrypt.run_job",
                                  "Job threw an exception", exc=e)
+                    # Fallback: write to JOB_LOG so the failure shows in Job History
+                    # even if the procedure never started (e.g. warehouse/session error).
+                    try:
+                        import uuid as _uuid
+                        session.sql(
+                            "INSERT INTO APP_SCHEMA.JOB_LOG "
+                            "(job_id, operation, rows_in, rows_matched, rows_out, "
+                            " runtime_s, status, error_msg, input_table, output_table, "
+                            " warehouse, output_cols) "
+                            "VALUES (?, 'ENCRYPT', NULL, NULL, NULL, ?, 'FAILED', ?, ?, NULL, NULL, NULL)",
+                            params=[
+                                str(_uuid.uuid4()), round(elapsed, 2), str(e)[:2000],
+                                st.session_state.get('enc_input_table', '—'),
+                            ],
+                        ).collect()
+                    except Exception:
+                        pass  # Best-effort — don't mask the original error
                     show_error(f"Encrypt job failed unexpectedly (elapsed: {elapsed:.1f}s).",
                                detail=e)
 

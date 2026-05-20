@@ -36,20 +36,9 @@ st.caption("Full audit log of all LocID enrichment jobs.")
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Filters
-# ---------------------------------------------------------------------------
-fc1, fc2, fc3 = st.columns(3)
-with fc1:
-    op_filter = st.selectbox("Operation", ["All", "ENCRYPT", "DECRYPT"])
-with fc2:
-    st_filter = st.selectbox("Status", ["All", "SUCCESS", "FAILED"])
-with fc3:
-    date_range = st.date_input("Date range", value=[], help="Leave empty for all dates")
-
-# ---------------------------------------------------------------------------
 # Cached query (TTL 30 s — short enough to see new jobs quickly)
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner="Loading jobs…")
 def _fetch_jobs(_session_id: int, op: str, status: str,
                 dr_start: str, dr_end: str) -> list:
     from snowflake.snowpark.context import get_active_session as _gas
@@ -78,6 +67,23 @@ def _fetch_jobs(_session_id: int, op: str, status: str,
     return [tuple(r) for r in rows]
 
 
+# ---------------------------------------------------------------------------
+# Filters
+# ---------------------------------------------------------------------------
+fc1, fc2, fc3, fc4 = st.columns([2, 2, 3, 1])
+with fc1:
+    op_filter = st.selectbox("Operation", ["All", "ENCRYPT", "DECRYPT"])
+with fc2:
+    st_filter = st.selectbox("Status", ["All", "SUCCESS", "FAILED", "STARTED"])
+with fc3:
+    date_range = st.date_input("Date range", value=[], help="Leave empty for all dates")
+with fc4:
+    st.write("")  # spacer to align with inputs
+    if st.button(":material/refresh: Refresh", use_container_width=True):
+        _fetch_jobs.clear()
+        st.rerun()
+
+
 dr_start = str(date_range[0]) if len(date_range) == 2 else ""
 dr_end   = str(date_range[1]) if len(date_range) == 2 else ""
 
@@ -100,7 +106,7 @@ else:
         status    = row[6]
         error_msg = row[7]
 
-        status_icon = "✅" if status == "SUCCESS" else "❌"
+        status_icon = "✅" if status == "SUCCESS" else ("⏳" if status == "STARTED" else "❌")
         label = (
             f"{status_icon} `{job_id[:8]}` · **{operation}** · "
             f"{str(run_dt)[:16]} · {rows_out:,} rows · {runtime_s}s · {status}"
@@ -118,6 +124,12 @@ else:
                 st.metric("Runtime",  f"{runtime_s}s")
             if error_msg and error_msg != 'None':
                 st.error(f"Error: {error_msg}", icon="❌")
+            if status == "STARTED":
+                st.warning(
+                    "This job was started but never completed — "
+                    "likely cancelled by the user or terminated by a session timeout.",
+                    icon="⏳"
+                )
             if st.button(":material/replay: Re-run with same settings",
                          key=f"rerun_{job_id}"):
                 logger.info(session, "job_history.rerun",
