@@ -6,3 +6,9 @@ backgroundColor          = "#0E1E35"
 secondaryBackgroundColor = "#162840"
 textColor                = "#E8F0F7"
 font                     = "sans serif"
+
+[snowflake]
+[snowflake.sleep]
+# Keep the app active for 30 minutes (default is 15 min).
+# For jobs exceeding 30 min, users should run via SQL worksheet (see Tips).
+streamlitSleepTimeoutMinutes = 30

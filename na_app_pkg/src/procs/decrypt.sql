@@ -331,17 +331,17 @@ def _log_job_start(session, job_id, operation, input_table, warehouse) -> None:
 
 
 def _log_job_end(session, job_id, rows_in, rows_matched, rows_out,
-                 runtime_s, status, error_msg, output_table,
+                 runtime_s, status, error_msg, input_table, output_table,
                  output_cols) -> None:
     """Update the STARTED row with final outcome."""
     session.sql(
         "UPDATE APP_SCHEMA.JOB_LOG SET "
         "rows_in = ?, rows_matched = ?, rows_out = ?, runtime_s = ?, "
-        "status = ?, error_msg = ?, output_table = ?, output_cols = ? "
+        "status = ?, error_msg = ?, input_table = ?, output_table = ?, output_cols = ? "
         "WHERE job_id = ?",
         params=[
             rows_in, rows_matched, rows_out, runtime_s,
-            status, error_msg, output_table, json.dumps(output_cols),
+            status, error_msg, input_table, output_table, json.dumps(output_cols),
             job_id,
         ]
     ).collect()
@@ -501,7 +501,7 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         _log_job_end(
             session, job_id, rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None,
+            runtime_s, 'SUCCESS', None, input_table_name,
             f"APP_SCHEMA.{output_table}", active_cols,
         )
 
@@ -527,7 +527,7 @@ def decrypt_handler(
         phases['total_s'] = runtime_s
         _log_job_end(
             session, job_id, rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc),
+            runtime_s, 'FAILED', str(exc), input_table_name,
             f"APP_SCHEMA.{output_table}", [],
         )
         raise RuntimeError(f'LOCID_DECRYPT failed: {exc}') from exc

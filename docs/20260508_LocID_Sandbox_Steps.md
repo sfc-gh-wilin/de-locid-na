@@ -390,11 +390,17 @@ snow app version create v1_0 --force --skip-git-check --connection locid
 snow app run --version v1_0 --connection locid
 ```
 
+> **Note:** You may see the warning `The connection host (xxx.snowflakecomputing.com) was missing or not in the expected format`. This is a Snow CLI message about the connection URL format — it does not affect deployment. Safe to ignore.
+
 After verifying the update works on the provider account, push it to consumers:
 
 ```sql
 USE ROLE LOCID_APP_ADMIN;
 
+-- Check current versions/patches to find the latest patch number:
+SHOW VERSIONS IN APPLICATION PACKAGE LOCID_PKG;
+
+-- Set the release directive to the new patch:
 ALTER APPLICATION PACKAGE LOCID_PKG
     MODIFY RELEASE CHANNEL DEFAULT
     SET DEFAULT RELEASE DIRECTIVE
@@ -402,7 +408,7 @@ ALTER APPLICATION PACKAGE LOCID_PKG
     PATCH = <new_patch_number>;
 ```
 
-> **Note:** Replace `<new_patch_number>` with the patch number output by `snow app version create` in step 2. Consumers on the DEFAULT channel will automatically pick up the new patch on their next app refresh.
+> **Note:** Replace `<new_patch_number>` with the latest patch number from `SHOW VERSIONS` above. Consumers on the DEFAULT channel will automatically pick up the new patch on their next app refresh.
 
 ---
 

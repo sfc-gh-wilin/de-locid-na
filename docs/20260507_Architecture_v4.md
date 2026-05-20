@@ -156,7 +156,7 @@ Pass 6: full range join on remaining rows    → (single accumulator anti-join)
 Key optimisations vs. the original LocID reference POC:
 - `PARSE_IP` / `ip_hex` computed once per row (not 6×)
 - `LOCID_BUILDS` scanned once (not 6×), pre-filtered to relevant build dates
-- **Prefix semi-join pre-filter** on builds materialisation: only build rows whose 12-char hex prefix matches an input IP are materialised (narrow blocks); wide blocks (<1%) kept unconditionally. Reduces working set from ~700M to ~4-5M rows.
+- **Prefix semi-join pre-filter** on builds materialisation — 3-tier selectivity: (1) 16-char prefix for narrow blocks, (2) 12-char prefix for medium-width blocks, (3) wide blocks kept unconditionally. Reduces working set from ~700M to typically <5M rows.
 - Prefix filter applied **before** the range join on the builds side
 - Single accumulator anti-join per pass (O(1)) vs. growing exclusion chain
 
@@ -393,10 +393,10 @@ Validation is **advisory** — warnings are shown but the job can still proceed:
 | Check | How | Behavior |
 |-------|-----|----------|
 | **IP format** | Sample 1000 rows from the IP column; test each against IPv4 (`x.x.x.x`) and IPv6 (`hex-colon`) patterns | Badge shows `IPv4 / IPv6 / Mixed`; error count shown if unparseable values found |
-| **Timestamp range** | Check min/max of the timestamp column | Warning if any timestamps are older than 52 weeks — those rows will not match any LocID build and will be returned as unmatched |
+| **Timestamp range** | Sample 100K rows; check min/max of the timestamp column | Warning if any timestamps are older than the earliest LocID build date (queried dynamically from `LOCID_BUILD_DATES`) |
 | **Null / empty values** | Count NULL or empty values in IP and timestamp columns | Shown as informational — nulls are skipped during matching |
 
-> **Note from LocID (2026-04-20):** These validation checks are in scope for v1. Timestamp age limit of 52 weeks aligns with LocID's build retention window.
+> **Note:** Timestamp validation cutoff is determined dynamically from `MIN(START_DT)` in the provider's build dates table — not a hardcoded lookback window.
 
 **Step 3 — Select Output Columns**
 
@@ -845,9 +845,11 @@ The stored procedures depend on specific column types and clustering keys on the
 - **Clustering** on `LOCID_BUILDS`: `(build_dt, start_ip_int_hex)` — compound key enables pruning on both the date filter AND the IPv6 hex BETWEEN range join.
 - **Clustering** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the IPv4 equi-join.
 - **Search Optimization Service** candidate on the IPv4 exploded table for equality predicate on `ip_address`.
-- **IPv6 prefix semi-join:** The builds materialisation step now pre-filters to only rows whose 12-char hex prefix matches an input IP. This reduces the working set from ~700M to ~4-5M rows for typical workloads.
+- **IPv6 prefix semi-join:** The builds materialisation step uses a 3-tier prefix pre-filter: (1) 16-char prefix for narrow blocks, (2) 12-char prefix for medium-width blocks, (3) wide blocks kept unconditionally. Dramatically reduces the working set for both device-address and network-block inputs.
 - IPv6 temp tables: materialized as transient tables within the job transaction to avoid recompute.
-- **Invalid timestamps:** Rows with unparseable timestamps are gracefully skipped (using `TRY_TO_*` functions), not failed. The result includes a `rows_skipped_invalid_ts` count and a warning in the Streamlit UI.
+- **Invalid timestamps:** Rows with unparseable timestamps are gracefully skipped (using `TRY_TO_*` functions with `::VARCHAR` cast for TIMESTAMP_NTZ columns), not failed. The result includes a `rows_skipped_invalid_ts` count and a warning in the Streamlit UI.
+- **ID column output:** The output table's ID column is always VARCHAR (via `TO_VARCHAR` cast) regardless of the input column type, ensuring consistent output schema.
+- **Session timeout:** Streamlit sleep timer is set to 30 minutes (`config.toml`). For jobs exceeding 30 min, users should run via SQL worksheet (see SQL Guide page) — SQL worksheets have no session timeout.
 - Warehouse sizing recommendation: Medium Snowpark-optimized minimum; Large Snowpark-optimized for 1M+ rows. The IP matching phase dominates runtime.
 - **Multi-cluster warehouses:** Scale-out (adding clusters) helps when 2+ encrypt/decrypt jobs run concurrently. It does not speed up a single job — use a larger warehouse size (scale-up) for that. Recommend `MAX_CLUSTER_COUNT = 2–3` with `SCALING_POLICY = 'STANDARD'` if concurrent usage is expected.
 - **Compute Pools (SPCS):** Not applicable to the encrypt/decrypt stored procedures. Compute Pools are for container services and Streamlit container runtimes — they cannot accelerate SQL-based query workloads.

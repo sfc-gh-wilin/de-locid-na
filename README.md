@@ -364,7 +364,7 @@ Pass 6: full range join on remaining rows    → (single accumulator anti-join)
 Key optimisations vs. reference POC (important for big-data performance):
 - `PARSE_IP` / `ip_hex` computed once per row (not 6×)
 - `LOCID_BUILDS` scanned once (not 6×), pre-filtered to relevant build dates
-- **Prefix semi-join pre-filter** on builds materialisation: only build rows whose 12-char hex prefix matches an input IP are materialised (narrow blocks); wide blocks (<1%) kept unconditionally. Reduces working set from ~700M to ~4-5M rows.
+- **Prefix semi-join pre-filter** on builds materialisation — 3-tier selectivity: (1) 16-char prefix for narrow blocks, (2) 12-char prefix for medium-width blocks, (3) wide blocks kept unconditionally. Reduces working set from ~700M to typically <5M rows.
 - Prefix filter applied **before** the range join on the builds side (not after)
 - Single accumulator anti-join per pass (O(1)) vs. growing exclusion chain (O(passes))
 
@@ -486,7 +486,7 @@ The app has seven views accessible from a left-side navigation bar. All views ru
   | Check | Scope | Behaviour |
   |-------|-------|-----------|
   | IP format | Sample 1,000 rows | Badge shows IPv4 / IPv6 / Mixed; warns on unparseable or NULL values |
-  | Timestamp range | Full table | Warns if any values are older than 52 weeks (will not match any build) |
+  | Timestamp range | Sample 100K rows | Warns if any values are older than the earliest LocID build date (dynamic from provider data) |
   | NULL timestamps | Full table | Informational count — NULLs are skipped during matching |
 
   Validation is advisory — warnings are shown but the job can always proceed.
@@ -762,11 +762,13 @@ The stored procedures depend on specific column types and clustering keys on the
 - **Clustering keys** on `LOCID_BUILDS`: `(build_dt, start_ip_int_hex)` — compound key enables micro-partition pruning on both the date filter AND the IPv6 hex BETWEEN range join.
 - **Clustering keys** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the equi-join.
 - **Search Optimization Service (SOS)** candidate on IPv4 exploded table for equality predicate on `ip_address`.
-- **IPv6 prefix semi-join:** The builds materialisation step pre-filters to only rows whose 12-char hex prefix matches an input IP. This reduces the working set from ~700M to ~4-5M rows for typical workloads.
+- **IPv6 prefix semi-join:** The builds materialisation step uses a 3-tier prefix pre-filter: (1) 16-char prefix for narrow blocks (~269K rows), (2) 12-char prefix for medium-width blocks, (3) wide blocks kept unconditionally. Dramatically reduces the working set for both device-address and network-block inputs.
 - **IPv6 intermediate table ordering:** The per-job `TBL_V6_BUILDS` transient table is created with `ORDER BY start_ip_int_hex` for range-join pruning.
 - **IPv6 early-exit:** After each prefix pass, the loop checks if all distinct IPv6 IPs have been matched and breaks early — avoids unnecessary wide-range passes.
 - **IPv6 network blocks** (e.g., `2806:108E:E:D03A::`) are fully supported. `PARSE_IP` expands `::` to zeros; the resulting hex is matched via the same BETWEEN range join as full device addresses.
-- **Invalid timestamps:** Rows with unparseable timestamps are gracefully skipped (using `TRY_TO_*` functions), not failed. The result includes a `rows_skipped_invalid_ts` count and a warning in the Streamlit UI.
+- **Invalid timestamps:** Rows with unparseable timestamps are gracefully skipped (using `TRY_TO_*` functions with `::VARCHAR` cast for TIMESTAMP_NTZ columns), not failed. The result includes a `rows_skipped_invalid_ts` count and a warning in the Streamlit UI.
+- **ID column output:** The output table's ID column is always VARCHAR (via `TO_VARCHAR` cast) regardless of the input column type, ensuring consistent output schema.
+- **Session timeout:** Streamlit sleep timer is set to 30 minutes (`config.toml`). For jobs exceeding 30 min, users should run via SQL worksheet (see SQL Guide page) — SQL worksheets have no session timeout.
 - Warehouse sizing recommendation: M or L Snowpark-optimized for large batch jobs.
 
 ---
@@ -1234,4 +1236,4 @@ Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `AP
 | Decrypt `location_id` field bug | ✓ Fixed (2026-05-19). Decrypt STABLE_CLOC was referencing `_decoded:location_id` (non-existent) instead of `_decoded:base_loc_id`. All decrypted rows now produce correct STABLE_CLOC values. |
 | Invalid timestamp handling | ✓ Fixed (2026-05-19). Encrypt now uses `TRY_TO_*` functions for timestamp parsing. Rows with invalid timestamps are skipped gracefully instead of failing the entire job. Result includes `rows_skipped_invalid_ts` count. |
 | Failed job tracking in Job History | ✓ Fixed (2026-05-20). Job procedures now INSERT a STARTED row at the beginning, then UPDATE to SUCCESS/FAILED on completion. Jobs cancelled via Snowsight or terminated by session timeout remain as STARTED in Job History — all started jobs are now visible. |
-| IPv6 performance — prefix semi-join | ✓ Optimised (2026-05-20). Added prefix semi-join pre-filter to IPv6 builds materialisation. Reduces working set from ~700M to ~4-5M rows by only materialising build rows whose 12-char hex prefix matches an input IP. Expected ~100-150× speedup for the IPv6 matching phase. |
+| IPv6 performance — prefix semi-join | ✓ Optimised (2026-05-20). 3-tier prefix semi-join pre-filter: (1) 16-char prefix for narrow blocks, (2) 12-char prefix for medium-width blocks, (3) wide blocks unconditionally. Reduces working set from ~700M to <5M rows for most inputs. |

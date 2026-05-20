@@ -126,8 +126,7 @@ else:
                 st.error(f"Error: {error_msg}", icon="❌")
             if status == "STARTED":
                 st.warning(
-                    "This job was started but never completed — "
-                    "likely cancelled by the user or terminated by a session timeout.",
+                    "This job was started but never completed.",
                     icon="⏳"
                 )
             if st.button(":material/replay: Re-run with same settings",

@@ -40,6 +40,12 @@ st.header(":material/lock: Run Encrypt")
 st.caption("Match IP + timestamp data against the LocID data lake.")
 with st.expander("💡 Tips", expanded=False):
     st.markdown(
+        "#### Long-running jobs (>30 min)\n\n"
+        "The app session stays active for up to 30 minutes. For large datasets that take longer, "
+        "run the job via **SQL worksheet** instead — no session timeout applies.\n\n"
+        "See the **SQL Guide** page for full syntax and examples. "
+        "Results appear in **Job History** when done.\n\n"
+        "---\n\n"
         "#### Warehouse\n\n"
         "**For best performance, use a Snowpark-optimized warehouse.**\n\n"
         "| Row count | Recommendation |\n"
@@ -208,10 +214,22 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
         else:   # epoch_sec (default)
             ts_expr = f"{q_ts}::BIGINT"
 
-        # UTC cutoff — 52 weeks back from now
-        cutoff_epoch = int(
-            (datetime.now(timezone.utc) - timedelta(weeks=52)).timestamp()
-        )
+        # Cutoff — use earliest build date from provider data (not hardcoded 52 weeks)
+        try:
+            min_dt_row = session.sql(
+                "SELECT MIN(start_dt) FROM LOCID_SHARE.LOCID_BUILD_DATES"
+            ).collect()[0][0]
+            if min_dt_row:
+                cutoff_epoch = int(datetime.combine(
+                    min_dt_row if hasattr(min_dt_row, 'year') else datetime.strptime(str(min_dt_row), '%Y-%m-%d').date(),
+                    datetime.min.time(),
+                    tzinfo=timezone.utc
+                ).timestamp())
+            else:
+                cutoff_epoch = int((datetime.now(timezone.utc) - timedelta(weeks=52)).timestamp())
+        except Exception:
+            cutoff_epoch = int((datetime.now(timezone.utc) - timedelta(weeks=52)).timestamp())
+
         ts_rows = session.sql(f"""
             SELECT
                 MIN({ts_expr})                              AS ts_min,
@@ -268,7 +286,7 @@ def _show_validation(v: dict) -> None:
     if v.get("stale_count") is not None:
         if v["stale_count"]:
             st.warning(
-                f"{v['stale_count']:,} row(s) have timestamps older than 52 weeks. "
+                f"{v['stale_count']:,} row(s) have timestamps older than the earliest LocID build date. "
                 "These will not match any LocID build and will be returned as unmatched.",
                 icon="⚠️"
             )
@@ -276,7 +294,7 @@ def _show_validation(v: dict) -> None:
             st.warning(f"{v['null_ts']:,} NULL timestamp value(s) — will be skipped.",
                        icon="⚠️")
         if v["ts_min"] is not None and v["stale_count"] == 0:
-            st.success("Timestamp range looks good — all values within the 52-week window.",
+            st.success("Timestamp range looks good — all values within LocID build coverage.",
                        icon="✅")
 
 
@@ -382,6 +400,15 @@ elif step == 2:
                                   "**epoch_ms** — integer Unix milliseconds  \n"
                                   "**timestamp** — Snowflake TIMESTAMP_NTZ column"
                               ))
+
+        # Validation: columns must be distinct
+        if len({col_id, col_ip, col_ts}) < 3:
+            st.warning(
+                "Each mapping must use a **different column**. "
+                "ID, IP Address, and Timestamp cannot share the same column.",
+                icon="⚠️",
+            )
+
         st.divider()
 
         if st.button("✅ Run Input Validation"):
@@ -407,7 +434,8 @@ elif step == 2:
             st.session_state.enc_step = 1
             st.rerun()
     with col2:
-        if st.button("Next →", disabled=not columns):
+        cols_valid = columns and len({col_id, col_ip, col_ts}) == 3
+        if st.button("Next →", disabled=not cols_valid):
             st.session_state.enc_col_id = col_id
             st.session_state.enc_col_ip = col_ip
             st.session_state.enc_col_ts = col_ts

@@ -338,17 +338,17 @@ def _log_job_start(session, job_id, operation, input_table, warehouse) -> None:
 
 
 def _log_job_end(session, job_id, rows_in, rows_matched, rows_out,
-                 runtime_s, status, error_msg, output_table,
+                 runtime_s, status, error_msg, input_table, output_table,
                  output_cols) -> None:
     """Update the STARTED row with final outcome."""
     session.sql(
         "UPDATE APP_SCHEMA.JOB_LOG SET "
         "rows_in = ?, rows_matched = ?, rows_out = ?, runtime_s = ?, "
-        "status = ?, error_msg = ?, output_table = ?, output_cols = ? "
+        "status = ?, error_msg = ?, input_table = ?, output_table = ?, output_cols = ? "
         "WHERE job_id = ?",
         params=[
             rows_in, rows_matched, rows_out, runtime_s,
-            status, error_msg, output_table, json.dumps(output_cols),
+            status, error_msg, input_table, output_table, json.dumps(output_cols),
             job_id,
         ]
     ).collect()
@@ -460,7 +460,7 @@ def encrypt_handler(
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_IPV4} AS
             WITH inp AS (
-                SELECT {id_col} AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
+                SELECT TO_VARCHAR({id_col}) AS _id, {ip_col} AS _ip, {ts_expr} AS _ts
                 FROM reference('ENCRYPT_INPUT_TABLE')
                 WHERE {ip_col} NOT LIKE '%:%'
                   AND {ts_expr} IS NOT NULL
@@ -526,7 +526,7 @@ def encrypt_handler(
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_INP} AS
             SELECT
-                {id_col}  AS _id,
+                TO_VARCHAR({id_col})  AS _id,
                 {ip_col}  AS _ip,
                 {ts_expr} AS _ts,
                 GET_PATH(PARSE_IP({ip_col}, 'INET'), 'hex_ipv6') AS ip_hex
@@ -536,20 +536,24 @@ def encrypt_handler(
         """).collect()
 
         # 4-a2: Distinct input hex prefixes — used to pre-filter builds so we
-        # materialize only the ~0.1% of build rows that can possibly match.
+        # materialize only the small fraction of build rows that can possibly match.
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_PFX} AS
             SELECT DISTINCT
+                SUBSTR(ip_hex, 1, 16) AS pfx16,
                 SUBSTR(ip_hex, 1, 12) AS pfx12
             FROM {TBL_V6_INP}
         """).collect()
 
         # 4-b: Relevant IPv6 build rows, pre-filtered by BOTH date range AND
-        # input hex prefix. This reduces the working set from hundreds of millions
-        # to typically a few million rows, dramatically accelerating the 6-pass loop.
+        # input hex prefix. Three tiers of selectivity:
         #
-        # Narrow blocks (start/end share 12-char prefix): semi-join on input pfx12.
-        # Wide blocks (start/end differ at 12-char): kept unconditionally (small set).
+        #   1. Narrow blocks (start/end share 16-char prefix): semi-join on pfx16.
+        #      Typically reduces 700M → <1M rows — covers most device-address inputs.
+        #   2. Medium blocks (share 12-char but differ at 16-char): semi-join on pfx12.
+        #      Covers network-block inputs that span wider ranges.
+        #   3. Wide blocks (differ at 12-char): kept unconditionally (small set <4M).
+        #
         # ORDER BY start_ip_int_hex enables micro-partition pruning on BETWEEN.
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_BUILDS} AS
@@ -559,17 +563,28 @@ def encrypt_handler(
                 JOIN {TBL_V6_INP} i
                     ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
             )
-            -- Narrow blocks: only those whose 12-char prefix matches an input IP
+            -- Narrow blocks (16-char prefix match): most selective
+            SELECT l.*
+            FROM {BUILDS} l
+            JOIN rel_dates rd ON l.build_dt = rd.build_dt
+            JOIN {TBL_V6_PFX} p ON SUBSTR(l.start_ip_int_hex, 1, 16) = p.pfx16
+            WHERE l.start_ip LIKE '%:%'
+              AND SUBSTR(l.start_ip_int_hex, 1, 16) = SUBSTR(l.end_ip_int_hex, 1, 16)
+
+            UNION ALL
+
+            -- Medium blocks (12-char match, 16-char mismatch): semi-join on pfx12
             SELECT l.*
             FROM {BUILDS} l
             JOIN rel_dates rd ON l.build_dt = rd.build_dt
             JOIN {TBL_V6_PFX} p ON SUBSTR(l.start_ip_int_hex, 1, 12) = p.pfx12
             WHERE l.start_ip LIKE '%:%'
               AND SUBSTR(l.start_ip_int_hex, 1, 12) = SUBSTR(l.end_ip_int_hex, 1, 12)
+              AND SUBSTR(l.start_ip_int_hex, 1, 16) != SUBSTR(l.end_ip_int_hex, 1, 16)
 
             UNION ALL
 
-            -- Wide blocks: keep all (typically <1% of IPv6 rows)
+            -- Wide blocks (differ at 12-char): keep all (typically <1% of IPv6 rows)
             SELECT l.*
             FROM {BUILDS} l
             JOIN rel_dates rd ON l.build_dt = rd.build_dt
@@ -773,7 +788,7 @@ def encrypt_handler(
         # ------------------------------------------------------------------
         _log_job_end(
             session, job_id, rows_in, rows_matched, rows_out,
-            runtime_s, 'SUCCESS', None,
+            runtime_s, 'SUCCESS', None, input_table_name,
             f"APP_SCHEMA.{output_table}", active_cols,
         )
 
@@ -815,7 +830,7 @@ def encrypt_handler(
         phases['total_s'] = runtime_s
         _log_job_end(
             session, job_id, rows_in, rows_matched, rows_out,
-            runtime_s, 'FAILED', str(exc),
+            runtime_s, 'FAILED', str(exc), input_table_name,
             f"APP_SCHEMA.{output_table}", [],
         )
         raise RuntimeError(f'LOCID_ENCRYPT failed: {exc}') from exc
