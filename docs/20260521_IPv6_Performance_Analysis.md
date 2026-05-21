@@ -12,18 +12,6 @@ IPv6 network block matching (inputs ending in `::`) is significantly slower than
 
 ---
 
-## Current Performance (Patch 7, Large Snowpark-Optimized)
-
-| Input Type | Table | Rows | Warm WH | Cold WH | Match Rate |
-|-----------|-------|------|:-------:|:-------:|:----------:|
-| IPv4 | `CUSTOMER_TEST_INPUT_1M_IPV4` | 1M | 17.8 min | ~18 min | 100% |
-| IPv6 device addresses | `CUSTOMER_TEST_INPUT_1M_IPV6` | 1M | ~9 min* | ~15 min* | 100% |
-| **IPv6 network blocks** | **`INPUT_IPV6_ONE_MIL`** | **1M** | **29 min** | **>60 min** | **100%** |
-
-*Estimated from earlier benchmarks
-
----
-
 ## Why IPv6 Network Blocks Are Slow
 
 ### The Data
