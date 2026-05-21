@@ -12,7 +12,47 @@ IPv6 network block matching (inputs ending in `::`) is significantly slower than
 
 ---
 
-## Why IPv6 Network Blocks Are Slow
+## Why Certain IPv6 Inputs Are Slow
+
+### Clarification: It's Not About `::` Notation
+
+The `::` notation vs fully-expanded notation produces **identical hex values** — Snowflake's `PARSE_IP` treats them the same way:
+
+```sql
+SELECT GET_PATH(PARSE_IP('2401:4900:4E06:2CB::', 'INET'), 'hex_ipv6');
+-- "240149004E0602CB0000000000000000"
+
+SELECT GET_PATH(PARSE_IP('2401:4900:4E06:2CB:0000:0000:0000:0000', 'INET'), 'hex_ipv6');
+-- "240149004E0602CB0000000000000000"  (identical)
+```
+
+The performance difference is **not** caused by how the IP is written. It's caused by **where the input IPs fall in the address space** relative to the build data ranges.
+
+### The Real Cause: How Many Build Ranges Overlap Each Input IP
+
+The LOCID_BUILDS table stores IPv6 data as hex ranges (`start_ip_int_hex` to `end_ip_int_hex`). The matching query is:
+
+```sql
+WHERE input_ip_hex BETWEEN start_ip_int_hex AND end_ip_int_hex
+```
+
+Performance depends on **how many build ranges must be scanned** to find the one containing each input IP. This is determined by the input IP's hex prefix overlap with the build data:
+
+| Input IP hex prefix (first 16 chars) | Matching build rows (16-char prefix filter) | Join cost |
+|-------|:-------:|:-------:|
+| `200300DBDF1A1C74` (random lower 64 bits) | **~0-5** | Fast |
+| `240149004E0602CB` (zeros in lower 64 bits) | **~269K** | Slow |
+
+**Why?** The LocID build data contains many overlapping ranges in popular /48 and /56 network blocks. IPs with zeros in their lower 64 bits (like `240149004E0602CB0000000000000000`) are at the **bottom of their /64 block** — they fall within the start range of many build entries that begin at or near `...0000`. Random device addresses (like `200300DBDF1A1C7487AFAA02DDDBFFFC`) are spread throughout the address space and typically only overlap with 1-5 build ranges.
+
+### Data Evidence (Build Date 2026-05-13)
+
+| Test Input Table | Input Characteristics | Build rows after 16-char prefix filter | Build rows after 12-char prefix filter |
+|------------------|----------------------|:-------:|:-------:|
+| `CUSTOMER_TEST_INPUT_1M_IPV6` | Random lower 64 bits | **393** | 58M |
+| `INPUT_IPV6_ONE_MIL` | Lower 64 bits = zeros | **269K** | 523M |
+
+The 269K vs 393 difference (686×) in the 16-char filter directly explains the performance gap: the matching engine must evaluate 686× more candidate ranges for the "zeros" dataset.
 
 ### The Data
 
@@ -20,23 +60,20 @@ IPv6 network block matching (inputs ending in `::`) is significantly slower than
 - IPv6 builds are stored as hex ranges: `start_ip_int_hex` to `end_ip_int_hex`
 - Matching requires: `input_ip_hex BETWEEN start_ip_int_hex AND end_ip_int_hex`
 
-### The Problem: BETWEEN Range Joins
+### The Fundamental Problem: BETWEEN Range Joins
 
 **IPv4** uses an "exploded" table (`LOCID_BUILDS_IPV4_EXPLODED`) with one row per individual IP address → enables hash equi-join (`input_ip = exploded.ip_address`). This is O(n) — extremely fast.
 
 **IPv6** cannot be exploded to individual addresses (2^128 space). Instead it uses BETWEEN range joins — Snowflake must evaluate whether each input IP falls within each candidate range. This is fundamentally O(n × m) even with clustering/pruning.
 
-### Network Blocks vs Device Addresses
+### Could Something Else Be Causing the Issue?
 
-| Property | Device Addresses | Network Blocks |
-|----------|:----------------:|:--------------:|
-| Example | `2001:4456:e0ff:6c28:eb94:8b0c:2d36:7dc7` | `2806:108E:E:D03A::` |
-| Hex representation | Full 32-char random | 16 meaningful chars + 16 zeros |
-| Distinct /64 prefixes (1M inputs) | 455K | 210K |
-| Build rows matching input prefixes (16-char) | **393** | **269K** |
-| Build rows matching input prefixes (12-char) | 58M | **523M** |
-
-Device addresses are highly specific — they match at a fine-grained level. Network blocks are ambiguous — they could fall into many overlapping build ranges.
+We investigated other potential causes:
+- **Clustering state:** `LOCID_BUILDS` clustering depth is 4.5 (well-clustered) — not the issue
+- **Warehouse size:** Both tests used the same Large Snowpark-optimized warehouse
+- **Code path:** Both use identical logic — same procedure, same 6-pass algorithm
+- **Data volume:** Both are 1M rows input, same build date
+- **Conclusion:** The ONLY variable is how many build rows each input IP overlaps with — and that's determined by the input data's position in the address space
 
 ### Pass-by-Pass Breakdown (Network Blocks, 29 min warm)
 
