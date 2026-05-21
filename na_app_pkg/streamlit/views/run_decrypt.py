@@ -40,11 +40,14 @@ st.header(":material/lock_open: Run Decrypt")
 st.caption("Decode TX_CLOC values back to STABLE_CLOC and geo context.")
 with st.expander("💡 Tips", expanded=False):
     st.markdown(
-        "#### Long-running jobs (>30 min)\n\n"
-        "The app session stays active for up to 30 minutes. For large datasets that take longer, "
-        "run the job via **SQL worksheet** instead — no session timeout applies.\n\n"
-        "See the **SQL Guide** page for full syntax and examples. "
-        "Results appear in **Job History** when done.\n\n"
+        "#### Long-running jobs\n\n"
+        "**Important:** If you navigate away from this tab or minimize the browser, "
+        "the session may terminate and your job will be cancelled.\n\n"
+        "For any job that may take more than a few minutes, run via **SQL worksheet** instead:\n\n"
+        "- Open a SQL worksheet in Snowsight\n"
+        "- See the **SQL Guide** page for full syntax\n"
+        "- SQL worksheets have **no session timeout** — the job runs to completion\n"
+        "- Results appear in **Job History** when done\n\n"
         "---\n\n"
         "#### Warehouse\n\n"
         "**For best performance, use a Snowpark-optimized warehouse.**\n\n"

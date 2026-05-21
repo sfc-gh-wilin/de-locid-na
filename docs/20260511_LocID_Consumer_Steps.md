@@ -181,7 +181,7 @@ After installation, grant the app permission to connect to LocID Central (`centr
 
 1. Navigate to **Catalog → Apps**
 2. Click the app name (**LocID for Snowflake** or **LOCID_APP**)
-3. Click **Settings** (gear icon) → **Connections**
+3. Click **Settings** (gear icon) → **Configurations**
 4. Next to *LocID Central API Access*, click **…** → **Approve**
 
 **Option B — SQL:**

@@ -7,7 +7,7 @@
 --
 -- Workflow:
 --   1. Validate entitlement (allow_decrypt)
---   2. Fetch license context (client_id, namespace_guid) from LocID Central (cached)
+--   2. Fetch license context (client_id) from cached license; namespace_guid from SECRET
 --      Crypto secrets are bound directly to UDFs via SECRETS clauses — never embedded in SQL.
 --   3. Decode each TX_CLOC via LOCID_TXCLOC_DECRYPT into a temp table
 --      → location_id (plaintext), timestamp, enc_client_id
@@ -46,7 +46,8 @@ EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
 PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
     'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY,
-    'api_key'     = APP_SCHEMA.LOCID_API_KEY
+    'api_key'     = APP_SCHEMA.LOCID_API_KEY,
+    'ns_guid'     = APP_SCHEMA.LOCID_NAMESPACE_GUID
 )
 HANDLER = 'decrypt_handler'
 AS $$
@@ -86,12 +87,12 @@ def _get_config(session, key: str):
 
 
 def _get_license_context(session) -> dict:
-    """Return non-secret license context (client_id, namespace_guid).
+    """Return non-secret license context (client_id).
 
     Refreshes via LOCID_FETCH_LICENSE if the cached license is older than 1 hour
     or missing. LOCID_FETCH_LICENSE writes/refreshes the crypto secrets directly
-    into APP_SCHEMA.LOCID_BASE_SECRET and LOCID_SCHEME_SECRET; this proc no
-    longer reads those values — the UDFs do, via their SECRETS clauses.
+    into APP_SCHEMA.LOCID_BASE_SECRET, LOCID_SCHEME_SECRET, and
+    LOCID_NAMESPACE_GUID; this proc reads namespace_guid from its SECRETS clause.
     """
     cached = _get_config(session, 'cached_license')
     if not (cached and cached[1] and time.time() - cached[1].timestamp() < 3600):
@@ -130,8 +131,7 @@ def _get_license_context(session) -> dict:
         )
 
     return {
-        'client_id':      int(lic_info.get('client_id', 0)),
-        'namespace_guid': entry.get('namespace_guid', ''),
+        'client_id': int(lic_info.get('client_id', 0)),
     }
 
 
@@ -404,13 +404,13 @@ def decrypt_handler(
         phases['entitlement_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
-        # Step 2: Fetch license context (client_id, namespace_guid).
+        # Step 2: Fetch license context (client_id) + namespace_guid from secret.
         # Crypto secrets are bound directly to the UDFs (see locid_udf.sql)
         # and are NEVER read into proc-local variables or embedded in SQL.
         # ------------------------------------------------------------------
         sec        = _get_license_context(session)
         client_id  = sec['client_id']
-        ns_guid    = _sql_lit(sec['namespace_guid'])   # non-secret identifier
+        ns_guid    = _sql_lit(_snowflake.get_generic_secret_string('ns_guid'))
 
         rows_in = session.sql("SELECT COUNT(*) FROM reference('DECRYPT_INPUT_TABLE')").collect()[0][0]
         phases['secrets_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()

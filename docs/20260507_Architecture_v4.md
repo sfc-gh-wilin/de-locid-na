@@ -226,7 +226,7 @@ A guided wizard runs once after install and can be re-accessed from the Configur
 | **E. Approve Network Access** | Shows `ALTER APPLICATION APPROVE SPECIFICATION` SQL for ACCOUNTADMIN; also `GRANT USAGE ON INTEGRATION`; **must run before Screen D** |
 | **D. Enter License Key** | Masked input; calls `APP_SCHEMA.LOCID_FETCH_LICENSE` stored procedure (requires EAI spec approved at Screen E); caches full license payload in `APP_CONFIG` |
 | **F. Create App Objects** | Bootstraps `APP_CONFIG`, `JOB_LOG`, and the `HTTP_PING` UDF |
-| **H. Select API Key** | Lists ACTIVE entries using `api_key_hint` (first 8 chars); user selects which API key to use; calls `APP_SCHEMA.LOCID_SET_API_KEY` to write full key to `LOCID_API_KEY` SECRET and scrub cache; `api_key_id`, `namespace_guid`, `client_id` stored in `APP_CONFIG` |
+| **H. Select API Key** | Lists ACTIVE entries using `api_key_hint` (first 8 chars); user selects which API key to use; calls `APP_SCHEMA.LOCID_SET_API_KEY` to write full key to `LOCID_API_KEY` SECRET and `namespace_guid` to `LOCID_NAMESPACE_GUID` SECRET; `api_key_id`, `client_id` stored in `APP_CONFIG` |
 | **I. Success** | Summary checklist and "Launch App" button |
 
 ---
@@ -240,16 +240,17 @@ Customer Input Table (via reference binding)
   (unique_id, ip_address, timestamp)
          │
          ▼
-   LOCID_ENCRYPT(ID_COL, IP_COL, TS_COL, TS_FORMAT, OUTPUT_COLS)
+   LOCID_ENCRYPT(ID_COL, IP_COL, TS_COL, TS_FORMAT, OUTPUT_COLS, ID_TO_VARCHAR)
          │
          ├─ 0. INSERT STARTED row into JOB_LOG (visible immediately in Job History)
          │
          ├─ 1. Entitlement check — verify allow_encrypt + requested output columns
          │
-          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
-          │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
-          │       never read into proc variables or embedded in SQL.
-          │       Resolve selected API key metadata: namespace_guid, client_id → used for STABLE_CLOC
+         ├─ 2. Fetch license context from APP_CONFIG (client_id)
+         │       namespace_guid read from LOCID_NAMESPACE_GUID secret.
+         │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
+         │       never read into proc variables or embedded in SQL.
+         │       Resolve selected API key metadata: client_id → used for STABLE_CLOC
          │
          ├─ 3. IP Matching (IPv4 equi-join + IPv6 cascading prefix join)
          │       → unique_id, encrypted_locid, tier, geo_context, build_dt
@@ -287,9 +288,10 @@ Customer Input Table (via reference binding)
          │
          ├─ 1. Entitlement check — verify allow_decrypt + requested output columns
          │
-          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
-          │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
-          │       never read into proc variables or embedded in SQL.
+         ├─ 2. Fetch license context from APP_CONFIG (client_id)
+         │       namespace_guid read from LOCID_NAMESPACE_GUID secret.
+         │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
+         │       never read into proc variables or embedded in SQL.
          │
          ├─ 3. Call UDFs per row:
          │       LOCID_TXCLOC_DECRYPT → base_loc_id + metadata + geo context (JSON)

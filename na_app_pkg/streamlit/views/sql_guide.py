@@ -115,7 +115,9 @@ with st.expander("Parameter reference", expanded=False):
         "| `TS_COL` | VARCHAR | Column name for the timestamp |\n"
         "| `TS_FORMAT` | VARCHAR | `'epoch_sec'`, `'epoch_ms'`, or `'timestamp'` |\n"
         "| `OUTPUT_COLS` | ARRAY | Columns to include in output — see valid values below. "
-        "Empty array `ARRAY_CONSTRUCT()` returns all entitled columns. |"
+        "Empty array `ARRAY_CONSTRUCT()` returns all entitled columns. |\n"
+        "| `ID_TO_VARCHAR` | BOOLEAN | `TRUE` = cast ID to VARCHAR in output; "
+        "`FALSE` (default) = preserve original column type |"
     )
     st.caption(
         "Use `'epoch_sec'` for Unix timestamps in seconds, `'epoch_ms'` for "
@@ -142,18 +144,20 @@ with st.expander("Parameter reference", expanded=False):
     )
 
 st.code(
-    f"-- All entitled columns (recommended default):\n"
+    f"-- All entitled columns, preserve original ID type (default):\n"
     f"CALL {_app_name}.APP_SCHEMA.LOCID_ENCRYPT(\n"
     f"    'MY_ID',           -- ID_COL:     your unique row identifier column\n"
     f"    'IP_ADDRESS',      -- IP_COL:     your IP address column\n"
     f"    'EVENT_TS',        -- TS_COL:     your timestamp column\n"
     f"    'epoch_sec',       -- TS_FORMAT:  epoch_sec | epoch_ms | timestamp\n"
     f"    ARRAY_CONSTRUCT()  -- OUTPUT_COLS: empty = all entitled columns\n"
+    f"    -- ID_TO_VARCHAR defaults to FALSE (original type preserved)\n"
     f");\n\n"
-    f"-- Specific columns only (e.g. TX_CLOC + country):\n"
+    f"-- Cast ID column to VARCHAR in output:\n"
     f"CALL {_app_name}.APP_SCHEMA.LOCID_ENCRYPT(\n"
     f"    'MY_ID', 'IP_ADDRESS', 'EVENT_TS', 'epoch_sec',\n"
-    f"    ARRAY_CONSTRUCT('tx_cloc', 'locid_country', 'locid_country_code')\n"
+    f"    ARRAY_CONSTRUCT('tx_cloc', 'locid_country', 'locid_country_code'),\n"
+    f"    TRUE  -- ID_TO_VARCHAR: cast ID to VARCHAR\n"
     f");",
     language="sql",
 )

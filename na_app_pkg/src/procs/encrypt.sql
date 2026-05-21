@@ -7,7 +7,7 @@
 --
 -- Workflow:
 --   1. Validate entitlement (allow_encrypt)
---   2. Fetch license context (client_id, namespace_guid) from LocID Central (cached)
+--   2. Fetch license context (client_id) from cached license; namespace_guid from SECRET
 --      Crypto secrets are bound directly to UDFs via SECRETS clauses — never embedded in SQL.
 --   3. IPv4 matching — equi-join via LOCID_BUILDS_IPV4_EXPLODED
 --   4. IPv6 matching — 6-pass cascading hex-prefix range join
@@ -29,12 +29,17 @@
 -- Output table: auto-generated in APP_SCHEMA as LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS.
 -- The app owns APP_SCHEMA — no consumer GRANT needed.
 -- SELECT is granted to APP_ADMIN and APP_VIEWER after creation.
+
+-- Drop old 5-param overload to avoid ambiguous overloading with the new DEFAULT param.
+DROP PROCEDURE IF EXISTS APP_SCHEMA.LOCID_ENCRYPT(VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY);
+
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
     ID_COL        VARCHAR,    -- column name for unique row identifier
     IP_COL        VARCHAR,    -- column name for IP address
     TS_COL        VARCHAR,    -- column name for timestamp
     TS_FORMAT     VARCHAR,    -- 'epoch_sec' | 'epoch_ms' | 'timestamp'
-    OUTPUT_COLS   ARRAY       -- requested output column names (empty = all entitled)
+    OUTPUT_COLS   ARRAY,      -- requested output column names (empty = all entitled)
+    ID_TO_VARCHAR BOOLEAN DEFAULT FALSE  -- TRUE = cast ID to VARCHAR in output; FALSE = preserve original type
 )
 RETURNS VARIANT
 LANGUAGE PYTHON
@@ -43,7 +48,8 @@ EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
 PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
     'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY,
-    'api_key'     = APP_SCHEMA.LOCID_API_KEY
+    'api_key'     = APP_SCHEMA.LOCID_API_KEY,
+    'ns_guid'     = APP_SCHEMA.LOCID_NAMESPACE_GUID
 )
 HANDLER = 'encrypt_handler'
 AS $$
@@ -90,12 +96,12 @@ def _get_config(session, key: str):
 
 
 def _get_license_context(session) -> dict:
-    """Return non-secret license context (client_id, namespace_guid).
+    """Return non-secret license context (client_id).
 
     Refreshes via LOCID_FETCH_LICENSE if the cached license is older than 1 hour
     or missing. LOCID_FETCH_LICENSE writes/refreshes the crypto secrets directly
-    into APP_SCHEMA.LOCID_BASE_SECRET and LOCID_SCHEME_SECRET; this proc no
-    longer reads those values — the UDFs do, via their SECRETS clauses.
+    into APP_SCHEMA.LOCID_BASE_SECRET, LOCID_SCHEME_SECRET, and
+    LOCID_NAMESPACE_GUID; this proc reads namespace_guid from its SECRETS clause.
     """
     cached = _get_config(session, 'cached_license')
     if not (cached and cached[1] and time.time() - cached[1].timestamp() < 3600):
@@ -135,8 +141,7 @@ def _get_license_context(session) -> dict:
         )
 
     return {
-        'client_id':      int(lic_info.get('client_id', 0)),
-        'namespace_guid': entry.get('namespace_guid', ''),
+        'client_id': int(lic_info.get('client_id', 0)),
     }
 
 
@@ -362,6 +367,7 @@ def encrypt_handler(
     session: snowpark.Session,
     id_col: str, ip_col: str, ts_col: str,
     ts_format: str, output_cols: list,
+    id_to_varchar: bool = False,
 ) -> dict:
 
     job_id   = str(uuid.uuid4())
@@ -427,13 +433,13 @@ def encrypt_handler(
         phases['entitlement_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
-        # Step 2: Fetch license context (client_id, namespace_guid).
+        # Step 2: Fetch license context (client_id) + namespace_guid from secret.
         # Crypto secrets are bound directly to the UDFs (see locid_udf.sql)
         # and are NEVER read into proc-local variables or embedded in SQL.
         # ------------------------------------------------------------------
         sec       = _get_license_context(session)
         client_id = sec['client_id']                  # int — embedded directly
-        ns_guid   = _sql_lit(sec['namespace_guid'])   # non-secret identifier
+        ns_guid   = _sql_lit(_snowflake.get_generic_secret_string('ns_guid'))
 
         rows_in = session.sql("SELECT COUNT(*) FROM reference('ENCRYPT_INPUT_TABLE')").collect()[0][0]
 
@@ -443,7 +449,7 @@ def encrypt_handler(
         # Note: TRY_TO_TIMESTAMP_NTZ fails if the column is already TIMESTAMP_NTZ,
         # so we cast through VARCHAR first to handle both string and timestamp inputs.
         if ts_format == 'epoch_ms':
-            ts_expr = f"FLOOR(TRY_TO_DOUBLE({ts_col}) / 1000.0)::BIGINT"
+            ts_expr = f"FLOOR(TRY_TO_NUMBER({ts_col}) / 1000)::BIGINT"
         elif ts_format == 'timestamp':
             ts_expr = f"DATE_PART(epoch_second, TRY_TO_TIMESTAMP_NTZ({ts_col}::VARCHAR))::BIGINT"
         else:   # epoch_sec (default)
@@ -747,7 +753,9 @@ def encrypt_handler(
             'locid_postal_code':  'locid_postal_code',
         }
 
-        select_exprs = [f"TO_VARCHAR(_id) AS {id_col}"] + [
+        # ID output: TO_VARCHAR is a no-op when _id is already VARCHAR (no cost).
+        id_expr = f"TO_VARCHAR(_id) AS {id_col}" if id_to_varchar else f"_id AS {id_col}"
+        select_exprs = [id_expr] + [
             f"{COL_SQL.get(c, c)} AS {c}" for c in active_cols
         ]
 
@@ -835,7 +843,7 @@ def encrypt_handler(
 $$;
 
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
-    VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY
+    VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY, BOOLEAN
 ) TO APPLICATION ROLE APP_ADMIN;
 
 

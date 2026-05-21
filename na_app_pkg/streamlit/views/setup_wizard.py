@@ -9,7 +9,7 @@ LocID Native App — Setup Wizard (View 2)
   D. Enter License Key       → validates + fetches license from LocID Central
   E. Review Privileges
   F. Create App Objects
-  H. Select API Key          → writes api_key / api_key_id / namespace_guid / client_id
+  H. Select API Key          → writes api_key + namespace_guid to SECRETs; api_key_id / client_id to APP_CONFIG
   I. Setup Complete
 """
 
@@ -284,9 +284,9 @@ elif step == "H":
                 else:
                     with st.spinner("Saving API key and completing setup…"):
                         session.call("APP_SCHEMA.LOCID_SET_API_KEY",
-                                     api_key_id, api_key_val)
+                                     api_key_id, api_key_val,
+                                     entry.get("namespace_guid", ""))
                         _upsert_config("api_key_id",          str(api_key_id))
-                        _upsert_config("namespace_guid",      entry.get("namespace_guid", ""))
                         _upsert_config("client_id",           str(client_id))
                         _upsert_config("onboarding_complete", "true")
                         # Clear entitlement caches so the new API key's flags take effect immediately

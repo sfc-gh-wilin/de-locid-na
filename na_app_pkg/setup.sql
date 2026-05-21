@@ -116,6 +116,7 @@ WHERE NOT EXISTS (
 --   LOCID_API_KEY      — selected API bearer token (written by LOCID_SET_API_KEY)
 --   LOCID_BASE_SECRET  — base_locid_secret AES key (written by LOCID_FETCH_LICENSE)
 --   LOCID_SCHEME_SECRET— scheme_secret AES key (written by LOCID_FETCH_LICENSE)
+--   LOCID_NAMESPACE_GUID — namespace GUID for STABLE_CLOC (written by LOCID_SET_API_KEY / LOCID_FETCH_LICENSE)
 -- =============================================================================
 CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_LICENSE_KEY
     TYPE          = GENERIC_STRING
@@ -137,12 +138,18 @@ CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_SCHEME_SECRET
     SECRET_STRING = ''
     COMMENT       = 'scheme_secret AES key from LocID Central. Written only by LOCID_FETCH_LICENSE.';
 
+CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_NAMESPACE_GUID
+    TYPE          = GENERIC_STRING
+    SECRET_STRING = ''
+    COMMENT       = 'namespace_guid for STABLE_CLOC generation. Written by LOCID_SET_API_KEY and LOCID_FETCH_LICENSE.';
+
 -- Grant READ so that proc SECRETS = (...) clauses can reference these secrets.
 -- (WRITE is not grantable to APPLICATION ROLEs — all writes go through procs.)
 GRANT READ ON SECRET APP_SCHEMA.LOCID_LICENSE_KEY   TO APPLICATION ROLE APP_ADMIN;
 GRANT READ ON SECRET APP_SCHEMA.LOCID_API_KEY       TO APPLICATION ROLE APP_ADMIN;
 GRANT READ ON SECRET APP_SCHEMA.LOCID_BASE_SECRET   TO APPLICATION ROLE APP_ADMIN;
 GRANT READ ON SECRET APP_SCHEMA.LOCID_SCHEME_SECRET TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_NAMESPACE_GUID TO APPLICATION ROLE APP_ADMIN;
 
 
 -- =============================================================================
@@ -233,6 +240,39 @@ BEGIN
             WHERE config_key = 'cached_license';
     END IF;
 
+    -- ----------------------------------------------------------------
+    -- Migrate namespace_guid (APP_CONFIG row → LOCID_NAMESPACE_GUID secret)
+    -- ----------------------------------------------------------------
+    LET v_ns VARCHAR DEFAULT NULL;
+    SELECT config_value INTO v_ns
+        FROM APP_SCHEMA.APP_CONFIG
+        WHERE config_key = 'namespace_guid' AND is_active = TRUE LIMIT 1;
+    IF (v_ns IS NOT NULL AND LENGTH(v_ns) > 0) THEN
+        ALTER SECRET APP_SCHEMA.LOCID_NAMESPACE_GUID SET SECRET_STRING = :v_ns;
+        DELETE FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'namespace_guid';
+    END IF;
+
+    -- Also strip namespace_guid from access[] entries in cached_license
+    LET v_cache2 VARIANT DEFAULT NULL;
+    SELECT PARSE_JSON(config_value) INTO v_cache2
+        FROM APP_SCHEMA.APP_CONFIG
+        WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1;
+    IF (v_cache2 IS NOT NULL AND v_cache2:access IS NOT NULL) THEN
+        UPDATE APP_SCHEMA.APP_CONFIG
+            SET config_value = (
+                SELECT OBJECT_CONSTRUCT_KEEP_NULL(
+                    'license',  :v_cache2:license,
+                    'access',   (
+                        SELECT ARRAY_AGG(
+                            OBJECT_DELETE(a.value::OBJECT, 'namespace_guid')
+                        )
+                        FROM TABLE(FLATTEN(:v_cache2:access)) a
+                    )
+                )::VARCHAR
+            )
+            WHERE config_key = 'cached_license';
+    END IF;
+
     RETURN 'Migration complete.';
 END;
 $$;
@@ -315,7 +355,8 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
         APP_SCHEMA.LOCID_LICENSE_KEY,
         APP_SCHEMA.LOCID_API_KEY,
         APP_SCHEMA.LOCID_BASE_SECRET,
-        APP_SCHEMA.LOCID_SCHEME_SECRET
+        APP_SCHEMA.LOCID_SCHEME_SECRET,
+        APP_SCHEMA.LOCID_NAMESPACE_GUID
     )
     ENABLED = TRUE;
 
@@ -368,16 +409,22 @@ GRANT USAGE ON FUNCTION APP_SCHEMA.HTTP_PING()
 --   state) — the key is never read from APP_CONFIG, so it is never stored in
 --   plain text in any table.
 --
---   Writes the api_key to the LOCID_API_KEY Snowflake SECRET, stores a masked
---   hint in APP_CONFIG, and removes any legacy plain-text 'api_key' row.
+--   Writes the api_key to the LOCID_API_KEY Snowflake SECRET, the namespace_guid
+--   to the LOCID_NAMESPACE_GUID SECRET, stores a masked hint in APP_CONFIG, and
+--   removes any legacy plain-text 'api_key' / 'namespace_guid' rows.
 --
 --   Runs EXECUTE AS OWNER (default) — required because APP_ADMIN cannot ALTER
 --   a Snowflake SECRET directly (WRITE privilege is not grantable to APPLICATION
 --   ROLEs). The proc's OWNER context has OWNERSHIP on all app-created objects.
 -- =============================================================================
+
+-- Drop old 2-param overload to avoid ambiguous overloading after signature change.
+DROP PROCEDURE IF EXISTS APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR);
+
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(
-    API_KEY_ID    INTEGER,
-    API_KEY_VALUE VARCHAR
+    API_KEY_ID      INTEGER,
+    API_KEY_VALUE   VARCHAR,
+    NAMESPACE_GUID  VARCHAR
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
@@ -400,7 +447,8 @@ _UPSERT_SQL = (
 
 
 def set_api_key_handler(session: snowpark.Session,
-                        api_key_id: int, api_key_value: str) -> str:
+                        api_key_id: int, api_key_value: str,
+                        namespace_guid: str) -> str:
     if not api_key_value:
         raise RuntimeError("API key value is required.")
 
@@ -410,18 +458,24 @@ def set_api_key_handler(session: snowpark.Session,
         params=[api_key_value]
     ).collect()
 
+    # Write namespace_guid to secret
+    session.sql(
+        "ALTER SECRET APP_SCHEMA.LOCID_NAMESPACE_GUID SET SECRET_STRING = ?",
+        params=[namespace_guid or '']
+    ).collect()
+
     # Write masked hint to APP_CONFIG
     session.sql(_UPSERT_SQL, params=['api_key_hint', api_key_value[:8]]).collect()
 
-    # Remove legacy plain-text 'api_key' row if it exists from older versions
+    # Remove legacy plain-text rows if they exist from older versions
     session.sql(
-        "DELETE FROM APP_SCHEMA.APP_CONFIG WHERE config_key = 'api_key'"
+        "DELETE FROM APP_SCHEMA.APP_CONFIG WHERE config_key IN ('api_key', 'namespace_guid')"
     ).collect()
 
     return f"API key {api_key_id} stored in LOCID_API_KEY secret."
 $$;
 
-GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR)
+GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR, VARCHAR)
     TO APPLICATION ROLE APP_ADMIN;
 
 

@@ -40,11 +40,14 @@ st.header(":material/lock: Run Encrypt")
 st.caption("Match IP + timestamp data against the LocID data lake.")
 with st.expander("💡 Tips", expanded=False):
     st.markdown(
-        "#### Long-running jobs (>30 min)\n\n"
-        "The app session stays active for up to 30 minutes. For large datasets that take longer, "
-        "run the job via **SQL worksheet** instead — no session timeout applies.\n\n"
-        "See the **SQL Guide** page for full syntax and examples. "
-        "Results appear in **Job History** when done.\n\n"
+        "#### Long-running jobs\n\n"
+        "**Important:** If you navigate away from this tab or minimize the browser, "
+        "the session may terminate and your job will be cancelled.\n\n"
+        "For any job that may take more than a few minutes, run via **SQL worksheet** instead:\n\n"
+        "- Open a SQL worksheet in Snowsight\n"
+        "- See the **SQL Guide** page for full syntax\n"
+        "- SQL worksheets have **no session timeout** — the job runs to completion\n"
+        "- Results appear in **Job History** when done\n\n"
         "---\n\n"
         "#### Warehouse\n\n"
         "**For best performance, use a Snowpark-optimized warehouse.**\n\n"
@@ -388,18 +391,44 @@ elif step == 2:
 
         # Auto-detect timestamp column type → pre-select the right format.
         # TIMESTAMP_NTZ / TIMESTAMP_LTZ / TIMESTAMP_TZ → "timestamp"
-        # All numeric types (NUMBER, INT, BIGINT, …)    → "epoch_sec" (default)
+        # Numeric with values > 10^12 → likely "epoch_ms" (current epoch_sec ~ 1.7×10^9)
+        # All other numeric types → "epoch_sec" (default)
         col_types     = st.session_state.get("enc_col_types", {})
         ts_type       = col_types.get(col_ts, '').upper()
-        default_fmt   = 2 if 'TIMESTAMP' in ts_type else 0   # index in list below
+        if 'TIMESTAMP' in ts_type:
+            default_fmt = 2  # timestamp
+        elif 'NUMBER' in ts_type or 'INT' in ts_type or 'FLOAT' in ts_type:
+            # Sample max value to detect ms vs sec
+            try:
+                max_val = session.sql(
+                    f"SELECT MAX({_quote_id(col_ts)}) FROM reference('ENCRYPT_INPUT_TABLE') LIMIT 1"
+                ).collect()[0][0]
+                default_fmt = 1 if max_val and float(max_val) > 1e12 else 0
+            except Exception:
+                default_fmt = 0
+        else:
+            default_fmt = 0
+
         ts_fmt = st.selectbox("Timestamp Format",
                               ["epoch_sec", "epoch_ms", "timestamp"],
                               index=default_fmt,
                               help=(
-                                  "**epoch_sec** — integer Unix seconds  \n"
-                                  "**epoch_ms** — integer Unix milliseconds  \n"
-                                  "**timestamp** — Snowflake TIMESTAMP_NTZ column"
+                                  "**epoch_sec** — integer Unix seconds (e.g. 1716000000)  \n"
+                                  "**epoch_ms** — integer Unix milliseconds (e.g. 1716000000000)  \n"
+                                  "**timestamp** — Snowflake TIMESTAMP_NTZ column  \n\n"
+                                  "Auto-detected based on column type and value range."
                               ))
+
+        st.divider()
+
+        id_to_varchar = st.checkbox(
+            "Convert ID column to VARCHAR in output",
+            value=False,
+            help=(
+                "When checked, the ID column is cast to VARCHAR in the output table. "
+                "Leave unchecked to preserve the original column data type."
+            ),
+        )
 
         # Validation: columns must be distinct
         if len({col_id, col_ip, col_ts}) < 3:
@@ -411,7 +440,7 @@ elif step == 2:
 
         st.divider()
 
-        if st.button("✅ Run Input Validation"):
+        if st.button("✅ Run Format Validation"):
             with st.spinner("Checking IP format and timestamp range…"):
                 v = _validate_inputs(
                     "reference('ENCRYPT_INPUT_TABLE')", col_ip, col_ts, ts_fmt
@@ -440,6 +469,7 @@ elif step == 2:
             st.session_state.enc_col_ip = col_ip
             st.session_state.enc_col_ts = col_ts
             st.session_state.enc_ts_fmt = ts_fmt
+            st.session_state.enc_id_to_varchar = id_to_varchar
             st.session_state.enc_step   = 3
             st.rerun()
 
@@ -501,6 +531,9 @@ elif step == 4:
         f"TS={st.session_state.get('enc_col_ts')}"
     )
     st.write(f"**Output columns:** {', '.join(st.session_state.get('enc_output_cols', []))}")
+    st.write(
+        f"**ID to VARCHAR:** {'Yes' if st.session_state.get('enc_id_to_varchar') else 'No (preserve original type)'}"
+    )
     st.caption(
         "Output will be written to an auto-named table in APP_SCHEMA "
         "(e.g. LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
@@ -526,6 +559,7 @@ elif step == 4:
                         st.session_state.enc_col_ts,
                         st.session_state.enc_ts_fmt,
                         st.session_state.enc_output_cols,
+                        st.session_state.get('enc_id_to_varchar', False),
                     )
                     elapsed = time.time() - t_start
                     result = json.loads(raw) if isinstance(raw, str) else raw

@@ -36,11 +36,11 @@
 | **Objective** | Verify the app installs correctly and required permissions are granted |
 | **Preconditions** | Provider has published listing; consumer has `LOCID_APP_INSTALLER` role |
 
-| Step | Action | Expected Result | Pass/Fail |
-|------|--------|-----------------|-----------|
-| 1.1 | Navigate to **Data Products → Apps** in Snowsight | `LOCID_APP` appears in list | ☐ |
-| 1.2 | Check app status | Status = **Ready** | ☐ |
-| 1.3 | Run: `DESCRIBE APPLICATION LOCID_APP;` | Returns version `v1_0`, patch ≥ 0, `upgrade_state = CURRENT` | ☐ |
+| Step | Action | Expected Result                                                                     | Pass/Fail |
+|------|--------|-------------------------------------------------------------------------------------|-----------|
+| 1.1 | Navigate to **Catalog → Apps** in Snowsight | `LOCID_APP` appears in list                                                         | ☐ |
+| 1.2 | Check app status | Status = **Installed**                                                              | ☐ |
+| 1.3 | Run: `DESCRIBE APPLICATION LOCID_APP;` | Returns version `v1_0`, patch ≥ 0, `upgrade_state = COMPLETE`                       | ☐ |
 | 1.4 | Verify external access was approved | Access to `central.locid.com` approved during install (Required Permissions prompt) | ☐ |
 
 ---
@@ -54,15 +54,15 @@
 
 | Step | Action | Expected Result | Pass/Fail |
 |------|--------|-----------------|-----------|
-| 2.1 | Open app → Setup Wizard screen A | "Welcome to LocID for Snowflake" displayed | ☐ |
-| 2.2 | Click **Get Started** | Advances to screen B ("Have a license key?") | ☐ |
-| 2.3 | Select **Yes, I have a license key** | Advances to screen C (Contact Sales not shown) | ☐ |
-| 2.4 | Enter valid license key → click **Fetch License** | License validated, advances to screen D (Review License) | ☐ |
-| 2.5 | Click **Continue** on Review License | Advances to screen E (Review Privileges) | ☐ |
-| 2.6 | Approve required permissions | Advances to screen F (Create App Objects) | ☐ |
-| 2.7 | Click **Create App Objects** | Objects created, advances to screen H (Select API Key) | ☐ |
-| 2.8 | Select active API key → click **Confirm** | Advances to screen I (Setup Complete) | ☐ |
-| 2.9 | Run: `SELECT config_key FROM LOCID_APP.APP_SCHEMA.APP_CONFIG ORDER BY config_key;` | Keys present: `api_key`, `api_key_id`, `cached_license`, `client_id`, `license_id_ref`, `namespace_guid`, `onboarding_complete` | ☐ |
+| 2.1 | Open app → Screen A | "Welcome to LocID for Snowflake" displayed with prerequisites | ☐ |
+| 2.2 | Click **Get Started** | Advances to Screen B ("Do you have a LocID license key?") | ☐ |
+| 2.3 | Select **Yes, I have a license key** → click **Continue** | Advances to Screen E (Approve Network Access) | ☐ |
+| 2.4 | Approve external access to `central.locid.com` (via Snowsight UI or SQL), then click **Approved — Continue** | Advances to Screen D (Enter License Key) | ☐ |
+| 2.5 | Enter valid license key → click **Validate & Continue** | License validated via LocID Central, advances to Screen F (Initialising App Objects) | ☐ |
+| 2.6 | Review objects (APP_CONFIG, JOB_LOG, APP_LOGS, HTTP_PING UDF) → click **Continue** | Advances to Screen H (Select API Key) | ☐ |
+| 2.7 | Select active API key → click **Confirm Selection** | API key saved, entitlements applied, advances to Screen I (Setup Complete) | ☐ |
+| 2.8 | Click **Launch App →** | Returns to Home page; wizard state cleared | ☐ |
+| 2.9 | Run: `SELECT config_key FROM LOCID_APP.APP_SCHEMA.APP_CONFIG ORDER BY config_key;` | Keys present: `api_key_id`, `cached_license`, `client_id`, `onboarding_complete` | ☐ |
 
 ---
 
@@ -113,7 +113,7 @@
 | Step | Action | Expected Result | Pass/Fail |
 |------|--------|-----------------|-----------|
 | 5.1 | Open **Run Encrypt** → Step 1 | Input table shown | ☐ |
-| 5.2 | Step 2 — Map columns: ID = `ROW_ID`, IP = `IP_ADDR`, Timestamp = `EVENT_TS`, Format = `timestamp` | Columns mapped, validation passes | ☐ |
+| 5.2 | Step 2 — Map columns: ID = `ROW_ID`, IP = `IP_ADDR`, Timestamp = `EVENT_TS`, Format = `timestamp`; leave "Convert ID to VARCHAR" unchecked | Columns mapped, validation passes | ☐ |
 | 5.3 | Step 3 — Select all entitled output columns | Checkboxes shown for entitled columns | ☐ |
 | 5.4 | Step 4 — Review & click **Run Job** | Job submits, progress indicator shown | ☐ |
 | 5.5 | Wait for completion | Job finishes with status SUCCESS | ☐ |
@@ -203,10 +203,10 @@
 | 9.4 | Filter by Status = `SUCCESS` | Only successful jobs shown | ☐ |
 | 9.5 | Filter by date range (today) | Only today's jobs shown | ☐ |
 | 9.6 | Expand a job row | Detail section shows run parameters | ☐ |
-| 9.7 | Click CSV export | CSV file downloads with job data | ☐ |
+| 9.7 | Export as CSV | CSV file downloads with job data | ☐ |
 | 9.8 | Run SQL verification: | Same data as UI | |
 | | ```sql | | |
-| | SELECT * FROM LOCID_APP.APP_SCHEMA.JOB_LOG ORDER BY run_at DESC; | | |
+| | SELECT * FROM LOCID_APP.APP_SCHEMA.JOB_LOG ORDER BY run_dt DESC; | | |
 | | ``` | | ☐ |
 
 ---
@@ -240,10 +240,11 @@
 
 | Step | Action | Expected Result | Pass/Fail |
 |------|--------|-----------------|-----------|
-| 11.1 | Open **SQL Guide** page in the app | SQL examples displayed with correct app database name | ☐ |
-| 11.2 | Run Encrypt via stored procedure using the documented SQL | Job completes, output table created | ☐ |
-| 11.3 | Run Decrypt via stored procedure using the documented SQL | Job completes, output table created | ☐ |
-| 11.4 | Verify both jobs appear in Job History | New entries visible | ☐ |
+| 11.1 | Open **SQL Guide** page in the app | SQL examples displayed with correct app database name; parameter reference shows `ID_TO_VARCHAR` | ☐ |
+| 11.2 | Run Encrypt via stored procedure using the documented SQL (default, no `ID_TO_VARCHAR`) | Job completes, output table created, ID column preserves original type | ☐ |
+| 11.3 | Run Encrypt with `ID_TO_VARCHAR => TRUE` | Job completes, ID column is VARCHAR in output | ☐ |
+| 11.4 | Run Decrypt via stored procedure using the documented SQL | Job completes, output table created | ☐ |
+| 11.5 | Verify all jobs appear in Job History | New entries visible | ☐ |
 
 ---
 
@@ -256,7 +257,7 @@
 
 | Step | Action | Expected Result | Pass/Fail |
 |------|--------|-----------------|-----------|
-| 12.1 | Setup Wizard: enter invalid license key → **Fetch License** | Error message displayed, wizard does not advance | ☐ |
+| 12.1 | Setup Wizard: enter invalid license key → **Validate & Continue** | Error message displayed, wizard does not advance | ☐ |
 | 12.2 | Run Encrypt without binding an input table | Error: unable to access the input table / prompt to bind via Settings | ☐ |
 | 12.3 | Run Encrypt with a table the role cannot SELECT | Permission error displayed | ☐ |
 | 12.4 | Run Encrypt without `allow_encrypt` entitlement | Blocked: "Your license does not include the Encrypt entitlement" | ☐ |
@@ -276,7 +277,7 @@
 |------|--------|-----------------|-----------|
 | 13.1 | Provider pushes new patch (updates release directive) | No action required on consumer | ☐ |
 | 13.2 | Wait for auto-upgrade (or run `ALTER APPLICATION LOCID_APP UPGRADE;`) | Upgrade completes without error | ☐ |
-| 13.3 | Run: `DESCRIBE APPLICATION LOCID_APP;` | New patch number shown, `upgrade_state = CURRENT` | ☐ |
+| 13.3 | Run: `DESCRIBE APPLICATION LOCID_APP;` | New patch number shown, `upgrade_state = COMPLETE` | ☐ |
 | 13.4 | Open app in Snowsight | App loads normally, all pages accessible | ☐ |
 | 13.5 | Run a new Encrypt job | Job succeeds — no regression | ☐ |
 

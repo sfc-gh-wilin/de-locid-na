@@ -10,9 +10,10 @@
 --   LocID Central and stores them securely:
 --
 --   Secrets (written to Snowflake SECRETs via ALTER SECRET):
---     LOCID_LICENSE_KEY  — full license key (when a new key is provided)
---     LOCID_BASE_SECRET  — base_locid_secret AES key
---     LOCID_SCHEME_SECRET— scheme_secret AES key
+--     LOCID_LICENSE_KEY    — full license key (when a new key is provided)
+--     LOCID_BASE_SECRET    — base_locid_secret AES key
+--     LOCID_SCHEME_SECRET  — scheme_secret AES key
+--     LOCID_NAMESPACE_GUID — namespace_guid of selected API key
 --
 --   APP_CONFIG (non-sensitive fields only):
 --     license_id_ref     — masked hint: first-4-chars + "****"
@@ -34,8 +35,9 @@
 --   3. GET /api/0/location_id/license/{license_id} → full license payload
 --   4. Write base_locid_secret → LOCID_BASE_SECRET secret
 --   5. Write scheme_secret     → LOCID_SCHEME_SECRET secret
---   6. Store stripped JSON (no secrets, api_key_hint only) in APP_CONFIG.cached_license
---   7. Return full license payload as VARIANT
+--   6. Write namespace_guid    → LOCID_NAMESPACE_GUID secret (for selected API key)
+--   7. Store stripped JSON (no secrets, no api_key, no namespace_guid) in APP_CONFIG.cached_license
+--   8. Return full license payload as VARIANT
 -- =============================================================================
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_FETCH_LICENSE(
     LICENSE_ID  VARCHAR    -- license key; pass '' to re-use stored LOCID_LICENSE_KEY secret
@@ -103,6 +105,7 @@ def _strip_sensitive(data: dict) -> dict:
       - Strip access[].api_key entirely — the full key is never stored in
         APP_CONFIG. LOCID_SET_API_KEY receives the key directly from Streamlit
         session state and writes it to the LOCID_API_KEY Snowflake SECRET.
+      - Strip access[].namespace_guid — written to LOCID_NAMESPACE_GUID secret
       - Add access[].api_key_hint (first 8 chars) for display
     """
     stripped = {k: v for k, v in data.items() if k != 'secrets'}
@@ -114,7 +117,7 @@ def _strip_sensitive(data: dict) -> dict:
         lic['license_key'] = raw_lic_key[:4] + '-****'
     stripped['license'] = lic
 
-    # Strip api_key; add api_key_hint for display
+    # Strip api_key and namespace_guid; add api_key_hint for display
     clean_access = []
     for entry in stripped.get('access', []):
         e = dict(entry)
@@ -122,6 +125,7 @@ def _strip_sensitive(data: dict) -> dict:
             if 'api_key_hint' not in e:
                 e['api_key_hint'] = e['api_key'][:8]
             del e['api_key']
+        e.pop('namespace_guid', None)
         clean_access.append(e)
     stripped['access'] = clean_access
 
@@ -161,6 +165,30 @@ def fetch_license_handler(session: snowpark.Session, license_id: str) -> dict:
             "ALTER SECRET APP_SCHEMA.LOCID_SCHEME_SECRET SET SECRET_STRING = ?",
             params=[scheme_val]
         ).collect()
+
+    # --- Write namespace_guid of selected API key to SECRET ---
+    # Look up which api_key_id is currently selected (from APP_CONFIG)
+    sel_id = None
+    try:
+        rows = session.sql(
+            "SELECT config_value FROM APP_SCHEMA.APP_CONFIG "
+            "WHERE config_key = 'api_key_id' AND is_active = TRUE LIMIT 1"
+        ).collect()
+        if rows and rows[0][0]:
+            sel_id = int(rows[0][0].strip())
+    except Exception:
+        pass
+    # Find matching access entry and write its namespace_guid
+    for entry in data.get('access', []):
+        if entry.get('status') == 'ACTIVE':
+            if sel_id is None or entry.get('api_key_id') == sel_id:
+                ns_val = entry.get('namespace_guid', '')
+                if ns_val:
+                    session.sql(
+                        "ALTER SECRET APP_SCHEMA.LOCID_NAMESPACE_GUID SET SECRET_STRING = ?",
+                        params=[ns_val]
+                    ).collect()
+                break
 
     # --- If a new license key was provided, store it and write masked hint ---
     if license_id.strip():

@@ -259,7 +259,7 @@ Multi-screen Streamlit wizard, runs once post-install.
 | **E. Approve Network Access** | EAI spec approval (runs before D) | Shows `SHOW SPECIFICATIONS` + `ALTER APPLICATION APPROVE SPECIFICATION` SQL for ACCOUNTADMIN; also `GRANT USAGE ON INTEGRATION`; **must be completed before license validation** |
 | **D. Enter License Key** | Validate license | Masked input; calls `APP_SCHEMA.LOCID_FETCH_LICENSE` stored procedure (requires EAI spec approved at Screen E); caches full license payload in `APP_CONFIG` |
 | **F. Create App Objects** | Bootstrap check | Verifies APP_CONFIG, JOB_LOG, APP_LOGS, HTTP_PING UDF |
-| **H. Select API Key** | API key picker | List ACTIVE keys from `access[]` using `api_key_hint` (first 8 chars); user selects which to use; calls `APP_SCHEMA.LOCID_SET_API_KEY` to write full key to `LOCID_API_KEY` SECRET and scrub raw values from cache; `api_key_id`, `namespace_guid`, `client_id` stored in APP_CONFIG |
+| **H. Select API Key** | API key picker | List ACTIVE keys from `access[]` using `api_key_hint` (first 8 chars); user selects which to use; calls `APP_SCHEMA.LOCID_SET_API_KEY` to write full key to `LOCID_API_KEY` SECRET and `namespace_guid` to `LOCID_NAMESPACE_GUID` SECRET; `api_key_id`, `client_id` stored in APP_CONFIG |
 | **I. Success** | Done | Summary checklist, link to docs, "Launch App" |
 
 ---
@@ -273,13 +273,13 @@ Customer Input Table (via reference binding)
   (unique_id, ip_address, timestamp)
          │
          ▼
-  LOCID_ENCRYPT(ID_COL, IP_COL, TS_COL, TS_FORMAT, OUTPUT_COLS)
+  LOCID_ENCRYPT(ID_COL, IP_COL, TS_COL, TS_FORMAT, OUTPUT_COLS, ID_TO_VARCHAR)
          │
          ├─ 0. INSERT STARTED row into JOB_LOG (visible immediately in Job History)
          │
          ├─ 1. Entitlement check — verify allow_encrypt + requested output columns
          │
-          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
+          ├─ 2. Fetch license context from APP_CONFIG (client_id); namespace_guid from SECRET
           │       Crypto secrets are bound directly to UDFs via SECRETS clauses —
           │       never read into proc variables or embedded in SQL.
          │
@@ -319,7 +319,7 @@ Customer Input Table (via reference binding)
          │
          ├─ 1. Entitlement check — verify allow_decrypt + requested output columns
          │
-          ├─ 2. Fetch license context from APP_CONFIG (client_id, namespace_guid)
+          ├─ 2. Fetch license context from APP_CONFIG (client_id); namespace_guid from SECRET
           │       Crypto secrets are bound directly to UDFs via SECRETS clauses.
          │
          ├─ 3. Call UDFs per row:
