@@ -19,7 +19,7 @@
 
 USE ROLE LOCID_APP_ADMIN;
 
-CREATE OR REPLACE TABLE LOCID_DEV.STAGING.LOCID_BUILDS (
+CREATE OR REPLACE TABLE LOCID.STAGING.LOCID_BUILDS (
     build_dt                  DATE     NOT NULL,  -- weekly build identifier
     start_ip                  VARCHAR  NOT NULL,  -- IP range start (IPv4 or IPv6)
     end_ip                    VARCHAR  NOT NULL,  -- IP range end   (IPv4 or IPv6)
@@ -37,5 +37,3 @@ CREATE OR REPLACE TABLE LOCID_DEV.STAGING.LOCID_BUILDS (
     locid_horizontal_accuracy NUMBER              -- accuracy radius in meters
 )
 CLUSTER BY (build_dt);
-
-

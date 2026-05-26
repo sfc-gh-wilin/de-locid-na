@@ -23,8 +23,8 @@
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.BENCHMARK;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.BENCHMARK;
 
 -- ---------------------------------------------------------------------------
 -- ⚠ Set $base_locid_secret for Approach A (Scala/JAR).
@@ -46,11 +46,11 @@ ALTER SESSION SET USE_CACHED_RESULT = FALSE;
 -- =============================================================================
 ALTER SESSION SET QUERY_TAG = 'locid_bench_A_scala_scalar';
 
-CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK._BENCH_A AS
+CREATE OR REPLACE TABLE LOCID.BENCHMARK._BENCH_A AS
 SELECT
     loc_id,
-    LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT(loc_id, $base_locid_secret) AS result_col
-FROM LOCID_DEV.BENCHMARK.MOCKUP_50M;
+    LOCID.STAGING.LOCID_BASE_ENCRYPT(loc_id, $base_locid_secret) AS result_col
+FROM LOCID.BENCHMARK.MOCKUP_50M;
 
 ALTER SESSION UNSET QUERY_TAG;
 
@@ -61,11 +61,11 @@ ALTER SESSION UNSET QUERY_TAG;
 -- =============================================================================
 ALTER SESSION SET QUERY_TAG = 'locid_bench_B_python_scalar';
 
-CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK._BENCH_B AS
+CREATE OR REPLACE TABLE LOCID.BENCHMARK._BENCH_B AS
 SELECT
     loc_id,
-    LOCID_DEV.BENCHMARK.PROXY_SCALAR(loc_id, key_str) AS result_col
-FROM LOCID_DEV.BENCHMARK.MOCKUP_50M;
+    LOCID.BENCHMARK.PROXY_SCALAR(loc_id, key_str) AS result_col
+FROM LOCID.BENCHMARK.MOCKUP_50M;
 
 ALTER SESSION UNSET QUERY_TAG;
 
@@ -76,11 +76,11 @@ ALTER SESSION UNSET QUERY_TAG;
 -- =============================================================================
 ALTER SESSION SET QUERY_TAG = 'locid_bench_C_python_vectorized';
 
-CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK._BENCH_C AS
+CREATE OR REPLACE TABLE LOCID.BENCHMARK._BENCH_C AS
 SELECT
     loc_id,
-    LOCID_DEV.BENCHMARK.PROXY_VECTORIZED(loc_id, key_str) AS result_col
-FROM LOCID_DEV.BENCHMARK.MOCKUP_50M;
+    LOCID.BENCHMARK.PROXY_VECTORIZED(loc_id, key_str) AS result_col
+FROM LOCID.BENCHMARK.MOCKUP_50M;
 
 ALTER SESSION UNSET QUERY_TAG;
 
@@ -91,11 +91,11 @@ ALTER SESSION UNSET QUERY_TAG;
 -- =============================================================================
 ALTER SESSION SET QUERY_TAG = 'locid_bench_D_whl_vectorized';
 
-CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK._BENCH_D AS
+CREATE OR REPLACE TABLE LOCID.BENCHMARK._BENCH_D AS
 SELECT
     loc_id,
-    LOCID_DEV.BENCHMARK.PROXY_WHL(loc_id, key_str) AS result_col
-FROM LOCID_DEV.BENCHMARK.MOCKUP_50M;
+    LOCID.BENCHMARK.PROXY_WHL(loc_id, key_str) AS result_col
+FROM LOCID.BENCHMARK.MOCKUP_50M;
 
 ALTER SESSION UNSET QUERY_TAG;
 
@@ -130,7 +130,7 @@ ORDER BY start_time;
 
 
 -- Insert into persistent results table
-INSERT INTO LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
+INSERT INTO LOCID.BENCHMARK.BENCHMARK_RESULTS
     (approach, warehouse_size, rows_processed, elapsed_s, krows_per_s, notes)
 SELECT
     CASE query_tag
@@ -173,17 +173,17 @@ SELECT
         2
     )                                                             AS speedup_vs_slowest,
     run_at
-FROM LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
+FROM LOCID.BENCHMARK.BENCHMARK_RESULTS
 ORDER BY approach, run_at DESC;
 
 
 -- =============================================================================
 -- CLEANUP: Drop temporary benchmark tables (run after reviewing results)
 -- =============================================================================
--- DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK._BENCH_A;
--- DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK._BENCH_B;
--- DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK._BENCH_C;
--- DROP TABLE IF EXISTS LOCID_DEV.BENCHMARK._BENCH_D;
+-- DROP TABLE IF EXISTS LOCID.BENCHMARK._BENCH_A;
+-- DROP TABLE IF EXISTS LOCID.BENCHMARK._BENCH_B;
+-- DROP TABLE IF EXISTS LOCID.BENCHMARK._BENCH_C;
+-- DROP TABLE IF EXISTS LOCID.BENCHMARK._BENCH_D;
 
 -- Restore session default
 ALTER SESSION UNSET USE_CACHED_RESULT;

@@ -11,7 +11,7 @@ Performance Estimates`.
 
 | File | Description |
 |------|-------------|
-| `01_setup.sql` | Create `LOCID_DEV.BENCHMARK` schema, 50M mockup row table, and results table |
+| `01_setup.sql` | Create `LOCID.BENCHMARK` schema, 50M mockup row table, and results table |
 | `02_proxy_scalar_python.sql` | Register Python **scalar** UDF `PROXY_SCALAR` — per-row dispatch |
 | `03_proxy_vectorized_python.sql` | Register Python **vectorized** UDF `PROXY_VECTORIZED` — batch dispatch, numpy proxy |
 | `04_whl_vectorized.sql` | Register Python **vectorized** UDF `PROXY_WHL` — batch dispatch, actual `mb-locid-encoding` WHL |
@@ -23,10 +23,10 @@ Performance Estimates`.
 
 | Approach | UDF | Language | Dispatch | Operation |
 |----------|-----|----------|----------|-----------|
-| **A — Scala scalar (JAR)** | `LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT` | Scala 2.13 | Per-row | AES-128 ECB |
-| **B — Python scalar proxy** | `LOCID_DEV.BENCHMARK.PROXY_SCALAR` | Python 3.11 | Per-row | HMAC-SHA256 proxy |
-| **C — Python vectorized proxy** | `LOCID_DEV.BENCHMARK.PROXY_VECTORIZED` | Python 3.11 | Batch (1K–8K rows/batch) | numpy BLAS polynomial hash proxy |
-| **D — Python vectorized (WHL)** | `LOCID_DEV.BENCHMARK.PROXY_WHL` | Python 3.11 | Batch (1K–8K rows/batch) | `locid_sf.encode_stable_cloc` (actual production WHL) |
+| **A — Scala scalar (JAR)** | `LOCID.STAGING.LOCID_BASE_ENCRYPT` | Scala 2.13 | Per-row | AES-128 ECB |
+| **B — Python scalar proxy** | `LOCID.BENCHMARK.PROXY_SCALAR` | Python 3.11 | Per-row | HMAC-SHA256 proxy |
+| **C — Python vectorized proxy** | `LOCID.BENCHMARK.PROXY_VECTORIZED` | Python 3.11 | Batch (1K–8K rows/batch) | numpy BLAS polynomial hash proxy |
+| **D — Python vectorized (WHL)** | `LOCID.BENCHMARK.PROXY_WHL` | Python 3.11 | Batch (1K–8K rows/batch) | `locid_sf.encode_stable_cloc` (actual production WHL) |
 
 ### Compute operations
 
@@ -87,7 +87,7 @@ doc's 5–10× estimate for production workloads at scale.
 
 ## Prerequisites
 
-1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (`LOCID_DEV.STAGING` schema
+1. `db/dev/provider/01_setup.sql` through `06_udfs.sql` already run (`LOCID.STAGING` schema
    and `LOCID_BASE_ENCRYPT` UDF must exist for Approach A).
 2. **Snowpark-optimized warehouse** (Medium recommended). Standard warehouses work but
    Snowpark-optimized provides better Python UDF throughput.
@@ -97,10 +97,10 @@ doc's 5–10× estimate for production workloads at scale.
    ```bash
    snow snowpark package upload \
        -f <path>/mb_locid_encoding-0.0.0-py3-none-any.whl \
-       -s LOCID_DEV.STAGING.LOCID_STAGE \
+       -s LOCID.STAGING.LOCID_STAGE \
        --connection <conn> --role LOCID_APP_ADMIN --overwrite
    ```
-   Verify: `LIST @LOCID_DEV.STAGING.LOCID_STAGE;`
+   Verify: `LIST @LOCID.STAGING.LOCID_STAGE;`
 
    > **Why `snow snowpark package upload` instead of `snow stage copy`?** The snowpark upload
    > command registers the wheel so Snowflake's Python runtime can import it directly via
@@ -145,7 +145,7 @@ For production Encrypt/Decrypt jobs, the warehouse size depends on input row cou
 **Before re-running timings**, truncate old results to keep the table clean:
 
 ```sql
-TRUNCATE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS;
+TRUNCATE TABLE LOCID.BENCHMARK.BENCHMARK_RESULTS;
 ```
 
 ---
@@ -157,7 +157,7 @@ Query the `BENCHMARK_RESULTS` table for a summary:
 ```sql
 SELECT approach, rows_processed, elapsed_s,
        ROUND(rows_processed / elapsed_s / 1000, 1) AS krows_per_s
-FROM   LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS
+FROM   LOCID.BENCHMARK.BENCHMARK_RESULTS
 ORDER  BY approach, run_at DESC;
 ```
 
@@ -177,5 +177,5 @@ and will recreate everything from scratch.
 USE ROLE LOCID_APP_ADMIN;
 
 -- Drop schema
-DROP SCHEMA IF EXISTS LOCID_DEV.BENCHMARK CASCADE;
+DROP SCHEMA IF EXISTS LOCID.BENCHMARK CASCADE;
 ```

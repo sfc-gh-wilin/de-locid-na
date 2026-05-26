@@ -1,14 +1,16 @@
 # IPv6 Performance Analysis & Optimization Proposal
 
 **Date:** 2026-05-21  
-**Status:** In Progress  
+**Status:** Implemented  
 **Environment:** LocID Provider Account (`JZAEQUY-QOC14949`)
 
 ---
 
 ## Executive Summary
 
-IPv6 network block matching (inputs ending in `::`) is significantly slower than IPv6 device addresses or IPv4. This document explains why, provides current benchmarks, and proposes a **Provider-side exploded table** solution that would convert the expensive BETWEEN range join into a fast equi-join — achieving IPv4-like performance for IPv6.
+IPv6 network block matching (inputs ending in `::`) is significantly slower than IPv6 device addresses or IPv4. This document explains why, provides current benchmarks, and describes the **Provider-side exploded table** solution that converts the expensive BETWEEN range join into a fast equi-join — achieving IPv4-like performance for IPv6.
+
+**This solution is now implemented.** The table `LOCID_BUILDS_IPV6_EXPLODED` (71.4B rows) is loaded and shared. The encrypt procedure uses a 2-stage approach: equi-join via the exploded table for ~99%+ of inputs, with a BETWEEN fallback for the small number of wide ranges (> /48) not covered by the exploded table.
 
 ---
 
@@ -116,23 +118,18 @@ The /56 level is the sweet spot:
 CREATE TABLE LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED (
     BUILD_DT            DATE            NOT NULL,
     PREFIX_56           VARCHAR(14)     NOT NULL,   -- equi-join key (first 14 hex chars)
-    START_IP_INT_HEX    VARCHAR(32)     NOT NULL,   -- original range start (for BETWEEN)
-    END_IP_INT_HEX      VARCHAR(32)     NOT NULL,   -- original range end (for BETWEEN)
     START_IP            VARCHAR         NOT NULL,
     END_IP              VARCHAR         NOT NULL,
-    TIER                VARCHAR,
-    LOCID_COUNTRY       VARCHAR,
-    LOCID_COUNTRY_CODE  VARCHAR,
-    LOCID_REGION        VARCHAR,
-    LOCID_REGION_CODE   VARCHAR,
-    LOCID_CITY          VARCHAR,
-    LOCID_CITY_CODE     VARCHAR,
-    LOCID_POSTAL_CODE   VARCHAR,
-    ENCRYPTED_LOCID     VARCHAR,
-    LOCID_HORIZONTAL_ACCURACY VARCHAR
+    START_IP_INT_HEX    VARCHAR(32)     NOT NULL,   -- original range start (for BETWEEN)
+    END_IP_INT_HEX      VARCHAR(32)     NOT NULL    -- original range end (for BETWEEN)
 )
 CLUSTER BY (PREFIX_56, BUILD_DT);
 ```
+
+**Note:** Geo context columns (tier, country, region, city, postal code, encrypted_locid,
+horizontal_accuracy) are intentionally excluded to reduce storage cost. The encrypt
+procedure retrieves them by joining back to `LOCID_BUILDS` on `(build_dt, start_ip, end_ip)`
+after the equi-join match.
 
 ### Population Query (per build_dt)
 
@@ -181,21 +178,33 @@ WHERE l.START_IP LIKE '%:%'
 ### Updated Encrypt Procedure (Matching Logic)
 
 ```sql
--- Current (BETWEEN range join against 700M rows):
-SELECT ...
-FROM input i
-JOIN LOCID_BUILDS l
-    ON i.build_dt = l.build_dt
-    AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+-- Stage 1: equi-join via LOCID_BUILDS_IPV6_EXPLODED (~99%+ of inputs)
+-- Hash join on PREFIX_56; join back to LOCID_BUILDS for geo context.
+SELECT i._id, i._ip, i._ts, lb.encrypted_locid, lb.tier,
+       lb.locid_country, lb.locid_country_code, ...
+FROM {TBL_V6_DATED} i
+JOIN LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED e
+    ON  i.build_dt = e.build_dt
+    AND SUBSTR(i.ip_hex, 1, 14) = e.prefix_56             -- equi-join (hash)
+    AND i.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex  -- ~30 candidates
+JOIN LOCID_SHARE.LOCID_BUILDS lb
+    ON  e.build_dt = lb.build_dt
+    AND e.start_ip = lb.start_ip                           -- geo context lookup
+    AND e.end_ip   = lb.end_ip
+QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY lb.build_dt DESC) = 1;
 
--- Proposed (equi-join + small BETWEEN filter):
-SELECT ...
-FROM input i
-JOIN LOCID_BUILDS_IPV6_EXPLODED e
-    ON i.build_dt = e.build_dt
-    AND SUBSTR(i.ip_hex, 1, 14) = e.prefix_56           -- equi-join (hash)
-    AND i.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex  -- filter (~30 rows)
-QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY e.build_dt DESC) = 1
+-- Stage 2: BETWEEN fallback for unmatched IDs (wide ranges > /48, ~31K source rows)
+INSERT INTO {TBL_IPV6}
+SELECT i._id, i._ip, i._ts, l.encrypted_locid, l.tier, l.locid_country, ...
+FROM {TBL_V6_DATED} i
+LEFT JOIN {TBL_IPV6} matched ON i._id = matched._id
+JOIN LOCID_SHARE.LOCID_BUILDS l
+    ON  i.build_dt = l.build_dt
+    AND l.start_ip LIKE '%:%'
+    AND SUBSTR(l.start_ip_int_hex, 1, 12) != SUBSTR(l.end_ip_int_hex, 1, 12)
+    AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+WHERE matched._id IS NULL
+QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1;
 ```
 
 ### Expected Performance
@@ -212,11 +221,11 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY e.build_dt DESC) = 1
 
 | Step | Owner | Effort |
 |------|-------|--------|
-| 1. Create exploded table DDL | Snowflake SA (us) | Done (above) |
-| 2. Population query / ETL | **LocID** (Provider data pipeline) | Add to weekly Airflow DAG |
-| 3. Add to Secure View + share | Snowflake SA (us) | `03_share_to_pkg.sql` update |
-| 4. Update encrypt procedure | Snowflake SA (us) | Replace 6-pass loop with equi-join |
-| 5. Add clustering keys | **LocID** | `ALTER TABLE ... CLUSTER BY (PREFIX_56, BUILD_DT)` |
+| 1. Create exploded table DDL | Snowflake SA (us) | Done |
+| 2. Population query / ETL | **LocID** (Provider data pipeline) | Done — loaded 71.4B rows |
+| 3. Add to Secure View + share | Snowflake SA (us) | **Done** — `04_share_to_pkg.sql` updated |
+| 4. Update encrypt procedure | Snowflake SA (us) | **Done** — 2-stage equi-join + fallback |
+| 5. Add clustering keys | **LocID** | Done — `CLUSTER BY (PREFIX_56, BUILD_DT)` |
 
 ### Storage Impact
 
@@ -224,7 +233,7 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY e.build_dt DESC) = 1
 |-------|------|:-------------:|
 | LOCID_BUILDS (current) | 58.3B | 2.15 TB |
 | LOCID_BUILDS_IPV4_EXPLODED (current) | 253B | 2.25 TB |
-| **LOCID_BUILDS_IPV6_EXPLODED (proposed)** | **~56B** | **~2 TB** |
+| **LOCID_BUILDS_IPV6_EXPLODED (implemented)** | **71.4B (actual)** | **~2 TB** |
 
 ---
 

@@ -2,17 +2,17 @@
 -- 05_stage_setup.sql
 -- LocID Dev: Internal stage for encode-lib JAR artifacts
 --
--- Run order: after 01_setup.sql (LOCID_DEV database + STAGING schema must exist)
+-- Run order: after 01_setup.sql (LOCID database + STAGING schema must exist)
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.STAGING;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.STAGING;
 
 -- ---------------------------------------------------------------------------
 -- Internal stage for UDF JARs
 -- ---------------------------------------------------------------------------
-CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_STAGE
+CREATE STAGE IF NOT EXISTS LOCID.STAGING.LOCID_STAGE
     DIRECTORY = ( ENABLE = TRUE )
     COMMENT   = 'Internal stage for LocID encode-lib JAR and related artifacts';
 
@@ -20,21 +20,21 @@ CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_STAGE
 -- Upload the JAR  (choose one option)
 --
 -- Option A — Snowsight UI (easiest):
---   Data → Databases → LOCID_DEV → STAGING → Stages → LOCID_STAGE
+--   Data → Databases → LOCID → STAGING → Stages → LOCID_STAGE
 --   Click "+ Files" and select the JAR file.
 --   Snowsight does not compress files, so no extra flags needed.
 --
 -- Option B — SnowSQL PUT (absolute path):
 --
 --   PUT file:///absolute/path/to/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
---       @LOCID_DEV.STAGING.LOCID_STAGE
+--       @LOCID.STAGING.LOCID_STAGE
 --       AUTO_COMPRESS = FALSE
 --       OVERWRITE     = TRUE;
 --
 -- Option C — SnowSQL PUT (from repo root):
 --
 --   PUT file://20260415/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
---       @LOCID_DEV.STAGING.LOCID_STAGE
+--       @LOCID.STAGING.LOCID_STAGE
 --       AUTO_COMPRESS = FALSE
 --       OVERWRITE     = TRUE;
 --
@@ -44,4 +44,4 @@ CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_STAGE
 -- ---------------------------------------------------------------------------
 
 -- Verify upload — expected: one row for the .jar file
-LIST @LOCID_DEV.STAGING.LOCID_STAGE;
+LIST @LOCID.STAGING.LOCID_STAGE;

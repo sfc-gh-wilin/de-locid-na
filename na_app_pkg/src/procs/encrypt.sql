@@ -49,7 +49,8 @@ PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
     'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY,
     'api_key'     = APP_SCHEMA.LOCID_API_KEY,
-    'ns_guid'     = APP_SCHEMA.LOCID_NAMESPACE_GUID
+    'ns_guid'     = APP_SCHEMA.LOCID_NAMESPACE_GUID,
+    'central_url' = APP_SCHEMA.LOCID_CENTRAL_URL
 )
 HANDLER = 'encrypt_handler'
 AS $$
@@ -246,12 +247,15 @@ def _timer(count: int, duration_ms: float) -> dict:
 
 def _post_stats(session, job_id: str, client_id: int, rows_in: int,
                 rows_matched: int, rows_out: int, phases: dict,
-                tier_counts: dict, op: str) -> None:
-    """POST batch-metrics telemetry to LocID Central. Non-blocking — silently ignores failures."""
+                tier_counts: dict, op: str, rows_skipped: int = 0) -> bool:
+    """POST batch-metrics telemetry to LocID Central.
+    Returns True on success, False on failure.
+    Failure is logged to APP_LOGS (ERROR) and must be reflected in JOB_LOG by the caller.
+    """
     api_key_val = _snowflake.get_generic_secret_string('api_key')
     lic_key_val = _snowflake.get_generic_secret_string('license_key')
     if not api_key_val or not lic_key_val:
-        return
+        return True  # Nothing to post — not a failure
 
     identifier = f"{lic_key_val[:4]}****_{job_id}"
     ts_ms      = int(time.time() * 1000)
@@ -271,10 +275,16 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
             'metric_datatype': 'Counter',
         }})
 
-    # batch-outcomes — matched + unmatched (invalid/error = 0 in success path)
-    unmatched = max(rows_in - rows_matched, 0)
-    for outcome, val in [('matched', rows_matched), ('unmatched', unmatched)]:
-        if val > 0:
+    # batch-outcomes (§4.3): matched always emitted; others only when non-zero.
+    # unmatched excludes rows_skipped (invalid input) — they go to the 'invalid' bucket.
+    # Integrity invariant: matched + unmatched + invalid == rows_in.
+    unmatched = max(rows_in - rows_matched - rows_skipped, 0)
+    for outcome, val, always in [
+        ('matched',   rows_matched,  True),   # always emitted per §4.3
+        ('unmatched', unmatched,     False),
+        ('invalid',   rows_skipped,  False),  # rows skipped due to bad IP/timestamp format
+    ]:
+        if always or val > 0:
             stats.append({**base, 'data': {
                 'metric_key': f'batch-outcomes.{op}',
                 'dimensions': {'api_key': api_key_val, 'client_id': client_str,
@@ -319,25 +329,35 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
         pass  # Logging must not abort the job
 
     try:
+        _central_url = _snowflake.get_generic_secret_string('central_url').strip().rstrip('/')
         req = urllib.request.Request(
-            'https://central.locid.com/api/0/location_id/stats',
+            f'{_central_url}/stats',
             data=json.dumps(stats).encode(),
             headers={'Content-Type': 'application/json', 'de-access-token': api_key_val},
             method='POST',
         )
         with urllib.request.urlopen(req, timeout=10):
             pass
-    except Exception:
-        pass  # Stats failure must not abort the job
+        return True
+    except Exception as exc:
+        try:
+            session.sql(
+                "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+                params=['ERROR', f'locid_{op}._post_stats', f'Stats POST failed: {exc}']
+            ).collect()
+        except Exception:
+            pass
+        return False
 
 
 def _log_job_start(session, job_id, operation, input_table, warehouse) -> None:
     """Insert a STARTED row so the job is visible even if cancelled externally."""
     session.sql(
         "INSERT INTO APP_SCHEMA.JOB_LOG "
-        "(job_id, operation, rows_in, rows_matched, rows_out, runtime_s, "
+        "(job_id, operation, run_dt, rows_in, rows_matched, rows_out, runtime_s, "
         " status, error_msg, input_table, output_table, warehouse, output_cols) "
-        "VALUES (?, ?, NULL, NULL, NULL, NULL, 'STARTED', NULL, ?, NULL, ?, NULL)",
+        "VALUES (?, ?, CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ, "
+        "        NULL, NULL, NULL, NULL, 'STARTED', NULL, ?, NULL, ?, NULL)",
         params=[job_id, operation, input_table, warehouse],
     ).collect()
 
@@ -373,6 +393,8 @@ def encrypt_handler(
     job_id   = str(uuid.uuid4())
     start_ts = time.time()
     rows_in = rows_matched = rows_out = rows_skipped = 0
+    client_id   = 0    # resolved in Step 2; default used if job fails before that
+    tier_counts = {}   # populated after matching; default used if job fails before that
     input_table_name = 'reference(ENCRYPT_INPUT_TABLE)'  # fallback; resolved in try block
 
     # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
@@ -384,15 +406,12 @@ def encrypt_handler(
     job_sfx       = job_id.replace('-', '')[:12].upper()
     TBL_IPV4      = f'APP_SCHEMA._LOCID_IPV4_{job_sfx}'
     TBL_V6_INP    = f'APP_SCHEMA._LOCID_V6_INP_{job_sfx}'
-    TBL_V6_PFX    = f'APP_SCHEMA._LOCID_V6_PFX_{job_sfx}'
-    TBL_V6_BUILDS = f'APP_SCHEMA._LOCID_V6_BLDS_{job_sfx}'
     TBL_V6_DATED  = f'APP_SCHEMA._LOCID_V6_DATD_{job_sfx}'
     TBL_IPV6      = f'APP_SCHEMA._LOCID_IPV6_{job_sfx}'
-    TBL_V6_SEEN   = f'APP_SCHEMA._LOCID_V6_SEEN_{job_sfx}'
     TBL_MATCHED   = f'APP_SCHEMA._LOCID_MTCHD_{job_sfx}'
     _interim_tbls = [
-        TBL_IPV4, TBL_V6_INP, TBL_V6_PFX, TBL_V6_BUILDS, TBL_V6_DATED,
-        TBL_IPV6, TBL_V6_SEEN, TBL_MATCHED,
+        TBL_IPV4, TBL_V6_INP, TBL_V6_DATED,
+        TBL_IPV6, TBL_MATCHED,
     ]
 
     # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
@@ -401,6 +420,7 @@ def encrypt_handler(
 
     BUILDS    = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS'
     BUILDS_V4 = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS_IPV4_EXPLODED'
+    BUILDS_V6 = f'{_PROVIDER_SCHEMA}.LOCID_BUILDS_IPV6_EXPLODED'
     DATES     = f'{_PROVIDER_SCHEMA}.LOCID_BUILD_DATES'
 
     phases: dict = {}
@@ -446,14 +466,24 @@ def encrypt_handler(
         # Timestamp → epoch-seconds SQL expression
         # Uses TRY_ functions so invalid values become NULL (skipped) instead of
         # failing the entire job.
-        # Note: TRY_TO_TIMESTAMP_NTZ fails if the column is already TIMESTAMP_NTZ,
-        # so we cast through VARCHAR first to handle both string and timestamp inputs.
         if ts_format == 'epoch_ms':
-            ts_expr = f"FLOOR(TRY_TO_NUMBER({ts_col}) / 1000)::BIGINT"
+            ts_expr = f"FLOOR(TRY_CAST({ts_col} AS BIGINT) / 1000)::BIGINT"
         elif ts_format == 'timestamp':
-            ts_expr = f"DATE_PART(epoch_second, TRY_TO_TIMESTAMP_NTZ({ts_col}::VARCHAR))::BIGINT"
+            # Probe the actual column type using a zero-row compile check.
+            # TRY_CAST(col AS TIMESTAMP_NTZ) raises a SQL compilation error when col
+            # is already TIMESTAMP_NTZ (Snowflake disallows same-type TRY_CAST).
+            # If the probe succeeds → col is VARCHAR/other → use TRY_CAST (safe NULL on bad values).
+            # If the probe errors  → col is TIMESTAMP → use DATE_PART directly (no cast, no round-trip).
+            try:
+                session.sql(
+                    f"SELECT TRY_CAST({ts_col} AS TIMESTAMP_NTZ) "
+                    f"FROM reference('ENCRYPT_INPUT_TABLE') LIMIT 0"
+                ).collect()
+                ts_expr = f"DATE_PART(epoch_second, TRY_CAST({ts_col} AS TIMESTAMP_NTZ))::BIGINT"
+            except Exception:
+                ts_expr = f"DATE_PART(epoch_second, {ts_col})::BIGINT"
         else:   # epoch_sec (default)
-            ts_expr = f"TRY_TO_NUMBER({ts_col})::BIGINT"
+            ts_expr = f"TRY_CAST({ts_col} AS BIGINT)"
 
         # Count rows with valid timestamps; difference = skipped due to invalid ts
         rows_valid_ts = session.sql(
@@ -506,29 +536,22 @@ def encrypt_handler(
         phases['ipv4_match_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
-        # Step 4: IPv6 matching — optimised 6-pass cascading hex-prefix range join
+        # Step 4: IPv6 matching — equi-join via LOCID_BUILDS_IPV6_EXPLODED
+        #         with BETWEEN fallback for wide ranges
         #
-        # Performance strategy (big-data focused):
+        # Performance strategy (2-stage):
         #
-        #   4-a  Pre-materialise IPv6 input rows with ip_hex computed ONCE.
-        #        Avoids calling PARSE_IP + GET_PATH 6× per row (one per pass).
+        #   Stage 1: Equi-join on /56 prefix via LOCID_BUILDS_IPV6_EXPLODED.
+        #            The exploded table has one row per /56 prefix per build range
+        #            (covers ranges ≤ /48, ~99%+ of inputs). Hash equi-join on
+        #            PREFIX_56 reduces candidates from ~269K → ~30 per input IP.
+        #            Join back to LOCID_BUILDS to retrieve geo context columns
+        #            (not stored in the exploded table).
         #
-        #   4-b  Pre-materialise relevant IPv6 LOCID_BUILDS rows for the date
-        #        range covering this job's input timestamps.
-        #        Avoids a full LOCID_BUILDS scan on every pass.
-        #
-        #   4-c  Pre-join each input row to its matching build_dt.
-        #        Avoids the LOCID_BUILD_DATES range join inside every pass.
-        #
-        #   4-d  Prefix pre-filter applied to the BUILDS side BEFORE the range
-        #        join (not after). Dramatically reduces range-join cardinality.
-        #
-        #   4-e  Single accumulator table (_locid_v6_seen) updated after each
-        #        pass. Each pass uses ONE anti-join (O(1)) instead of a growing
-        #        chain (reference impl: 0+1+2+3+4+5 = 15 hash joins total).
-        #
-        #   4-f  Results accumulated directly into _locid_ipv6 via INSERT,
-        #        eliminating the final 6-table UNION ALL.
+        #   Stage 2: BETWEEN fallback for IDs unmatched in Stage 1.
+        #            Wide ranges (> /48, ~31K source rows) are excluded from the
+        #            exploded table. Only unmatched IDs are joined against the
+        #            LOCID_BUILDS source for these rare wide ranges.
         # ------------------------------------------------------------------
 
         # 4-a: IPv6 input with ip_hex pre-computed
@@ -544,41 +567,7 @@ def encrypt_handler(
               AND {ts_expr} IS NOT NULL
         """).collect()
 
-        # 4-a2: Distinct input hex prefixes — used to pre-filter builds so we
-        # materialize only the small fraction of build rows that can possibly match.
-        session.sql(f"""
-            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_PFX} AS
-            SELECT DISTINCT
-                SUBSTR(ip_hex, 1, 16) AS pfx16,
-                SUBSTR(ip_hex, 1, 12) AS pfx12
-            FROM {TBL_V6_INP}
-        """).collect()
-
-        # 4-b: Relevant IPv6 build rows, pre-filtered by BOTH date range AND
-        # input hex prefix. Only materialise the NARROW blocks (16-char prefix match)
-        # which are highly selective. Medium and wide blocks are queried directly from
-        # the clustered source table in the 6-pass loop — the source table's clustering
-        # on (BUILD_DT, START_IP_INT_HEX) provides efficient pruning for range joins.
-        #
-        # ORDER BY start_ip_int_hex enables micro-partition pruning on BETWEEN.
-        session.sql(f"""
-            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_BUILDS} AS
-            WITH rel_dates AS (
-                SELECT DISTINCT bd.build_dt
-                FROM {DATES} bd
-                JOIN {TBL_V6_INP} i
-                    ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
-            )
-            SELECT l.*
-            FROM {BUILDS} l
-            JOIN rel_dates rd ON l.build_dt = rd.build_dt
-            JOIN {TBL_V6_PFX} p ON SUBSTR(l.start_ip_int_hex, 1, 16) = p.pfx16
-            WHERE l.start_ip LIKE '%:%'
-              AND SUBSTR(l.start_ip_int_hex, 1, 16) = SUBSTR(l.end_ip_int_hex, 1, 16)
-            ORDER BY start_ip_int_hex
-        """).collect()
-
-        # 4-c: Pre-join each input row to its matching build_dt
+        # 4-b: Pre-join each input row to its matching build_dt
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_DATED} AS
             SELECT i._id, i._ip, i._ts, i.ip_hex, bd.build_dt
@@ -587,7 +576,7 @@ def encrypt_handler(
                 ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
         """).collect()
 
-        # 4-d / 4-e / 4-f: 6-pass loop with pre-filtered builds and O(1) anti-join
+        # Create empty IPv6 results accumulator
         session.sql(f"""
             CREATE OR REPLACE TRANSIENT TABLE {TBL_IPV6} (
                 _id VARCHAR, _ip VARCHAR, _ts BIGINT,
@@ -600,96 +589,52 @@ def encrypt_handler(
             )
         """).collect()
 
-        # Accumulator: IPs already matched — single anti-join target per pass
+        # Stage 1: equi-join via LOCID_BUILDS_IPV6_EXPLODED (~99%+ of inputs).
+        # Hash join on PREFIX_56 + BETWEEN filter reduces candidates from ~269K → ~30.
+        # Join back to LOCID_BUILDS to retrieve geo context (not in exploded table).
         session.sql(f"""
-            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_SEEN} (_ip VARCHAR)
+            INSERT INTO {TBL_IPV6}
+            SELECT i._id, i._ip, i._ts,
+                lb.encrypted_locid, lb.tier,
+                lb.locid_country,      lb.locid_country_code,
+                lb.locid_region,       lb.locid_region_code,
+                lb.locid_city,         lb.locid_city_code,
+                lb.locid_postal_code,  lb.locid_horizontal_accuracy,
+                lb.build_dt
+            FROM {TBL_V6_DATED} i
+            JOIN {BUILDS_V6} e
+                ON  i.build_dt = e.build_dt
+                AND SUBSTR(i.ip_hex, 1, 14) = e.prefix_56
+                AND i.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex
+            JOIN {BUILDS} lb
+                ON  e.build_dt = lb.build_dt
+                AND e.start_ip  = lb.start_ip
+                AND e.end_ip    = lb.end_ip
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY lb.build_dt DESC) = 1
         """).collect()
 
-        # Count distinct IPv6 IPs for early-exit check
-        v6_ip_count = session.sql(
-            f"SELECT COUNT(DISTINCT _ip) FROM {TBL_V6_DATED}"
-        ).collect()[0][0]
-
-        for pass_num, prefix in enumerate([12, 10, 8, 6, 4, 0]):
-
-            # Single anti-join against the accumulator (constant cost per pass)
-            if pass_num > 0:
-                excl_join  = f"LEFT JOIN {TBL_V6_SEEN} xs ON i._ip = xs._ip"
-                excl_where = "AND xs._ip IS NULL"
-            else:
-                excl_join  = ""
-                excl_where = ""
-
-            # Prefix pre-filter on BUILDS — applied before the range join
-            if prefix > 0:
-                pfx_build_filter = (
-                    f"AND SUBSTR(start_ip_int_hex, 1, {prefix}) = "
-                    f"    SUBSTR(end_ip_int_hex,   1, {prefix})"
-                )
-                pfx_inp_cond = (
-                    f"AND SUBSTR(i.ip_hex, 1, {prefix}) = "
-                    f"    SUBSTR(l.start_ip_int_hex, 1, {prefix})"
-                )
-            else:
-                pfx_build_filter = ""
-                pfx_inp_cond     = ""
-
-            # Pass 1 (prefix=12): query the pre-materialised narrow table (small, fast).
-            # Passes 2+: query the clustered source table directly — the source table's
-            # clustering on (BUILD_DT, START_IP_INT_HEX) enables efficient pruning for
-            # the BETWEEN range join without needing to materialise all medium/wide blocks.
-            if pass_num == 0:
-                builds_source = TBL_V6_BUILDS
-                builds_date_filter = ""
-            else:
-                builds_source = BUILDS
-                builds_date_filter = f"AND build_dt IN (SELECT DISTINCT build_dt FROM {TBL_V6_DATED})"
-
-            session.sql(f"""
-                INSERT INTO {TBL_IPV6}
-                WITH inp AS (
-                    SELECT i._id, i._ip, i._ts, i.ip_hex, i.build_dt
-                    FROM {TBL_V6_DATED} i
-                    {excl_join}
-                    WHERE TRUE {excl_where}
-                ),
-                builds AS (
-                    SELECT *
-                    FROM {builds_source}
-                    WHERE start_ip LIKE '%:%'
-                      {builds_date_filter}
-                      {pfx_build_filter}
-                )
-                SELECT
-                    i._id, i._ip, i._ts,
-                    l.encrypted_locid, l.tier,
-                    l.locid_country,      l.locid_country_code,
-                    l.locid_region,       l.locid_region_code,
-                    l.locid_city,         l.locid_city_code,
-                    l.locid_postal_code,  l.locid_horizontal_accuracy,
-                    l.build_dt
-                FROM inp i
-                JOIN builds l
-                    ON  i.build_dt = l.build_dt
-                    {pfx_inp_cond}
-                    AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
-                QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
-            """).collect()
-
-            # Update accumulator with IPs matched so far (for next pass anti-join)
-            session.sql(f"""
-                INSERT INTO {TBL_V6_SEEN}
-                SELECT DISTINCT _ip FROM {TBL_IPV6}
-                EXCEPT SELECT _ip FROM {TBL_V6_SEEN}
-            """).collect()
-
-            # Early exit: skip remaining passes if all IPv6 IPs are matched
-            if v6_ip_count > 0:
-                seen_count = session.sql(
-                    f"SELECT COUNT(*) FROM {TBL_V6_SEEN}"
-                ).collect()[0][0]
-                if seen_count >= v6_ip_count:
-                    break
+        # Stage 2: BETWEEN fallback for IDs unmatched in Stage 1.
+        # Wide ranges (> /48) are excluded from the exploded table. Only the ~31K
+        # source rows where start and end differ at the /48 level are scanned.
+        session.sql(f"""
+            INSERT INTO {TBL_IPV6}
+            SELECT i._id, i._ip, i._ts,
+                l.encrypted_locid, l.tier,
+                l.locid_country,      l.locid_country_code,
+                l.locid_region,       l.locid_region_code,
+                l.locid_city,         l.locid_city_code,
+                l.locid_postal_code,  l.locid_horizontal_accuracy,
+                l.build_dt
+            FROM {TBL_V6_DATED} i
+            LEFT JOIN {TBL_IPV6} matched ON i._id = matched._id
+            JOIN {BUILDS} l
+                ON  i.build_dt = l.build_dt
+                AND l.start_ip LIKE '%:%'
+                AND SUBSTR(l.start_ip_int_hex, 1, 12) != SUBSTR(l.end_ip_int_hex, 1, 12)
+                AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+            WHERE matched._id IS NULL
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
+        """).collect()
 
         # Combine IPv4 and IPv6 results
         session.sql(f"""
@@ -753,8 +698,13 @@ def encrypt_handler(
             'locid_postal_code':  'locid_postal_code',
         }
 
-        # ID output: TO_VARCHAR is a no-op when _id is already VARCHAR (no cost).
-        id_expr = f"TO_VARCHAR(_id) AS {id_col}" if id_to_varchar else f"_id AS {id_col}"
+        # ID output: COALESCE(TRY_CAST AS NUMBER(38,0)::VARCHAR, TO_VARCHAR) strips decimal
+        # points for FLOAT/NUMBER columns (e.g. 12345.0 → '12345') while falling back
+        # to TO_VARCHAR for non-numeric types (VARCHAR, etc.).
+        id_expr = (
+            f"COALESCE(TRY_CAST(_id AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
+            if id_to_varchar else f"_id AS {id_col}"
+        )
         select_exprs = [id_expr] + [
             f"{COL_SQL.get(c, c)} AS {c}" for c in active_cols
         ]
@@ -804,8 +754,17 @@ def encrypt_handler(
         except Exception:
             tier_counts = {'T0': rows_matched}
 
-        _post_stats(session, job_id, client_id, rows_in,
-                    rows_matched, rows_out, phases, tier_counts, 'encrypt')
+        stats_ok = _post_stats(session, job_id, client_id, rows_in,
+                               rows_matched, rows_out, phases, tier_counts, 'encrypt',
+                               rows_skipped=rows_skipped)
+        if not stats_ok:
+            _log_job_end(
+                session, job_id, rows_in, rows_matched, rows_out,
+                runtime_s, 'FAILED',
+                f'Usage stats could not be posted to LocID Central. '
+                f'Data was processed successfully — output table APP_SCHEMA.{output_table} was created.',
+                input_table_name, f"APP_SCHEMA.{output_table}", active_cols,
+            )
 
         result = {
             'job_id':        job_id,
@@ -827,11 +786,24 @@ def encrypt_handler(
     except Exception as exc:
         runtime_s = round(time.time() - start_ts, 2)
         phases['total_s'] = runtime_s
+        try:
+            session.sql(
+                "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+                params=['ERROR', 'locid_encrypt.encrypt_handler', str(exc)]
+            ).collect()
+        except Exception:
+            pass
         _log_job_end(
             session, job_id, rows_in, rows_matched, rows_out,
             runtime_s, 'FAILED', str(exc), input_table_name,
             f"APP_SCHEMA.{output_table}", [],
         )
+        try:
+            _post_stats(session, job_id, client_id, rows_in,
+                        rows_matched, rows_out, phases, tier_counts, 'encrypt',
+                        rows_skipped=rows_skipped)
+        except Exception:
+            pass  # Error-path stats are best-effort — never suppress the original raise
         raise RuntimeError(f'LOCID_ENCRYPT failed: {exc}') from exc
     finally:
         # Drop all interim work tables unconditionally (success or failure).

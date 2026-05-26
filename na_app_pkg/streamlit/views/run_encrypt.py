@@ -115,6 +115,18 @@ def _quote_id(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+# Sample size options for validation queries (label → row count; 0 = full table).
+_SAMPLE_OPTIONS: dict[str, int] = {
+    "1,000 rows":        1_000,
+    "10,000 rows":      10_000,
+    "100,000 rows":    100_000,   # default
+    "500,000 rows":    500_000,
+    "1,000,000 rows":  1_000_000,
+    "5,000,000 rows":  5_000_000,
+    "Full table":              0,
+}
+
+
 def _get_bound_table(ref_name: str) -> str | None:
     """Return FQN of the currently bound table for ref_name, or None.
 
@@ -179,14 +191,17 @@ def _best_match(columns: list[str], hints: list[str]) -> int:
     return 0
 
 
-def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
+def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str,
+                     sample_rows: int = 100_000) -> dict:
     """
     Advisory pre-flight checks on the mapped columns.
     All cutoff math uses UTC. Never blocks the job.
+    sample_rows: rows to sample (TABLESAMPLE); 0 = full table scan.
     """
     result: dict = {}
     q_ip = _quote_id(ip_col)
     q_ts = _quote_id(ts_col)
+    sample_clause = f"TABLESAMPLE ({sample_rows} ROWS)" if sample_rows > 0 else ""
     try:
         ip_rows = session.sql(f"""
             SELECT
@@ -198,7 +213,7 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
                 SUM(IFF({q_ip} IS NOT NULL
                         AND NOT {q_ip} LIKE '%:%'
                         AND NOT {q_ip} LIKE '%.%.%.%', 1, 0))            AS cnt_bad
-            FROM (SELECT {q_ip} FROM {table} LIMIT 1000)
+            FROM (SELECT {q_ip} FROM {table} {sample_clause})
         """).collect()[0]
         result["null_ip"] = int(ip_rows[0] or 0)
         result["cnt_v4"]  = int(ip_rows[1] or 0)
@@ -239,7 +254,7 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
                 MAX({ts_expr})                              AS ts_max,
                 SUM(IFF({q_ts} IS NULL, 1, 0))           AS null_ts,
                 SUM(IFF({ts_expr} < {cutoff_epoch}, 1, 0)) AS stale_cnt
-            FROM (SELECT {q_ts} FROM {table} TABLESAMPLE (100000 ROWS))
+            FROM (SELECT {q_ts} FROM {table} {sample_clause})
         """).collect()[0]
         result["ts_min"]      = ts_rows[0]
         result["ts_max"]      = ts_rows[1]
@@ -253,7 +268,7 @@ def _validate_inputs(table: str, ip_col: str, ts_col: str, ts_fmt: str) -> dict:
     return result
 
 
-def _show_validation(v: dict) -> None:
+def _show_validation(v: dict, sample_label: str = "100,000 rows") -> None:
     """Render advisory validation results."""
     ip_ok = v.get("cnt_v4") is not None
     ts_ok = v.get("stale_count") is not None
@@ -271,8 +286,8 @@ def _show_validation(v: dict) -> None:
         ip_parts = []
         if v4: ip_parts.append(f"IPv4: {v4:,}")
         if v6: ip_parts.append(f"IPv6: {v6:,}")
-        st.info("IP types (sample 1,000): " + " · ".join(ip_parts) if ip_parts
-                else "No parseable IPs found in sample")
+        st.info("IP types (sample " + sample_label + "): " + " · ".join(ip_parts) if ip_parts
+                else f"No parseable IPs found in sample ({sample_label})")
         if bad:
             st.warning(f"{bad:,} unparseable IP value(s) — will be skipped during matching.",
                        icon="⚠️")
@@ -300,10 +315,120 @@ def _show_validation(v: dict) -> None:
             st.success("Timestamp range looks good — all values within LocID build coverage.",
                        icon="✅")
 
+def _check_id_uniqueness(table: str, id_col: str, sample_rows: int = 100_000) -> dict:
+    """Check whether id_col has duplicate values in the input table.
 
-# ---------------------------------------------------------------------------
-# Entitlement gate — block the entire workflow if allow_encrypt is missing
-# ---------------------------------------------------------------------------
+    The LOCID_ENCRYPT procedure deduplicates to one output row per unique ID
+    (via QUALIFY ROW_NUMBER()). Duplicates are not an error, but customers
+    should know their output row count may be lower than their input.
+    sample_rows: rows to sample; 0 = full table scan.
+    """
+    q_id = _quote_id(id_col)
+    sample_clause = f"TABLESAMPLE ({sample_rows} ROWS)" if sample_rows > 0 else ""
+    try:
+        rows = session.sql(f"""
+            SELECT COUNT(*) AS total, COUNT(DISTINCT {q_id}) AS distinct_count
+            FROM (SELECT {q_id} FROM {table} {sample_clause})
+        """).collect()[0]
+        return {
+            "id_total":    int(rows[0] or 0),
+            "id_distinct": int(rows[1] or 0),
+        }
+    except Exception as e:
+        logger.warning(session, "run_encrypt._check_id_uniqueness",
+                       f"ID uniqueness check failed: {e}")
+        return {"id_error": str(e)}
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _get_table_row_count(_sid: int) -> int | None:
+    """Return row count for the bound ENCRYPT_INPUT_TABLE.
+
+    Uses INFORMATION_SCHEMA.TABLES (metadata-only, fast) with COUNT(*) fallback.
+    Cached 10 minutes per session — the table size won't change within a submission.
+    Returns None if the count cannot be determined.
+    """
+    try:
+        bound = _get_bound_table('ENCRYPT_INPUT_TABLE')
+        if bound:
+            parts = bound.split('.')
+            if len(parts) == 3:
+                db, schema, tbl = parts
+                rows = session.sql(
+                    f"SELECT row_count FROM {db}.INFORMATION_SCHEMA.TABLES "
+                    "WHERE TABLE_SCHEMA = UPPER(?) AND TABLE_NAME = UPPER(?)",
+                    params=[schema, tbl]
+                ).collect()
+                if rows and rows[0][0] is not None:
+                    return int(rows[0][0])
+    except Exception:
+        pass
+    # Fallback: COUNT(*) via reference binding
+    try:
+        row = session.sql(
+            "SELECT COUNT(*) FROM reference('ENCRYPT_INPUT_TABLE')"
+        ).collect()[0]
+        return int(row[0] or 0)
+    except Exception:
+        return None
+
+
+def _smart_sample_options(table_count: int | None) -> tuple[list[str], int]:
+    """Return (option_labels, default_index) filtered and defaulted by table size.
+
+    Rules:
+    - Options where sample_rows >= table_count are hidden (they'd scan the full table anyway).
+    - "Full table" is always shown.
+    - Default: "Full table" for tables ≤ 100K rows (fast enough); "100,000 rows" for larger.
+    - Falls back to all options with "100,000 rows" default when count is unknown.
+    """
+    all_labels = list(_SAMPLE_OPTIONS.keys())
+
+    if table_count is None:
+        return all_labels, 2   # unknown size — all options, 100K default
+
+    # Keep options whose sample size is smaller than the table; always keep Full table
+    filtered = [
+        lbl for lbl in all_labels
+        if _SAMPLE_OPTIONS[lbl] == 0 or _SAMPLE_OPTIONS[lbl] < table_count
+    ]
+    # Guarantee at least "1,000 rows" and "Full table" are always present
+    for must_have in ("1,000 rows", "Full table"):
+        if must_have not in filtered:
+            filtered.append(must_have)
+
+    default_label = "Full table" if table_count <= 100_000 else "100,000 rows"
+    if default_label not in filtered:
+        default_label = filtered[-1]   # fallback to last option
+    return filtered, filtered.index(default_label)
+
+
+def _show_id_check(r: dict, id_col: str, sample_label: str) -> None:
+    """Render ID uniqueness check results."""
+    if "id_error" in r:
+        st.warning(f"ID uniqueness check failed: {r['id_error']}", icon="⚠️")
+        return
+    total    = r.get("id_total", 0)
+    distinct = r.get("id_distinct", 0)
+    dups     = total - distinct
+    st.caption(f"Last checked — ID: `{id_col}` · Sample: {sample_label}")
+    if total == 0:
+        st.info("No rows in sample — table may be empty.", icon="ℹ️")
+    elif dups == 0:
+        st.success(
+            f"All {total:,} sampled ID values are unique.",
+            icon="✅",
+        )
+    else:
+        st.warning(
+            f"{dups:,} duplicate ID value(s) found in {total:,} sampled rows "
+            f"({distinct:,} unique). The procedure outputs **one result per unique ID** — "
+            "duplicate IDs in the input will be deduplicated in the output.",
+            icon="⚠️",
+        )
+
+
+
 if 'allow_encrypt' not in get_active_entitlements(sid):
     st.error(
         "Your LocID license does not include the **Encrypt** entitlement (`allow_encrypt`). "
@@ -440,26 +565,79 @@ elif step == 2:
 
         st.divider()
 
-        if st.button("✅ Run Format Validation"):
-            with st.spinner("Checking IP format and timestamp range…"):
-                v = _validate_inputs(
-                    "reference('ENCRYPT_INPUT_TABLE')", col_ip, col_ts, ts_fmt
-                )
-                st.session_state.enc_validation      = v
-                st.session_state.enc_validation_cols = (col_ip, col_ts, ts_fmt)
+        # Sample size selector — smart: filtered and defaulted by actual table row count
+        _tbl_count    = _get_table_row_count(sid)
+        _sample_opts, _sample_default = _smart_sample_options(_tbl_count)
+
+        if _tbl_count is not None:
+            st.caption(f"Input table: **{_tbl_count:,} rows**")
+
+        sample_label = st.selectbox(
+            "Validation sample size",
+            _sample_opts,
+            index=_sample_default,
+            help=(
+                "Rows sampled for format and ID uniqueness checks.  \n"
+                "Options larger than the table are automatically hidden.  \n"
+                "Tables ≤ 100K rows default to **Full table** (fast enough to scan completely)."
+            ),
+        )
+        sample_rows = _SAMPLE_OPTIONS[sample_label]
+
+        # Show coverage percentage and warn for large full-table scans
+        if sample_rows > 0 and _tbl_count and _tbl_count > 0:
+            pct = min(100.0, sample_rows / _tbl_count * 100)
+            st.caption(f"≈ {pct:.1f}% of table")
+        elif sample_rows == 0 and _tbl_count and _tbl_count > 1_000_000:
+            st.warning(
+                f"Full table scan — {_tbl_count:,} rows may take a while on large datasets.",
+                icon="⚠️",
+            )
+
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("✅ Run Format Validation"):
+                with st.spinner("Checking IP format and timestamp range…"):
+                    v = _validate_inputs(
+                        "reference('ENCRYPT_INPUT_TABLE')", col_ip, col_ts, ts_fmt,
+                        sample_rows,
+                    )
+                    st.session_state.enc_validation       = v
+                    st.session_state.enc_validation_cols  = (col_ip, col_ts, ts_fmt, sample_label)
+        with btn_col2:
+            if st.button("🔑 Run ID Unique Check"):
+                with st.spinner("Checking ID column for duplicate values…"):
+                    r = _check_id_uniqueness(
+                        "reference('ENCRYPT_INPUT_TABLE')", col_id, sample_rows
+                    )
+                    st.session_state.enc_id_check       = r
+                    st.session_state.enc_id_check_label = (col_id, sample_label)
 
         if "enc_validation" in st.session_state:
             vcols = st.session_state.get("enc_validation_cols", ())
             if vcols:
                 st.caption(
-                    f"Last validated — IP: `{vcols[0]}` · TS: `{vcols[1]}` · Format: `{vcols[2]}`"
+                    f"Last validated — IP: `{vcols[0]}` · TS: `{vcols[1]}` "
+                    f"· Format: `{vcols[2]}` · Sample: {vcols[3] if len(vcols) > 3 else '—'}"
                 )
-            _show_validation(st.session_state.enc_validation)
+            _show_validation(
+                st.session_state.enc_validation,
+                vcols[3] if len(vcols) > 3 else "100,000 rows",
+            )
+
+        if "enc_id_check" in st.session_state:
+            id_label = st.session_state.get("enc_id_check_label", ("—", "—"))
+            _show_id_check(
+                st.session_state.enc_id_check,
+                id_label[0],
+                id_label[1],
+            )
 
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
             st.session_state.pop("enc_validation", None)
+            st.session_state.pop("enc_id_check", None)
             st.session_state.enc_step = 1
             st.rerun()
     with col2:

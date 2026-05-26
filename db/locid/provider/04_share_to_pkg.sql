@@ -1,8 +1,8 @@
 -- =============================================================================
--- 03_share_to_pkg.sql
+-- 04_share_to_pkg.sql
 -- LocID: Share provider data into the Native App Package
 --
--- Run order: AFTER 01_optimize_tables.sql and 02_grant_access.sql, and snow app deploy.
+-- Run order: AFTER 02_ipv6_exploded_table.sql and 03_grant_access.sql, and snow app deploy.
 --            Re-run whenever optimized tables are refreshed.
 --
 -- Role: LOCID_APP_ADMIN — this role owns LOCID_PKG because snowflake.yml
@@ -20,6 +20,7 @@
 -- are accessible as:
 --   LOCID_SHARE.LOCID_BUILDS
 --   LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
+--   LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED
 --   LOCID_SHARE.LOCID_BUILD_DATES
 --
 -- Consumer accounts cannot query these views directly — the Native App
@@ -77,6 +78,16 @@ SELECT
     END_IP
 FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
 
+CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED AS
+SELECT
+    BUILD_DT,
+    PREFIX_56,
+    START_IP,
+    END_IP,
+    START_IP_INT_HEX,
+    END_IP_INT_HEX
+FROM LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED;
+
 CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILD_DATES AS
 SELECT
     BUILD_DT,
@@ -99,6 +110,9 @@ GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS
     TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
 
 GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
+    TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
+
+GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED
     TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
 
 GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILD_DATES

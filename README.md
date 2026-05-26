@@ -110,7 +110,8 @@ LocID maintains these tables in their Snowflake account, shared to the Native Ap
 
 ```
 LOCID.STAGING.LOCID_BUILDS                  -- IP ranges, encrypted_locid, geo context
-LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED    -- Exploded IPv4 table (equi-join)
+LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED    -- Exploded IPv4 lookup (equi-join, one row per IP)
+LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED    -- Exploded IPv6 /56 prefix lookup (equi-join, one row per /56 per range ≤ /48; 71.4B rows)
 LOCID.STAGING.LOCID_BUILD_DATES             -- Weekly build date reference
 ```
 
@@ -298,12 +299,13 @@ Customer Input Table (via reference binding)
          ├─ 6. CREATE TABLE APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS
          │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
          │
-         ├─ 7. POST usage stats to LocID Central (via EAI)
+         ├─ 8. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
          │
-         └─ 8. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
+         └─ 9. POST usage stats to LocID Central (via EAI)
+              If stats POST fails → JOB_LOG updated to FAILED (data still in output table)
 ```
 
-**On failure:** Step 8 updates JOB_LOG to FAILED with error message.  
+**On failure:** APP_LOGS receives an ERROR entry. JOB_LOG is updated to FAILED with the error message. Usage stats are posted to LocID Central with partial data (whatever rows were counted/matched before the failure).  
 **On user cancel:** The STARTED row remains — visible in Job History as an incomplete job.
 
 ### Decrypt (TX_CLOC → STABLE_CLOC)
@@ -333,10 +335,14 @@ Customer Input Table (via reference binding)
          ├─ 5. CREATE TABLE APP_SCHEMA.LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS
          │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
          │
-         ├─ 6. POST usage stats to LocID Central (via EAI)
+         ├─ 7. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
          │
-         └─ 7. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
+         └─ 8. POST usage stats to LocID Central (via EAI)
+              If stats POST fails → JOB_LOG updated to FAILED (data still in output table)
 ```
+
+**On failure:** APP_LOGS receives an ERROR entry. JOB_LOG is updated to FAILED with the error message. Usage stats are posted to LocID Central with partial data (whatever rows were counted/matched before the failure).  
+**On user cancel:** The STARTED row remains — visible in Job History as an incomplete job.
 
 ### IP Matching Strategy
 
@@ -346,29 +352,27 @@ customer_input.ip_address = locid_builds_ipv4_exploded.ip_address
 joined back to locid_builds on (build_dt, start_ip, end_ip)
 ```
 
-**IPv6** — Optimised 6-pass cascading hex-prefix range join:
+**IPv6** — 2-stage equi-join via `LOCID_BUILDS_IPV6_EXPLODED` + BETWEEN fallback:
 ```
-Pre-step: materialise IPv6 input rows once (ip_hex pre-computed)
-           extract distinct hex prefixes from input (prefix semi-join table)
-           materialise relevant IPv6 build rows (date + prefix pre-filtered)
-           pre-join each input row to its build_dt (avoids 6× DATES range join)
+Stage 1 (~99%+ of inputs):
+  equi-join on SUBSTR(ip_hex, 1, 14) = PREFIX_56    → hash join, ~30 candidates per IP
+  BETWEEN filter on start/end_ip_int_hex             → exact range match
+  join back to LOCID_BUILDS on (build_dt, start_ip, end_ip)  → retrieve geo context
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY _id ORDER BY build_dt DESC) = 1
 
-Pass 1: hex prefix[0:12] match + range join  → matched rows accumulated
-Pass 2: prefix[0:10], exclude matched IPs    → (single accumulator anti-join)
-Pass 3: prefix[0:8],  exclude matched IPs    → (single accumulator anti-join)
-Pass 4: prefix[0:6],  exclude matched IPs    → (single accumulator anti-join)
-Pass 5: prefix[0:4],  exclude matched IPs    → (single accumulator anti-join)
-Pass 6: full range join on remaining rows    → (single accumulator anti-join)
+Stage 2 (fallback for unmatched IDs — wide ranges > /48 only, ~31K source rows):
+  LEFT JOIN anti-join on Stage 1 results (matched._id IS NULL)
+  BETWEEN range join against LOCID_BUILDS wide ranges directly
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY _id ORDER BY build_dt DESC) = 1
 ```
 
-Key optimisations vs. reference POC (important for big-data performance):
-- `PARSE_IP` / `ip_hex` computed once per row (not 6×)
-- `LOCID_BUILDS` scanned once (not 6×), pre-filtered to relevant build dates
-- **Prefix semi-join pre-filter** on builds materialisation — 3-tier selectivity: (1) 16-char prefix for narrow blocks, (2) 12-char prefix for medium-width blocks, (3) wide blocks kept unconditionally. Reduces working set from ~700M to typically <5M rows.
-- Prefix filter applied **before** the range join on the builds side (not after)
-- Single accumulator anti-join per pass (O(1)) vs. growing exclusion chain (O(passes))
+Key performance characteristics:
+- Stage 1 hash equi-join on `PREFIX_56` reduces candidates per input IP from ~269K → ~30
+- `LOCID_BUILDS_IPV6_EXPLODED` clustered on `(PREFIX_56, BUILD_DT)` — micro-partition pruning on prefix + date
+- Stage 2 scans only ~31K wide-range build rows — negligible overhead for the remaining inputs
+- `PARSE_IP` / `ip_hex` computed once per input row (shared by both stages)
 
-Both IPv4 and IPv6 results are filtered to `relevant_builds` (build dates whose range covers the input timestamp).
+Both IPv4 and IPv6 results are combined into a single matched table before UDF execution.
 
 ---
 
@@ -481,15 +485,15 @@ The app has seven views accessible from a left-side navigation bar. All views ru
 
 - Column dropdowns are pre-filled with best-guess matches (e.g. a column named `ip` auto-selects for IP Address)
 - Timestamp format selector: epoch seconds, epoch milliseconds, or TIMESTAMP string
-- **"Run Input Validation"** button runs advisory checks after columns are mapped:
+- **"Run Format Validation"** and **"Run ID Unique Check"** buttons run advisory checks after columns are mapped. A sample size selector (1K–5M rows or full table; default 100K) controls the scope for all checks:
 
   | Check | Scope | Behaviour |
   |-------|-------|-----------|
-  | IP format | Sample 1,000 rows | Badge shows IPv4 / IPv6 / Mixed; warns on unparseable or NULL values |
-  | Timestamp range | Sample 100K rows | Warns if any values are older than the earliest LocID build date (dynamic from provider data) |
-  | NULL timestamps | Full table | Informational count — NULLs are skipped during matching |
+  | IP format | Configurable sample (default 100K rows) | Shows IPv4 / IPv6 / Mixed counts; warns on unparseable or NULL values |
+  | Timestamp range | Configurable sample (default 100K rows) | Warns if any values are older than the earliest LocID build date (dynamic from provider data) |
+  | ID uniqueness | Configurable sample (default 100K rows) | Warns if duplicate ID values found — procedure deduplicates to one result per unique ID |
 
-  Validation is advisory — warnings are shown but the job can always proceed.
+  All checks are advisory — warnings are shown but the job can always proceed.
 
 **Step 3 — Select Output Columns**
 - Checkboxes for each available output field, gated by entitlement:
@@ -755,19 +759,18 @@ The stored procedures depend on specific column types and clustering keys on the
 1. Secure Views in the app package cast `VARIANT→VARCHAR` inline at query time (zero storage cost)
 2. Clustering keys are added to the source tables for micro-partition pruning
 
-> **Setup script:** `db/locid/provider/01_optimize_tables.sql` adds clustering keys. The Secure Views in `03_share_to_pkg.sql` handle the `VARIANT→VARCHAR` cast inline.
+> **Setup script:** `db/locid/provider/01_optimize_tables.sql` adds clustering keys. The Secure Views in `04_share_to_pkg.sql` handle the `VARIANT→VARCHAR` cast inline.
 
 ### General Performance Notes
 
-- **Clustering keys** on `LOCID_BUILDS`: `(build_dt, start_ip_int_hex)` — compound key enables micro-partition pruning on both the date filter AND the IPv6 hex BETWEEN range join.
-- **Clustering keys** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the equi-join.
+- **Clustering keys** on `LOCID_BUILDS`: `(build_dt, start_ip_int_hex)` — compound key enables micro-partition pruning on the date filter and the Stage 2 BETWEEN fallback for wide IPv6 ranges.
+- **Clustering keys** on `LOCID_BUILDS_IPV4_EXPLODED`: `(ip_address, build_dt)` — supports the IPv4 equi-join.
+- **Clustering keys** on `LOCID_BUILDS_IPV6_EXPLODED`: `(PREFIX_56, BUILD_DT)` — supports the Stage 1 IPv6 equi-join. Adding start/end hex columns is not beneficial: ~30 candidates per prefix is trivial in memory.
 - **Search Optimization Service (SOS)** candidate on IPv4 exploded table for equality predicate on `ip_address`.
-- **IPv6 prefix semi-join:** The builds materialisation step uses a 3-tier prefix pre-filter: (1) 16-char prefix for narrow blocks (~269K rows), (2) 12-char prefix for medium-width blocks, (3) wide blocks kept unconditionally. Dramatically reduces the working set for both device-address and network-block inputs.
-- **IPv6 intermediate table ordering:** The per-job `TBL_V6_BUILDS` transient table is created with `ORDER BY start_ip_int_hex` for range-join pruning.
-- **IPv6 early-exit:** After each prefix pass, the loop checks if all distinct IPv6 IPs have been matched and breaks early — avoids unnecessary wide-range passes.
-- **IPv6 network blocks** (e.g., `2806:108E:E:D03A::`) are fully supported. `PARSE_IP` expands `::` to zeros; the resulting hex is matched via the same BETWEEN range join as full device addresses.
-- **Invalid timestamps:** Rows with unparseable timestamps are gracefully skipped (using `TRY_TO_*` functions with `::VARCHAR` cast for TIMESTAMP_NTZ columns), not failed. The result includes a `rows_skipped_invalid_ts` count and a warning in the Streamlit UI.
-- **ID column output:** The output table's ID column is always VARCHAR (via `TO_VARCHAR` cast) regardless of the input column type, ensuring consistent output schema.
+- **IPv6 exploded-table equi-join:** `LOCID_BUILDS_IPV6_EXPLODED` (71.4B rows) has one row per /56 prefix per build range ≤ /48. Stage 1 hash equi-join on `PREFIX_56` reduces candidates from ~269K → ~30 per input IP vs. the previous 6-pass range join approach.
+- **IPv6 network blocks** (e.g., `2806:108E:E:D03A::`) are fully supported. `PARSE_IP` expands `::` notation; the resulting hex matches via Stage 1 equi-join, identical to full device addresses.
+- **Invalid timestamps:** Rows with unparseable timestamps are gracefully skipped using `TRY_CAST`. For `epoch_sec`/`epoch_ms`, the column is cast to `BIGINT`. For `timestamp` format, a zero-row type probe at job start determines whether to use `TRY_CAST AS TIMESTAMP_NTZ` (VARCHAR column) or `DATE_PART(epoch_second, col)` directly (native TIMESTAMP column). Skipped rows appear in `rows_skipped_invalid_ts`.
+- **ID column output:** The output table preserves the original ID column type by default. Set `ID_TO_VARCHAR=TRUE` to cast to VARCHAR — numeric IDs with decimal representation (e.g. `12345.0`) are stripped to integer string (`12345`) via `COALESCE(TRY_CAST AS NUMBER(38,0)::VARCHAR, TO_VARCHAR(id))`.
 - **Session timeout:** Streamlit sleep timer is set to 30 minutes (`config.toml`). For jobs exceeding 30 min, users should run via SQL worksheet (see SQL Guide page) — SQL worksheets have no session timeout.
 - Warehouse sizing recommendation: M or L Snowpark-optimized for large batch jobs.
 
@@ -1152,7 +1155,11 @@ The **provider** bears all auto-fulfillment costs. Consumers pay nothing extra b
 
 ## Usage Telemetry
 
-After each job run, the stored procedure reports usage statistics to LocID Central (best-effort — failures are logged but do not block the job). The telemetry contract is defined in the [Telemetry Catalog Addendum](Tmp/tmp/20260505/locid-central-telemetry-catalog-native-app-addendum.md).
+After each job run — whether it succeeds or fails — the stored procedure posts usage statistics to LocID Central. The telemetry contract is defined in the [Telemetry Catalog Addendum](Tmp/tmp/20260505/locid-central-telemetry-catalog-native-app-addendum.md).
+
+**Stats POST failure** is not silent: if the POST to Central fails, the job's `JOB_LOG` status is updated to `FAILED` with a message that identifies the output table (so the consumer knows their data was processed). The failure is also written to `APP_LOGS` as `ERROR`.
+
+**Failed jobs** also post stats: if the job itself throws an exception, `_post_stats` is called from the error handler using whatever partial counters were accumulated (rows counted, rows matched, partial phase timings). This gives Central visibility into both good and bad job outcomes.
 
 ### Endpoint & Envelope
 
@@ -1175,12 +1182,23 @@ Body is a JSON array of `Stat` objects. Envelope-level fields:
 
 | metric_key | datatype | dimensions | description |
 |------------|----------|------------|-------------|
-| `batch-hits.encrypt` | Counter | api_key, client_id, tier, job_id | Rows matched at each tier |
-| `batch-hits.decrypt` | Counter | api_key, client_id, tier, job_id | Rows matched at each tier |
-| `batch-runtime.encrypt` | Timer | api_key, client_id, job_id, stage | Per-phase timing (match, udf, write, total) |
-| `batch-runtime.decrypt` | Timer | api_key, client_id, job_id, stage | Per-phase timing (match, udf, write, total) |
-| `batch-outcomes.encrypt` | Counter | api_key, client_id, outcome, job_id | Rows per outcome (matched, unmatched, invalid, error) |
-| `batch-outcomes.decrypt` | Counter | api_key, client_id, outcome, job_id | Rows per outcome (matched, unmatched, invalid, error) |
+| `batch-hits.encrypt` | Counter | api_key, client_id, tier, job_id | Rows matched at each tier. Emitted only when non-zero. |
+| `batch-hits.decrypt` | Counter | api_key, client_id, tier, job_id | Rows matched at each tier. Emitted only when non-zero. |
+| `batch-runtime.encrypt` | Timer | api_key, client_id, job_id, stage | Per-phase timing (match, udf, write, total). Always emitted (even with 0 counts). |
+| `batch-runtime.decrypt` | Timer | api_key, client_id, job_id, stage | Per-phase timing (match, udf, write, total). Always emitted. |
+| `batch-outcomes.encrypt` | Counter | api_key, client_id, outcome, job_id | Row classification: `matched` (always emitted), `unmatched` / `invalid` / `error` (emitted when non-zero). |
+| `batch-outcomes.decrypt` | Counter | api_key, client_id, outcome, job_id | Row classification: same outcome values. |
+
+#### `batch-outcomes` outcome values
+
+| `outcome` | Meaning | When emitted |
+|-----------|---------|--------------|
+| `matched` | Row joined FC50 build successfully; a CLOC was produced | Always (even if 0) |
+| `unmatched` | No FC50 hit — IP not in coverage, or timestamp outside any build window | When > 0 |
+| `invalid` | Row rejected for bad input — IP failed format validation or timestamp unparseable | When > 0 |
+| `error` | Row hit a UDF exception or SP-level failure; or all unprocessed rows on a failed job | When > 0 |
+
+**Integrity invariant:** `matched + unmatched + invalid + error == JOB_LOG.rows_in`
 
 ### Example (Counter)
 
@@ -1201,14 +1219,16 @@ Body is a JSON array of `Stat` objects. Envelope-level fields:
 
 ### Cadence
 
-One flush per job, immediately after the matching/UDF/write phases complete and `JOB_LOG` is finalized. Each Counter value represents that job's totals (delta semantics — not cumulative since process start).
+One flush per job: on the **success path**, immediately after JOB_LOG is written to `SUCCESS`. On the **failure path**, immediately after JOB_LOG is written to `FAILED` — using whatever partial counters were accumulated before the exception.
 
-### Integrity Invariants
+Each Counter value represents that job's totals (delta semantics — not cumulative since process start).
 
-- `sum(batch-outcomes.{op} across all outcomes) == JOB_LOG.rows_in`
+### Integrity Invariants (success path)
+
+- `matched + unmatched + invalid + error == JOB_LOG.rows_in`
 - `sum(batch-hits.{op} across all tiers) == batch-outcomes.{op} where outcome='matched'`
 
-Job metadata (rows_in, rows_out, runtime_s, success flag) is also written to `APP_SCHEMA.JOB_LOG` for the customer's own visibility.
+Job metadata (rows_in, rows_out, runtime_s, status) is also written to `APP_SCHEMA.JOB_LOG` for the consumer's own visibility.
 
 ---
 

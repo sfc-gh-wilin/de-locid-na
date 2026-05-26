@@ -48,7 +48,8 @@ RUNTIME_VERSION = '3.11'
 EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
 PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
-    'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY
+    'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY,
+    'central_url' = APP_SCHEMA.LOCID_CENTRAL_URL
 )
 HANDLER = 'fetch_license_handler'
 AS $$
@@ -61,7 +62,7 @@ import urllib.error
 import _snowflake
 import snowflake.snowpark as snowpark
 
-CENTRAL_BASE_URL = "https://central.locid.com/api/0/location_id"
+CENTRAL_BASE_URL = "https://central.locid.com/api/0/location_id"  # fallback only
 
 _UPSERT_SQL = (
     "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
@@ -133,23 +134,52 @@ def _strip_sensitive(data: dict) -> dict:
 
 
 def fetch_license_handler(session: snowpark.Session, license_id: str) -> dict:
+    # Read endpoint from secret — not visible to consumers via SQL
+    try:
+        central_base_url = _snowflake.get_generic_secret_string('central_url').strip().rstrip('/')
+    except Exception:
+        central_base_url = CENTRAL_BASE_URL
     # Resolve license key: use provided value or fall back to stored secret
     lic = license_id.strip() if license_id else ""
     if not lic:
         lic = _snowflake.get_generic_secret_string('license_key').strip()
     if not lic:
-        raise RuntimeError("License not configured. Complete the Setup Wizard first.")
+        _err = "License not configured. Complete the Setup Wizard first."
+        try:
+            session.sql(
+                "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+                params=['ERROR', 'locid_fetch_license.fetch_license_handler', _err]
+            ).collect()
+        except Exception:
+            pass
+        raise RuntimeError(_err)
 
-    url = f"{CENTRAL_BASE_URL}/license/{lic}"
+    url = f"{central_base_url}/license/{lic}"
     req = urllib.request.Request(url)
 
     try:
         with _urlopen_with_retry(req, 15) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        raise RuntimeError(f"LocID Central license fetch failed: HTTP {e.code}") from e
+        _err = f"LocID Central license fetch failed: HTTP {e.code}"
+        try:
+            session.sql(
+                "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+                params=['ERROR', 'locid_fetch_license.fetch_license_handler', _err]
+            ).collect()
+        except Exception:
+            pass
+        raise RuntimeError(_err) from e
     except Exception as e:
-        raise RuntimeError(f"LocID Central license fetch failed: {e}") from e
+        _err = f"LocID Central license fetch failed: {e}"
+        try:
+            session.sql(
+                "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+                params=['ERROR', 'locid_fetch_license.fetch_license_handler', _err]
+            ).collect()
+        except Exception:
+            pass
+        raise RuntimeError(_err) from e
 
     # --- Write cryptographic secrets to Snowflake SECRETs ---
     raw_secrets = data.get('secrets', {})
@@ -182,8 +212,8 @@ def fetch_license_handler(session: snowpark.Session, license_id: str) -> dict:
     for entry in data.get('access', []):
         if entry.get('status') == 'ACTIVE':
             if sel_id is None or entry.get('api_key_id') == sel_id:
-                ns_val = entry.get('namespace_guid', '')
-                if ns_val:
+                ns_val = entry.get('namespace_guid', None)
+                if ns_val is not None:  # write even if empty string — skipping only when key is absent
                     session.sql(
                         "ALTER SECRET APP_SCHEMA.LOCID_NAMESPACE_GUID SET SECRET_STRING = ?",
                         params=[ns_val]

@@ -205,8 +205,14 @@ with st.expander("Parameter reference", expanded=False):
     st.markdown("**Valid `OUTPUT_COLS` values (Decrypt):**")
     st.code(
         "ARRAY_CONSTRUCT(\n"
-        "    'stable_cloc'         -- STABLE_CLOC UUID (requires allow_stable)\n"
-        "    -- Geo context columns are not available in v1 of the Decrypt path\n"
+        "    'stable_cloc',        -- STABLE_CLOC UUID    (requires allow_stable)\n"
+        "    'locid_country',      -- Country name        (requires allow_geo_context)\n"
+        "    'locid_country_code', -- ISO country code    (requires allow_geo_context)\n"
+        "    'locid_region',       -- Region / state name (requires allow_geo_context)\n"
+        "    'locid_region_code',  -- Region code         (requires allow_geo_context)\n"
+        "    'locid_city',         -- City name           (requires allow_geo_context)\n"
+        "    'locid_city_code',    -- City code           (requires allow_geo_context)\n"
+        "    'locid_postal_code'   -- Postal / ZIP code   (requires allow_geo_context)\n"
         ")",
         language="sql",
     )

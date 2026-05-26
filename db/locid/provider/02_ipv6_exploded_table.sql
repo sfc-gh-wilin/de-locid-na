@@ -1,5 +1,5 @@
 -- =============================================================================
--- 04_ipv6_exploded_table.sql
+-- 02_ipv6_exploded_table.sql
 -- LocID: Create and populate the IPv6 /56 exploded lookup table
 --
 -- Run order: AFTER 01_optimize_tables.sql. Can be re-run to refresh data.
@@ -14,10 +14,16 @@
 --
 --   This exploded table converts the BETWEEN range join into a fast equi-join
 --   at the /56 prefix level (first 14 hex chars of the IPv6 hex address).
---   Each build range is expanded into one row per /56 block it covers.
+--   Each build range ≤ /48 is expanded into one row per /56 block it covers.
+--   Wide ranges (> /48, ~31K source rows) are excluded — the encrypt procedure
+--   handles these via a BETWEEN fallback against LOCID_BUILDS.
 --
--- Explosion factor: ~1.8× (from 700M → ~1.26B rows per build date)
--- Total storage: ~56B rows across all build dates (~2 TB estimated)
+--   Geo context columns (country, region, city, etc.) are NOT stored here to
+--   reduce storage cost. The encrypt procedure joins back to LOCID_BUILDS on
+--   (build_dt, start_ip, end_ip) to retrieve geo context after the equi-join.
+--
+-- Explosion factor: ~1.8× (from 700M → ~71.4B rows across all build dates)
+-- Total storage: ~71.4B rows (~2 TB estimated)
 --
 -- The encrypt procedure joins:
 --   SUBSTR(input_ip_hex, 1, 14) = exploded.prefix_56   (equi-join / hash join)
@@ -39,19 +45,13 @@ CREATE TABLE IF NOT EXISTS LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED (
     START_IP                  VARCHAR         NOT NULL,
     END_IP                    VARCHAR         NOT NULL,
     START_IP_INT_HEX          VARCHAR(32)     NOT NULL,
-    END_IP_INT_HEX            VARCHAR(32)     NOT NULL,
-    TIER                      VARCHAR,
-    LOCID_COUNTRY             VARCHAR,
-    LOCID_COUNTRY_CODE        VARCHAR,
-    LOCID_REGION              VARCHAR,
-    LOCID_REGION_CODE         VARCHAR,
-    LOCID_CITY                VARCHAR,
-    LOCID_CITY_CODE           VARCHAR,
-    LOCID_POSTAL_CODE         VARCHAR,
-    ENCRYPTED_LOCID           VARCHAR,
-    LOCID_HORIZONTAL_ACCURACY VARCHAR
+    END_IP_INT_HEX            VARCHAR(32)     NOT NULL
 )
 CLUSTER BY (PREFIX_56, BUILD_DT);
+-- Note: geo context columns (tier, country, region, city, postal code,
+-- encrypted_locid, horizontal_accuracy) are intentionally excluded to
+-- reduce storage. The encrypt procedure retrieves them by joining back
+-- to LOCID_BUILDS on (build_dt, start_ip, end_ip) after the equi-join.
 
 
 -- =============================================================================
@@ -73,12 +73,7 @@ SELECT
     BUILD_DT,
     SUBSTR(START_IP_INT_HEX, 1, 14)  AS PREFIX_56,
     START_IP, END_IP,
-    START_IP_INT_HEX, END_IP_INT_HEX,
-    TIER,
-    LOCID_COUNTRY, LOCID_COUNTRY_CODE,
-    LOCID_REGION, LOCID_REGION_CODE,
-    LOCID_CITY, LOCID_CITY_CODE,
-    LOCID_POSTAL_CODE, ENCRYPTED_LOCID, LOCID_HORIZONTAL_ACCURACY
+    START_IP_INT_HEX, END_IP_INT_HEX
 FROM LOCID.STAGING.LOCID_BUILDS
 WHERE START_IP LIKE '%:%'
   AND SUBSTR(START_IP_INT_HEX, 1, 14) = SUBSTR(END_IP_INT_HEX, 1, 14)
@@ -110,24 +105,15 @@ SELECT
     s.BUILD_DT,
     SUBSTR(s.START_IP_INT_HEX, 1, 12) || LPAD(TO_VARCHAR(seq.n, 'XX'), 2, '0') AS PREFIX_56,
     s.START_IP, s.END_IP,
-    s.START_IP_INT_HEX, s.END_IP_INT_HEX,
-    s.TIER,
-    s.LOCID_COUNTRY, s.LOCID_COUNTRY_CODE,
-    s.LOCID_REGION, s.LOCID_REGION_CODE,
-    s.LOCID_CITY, s.LOCID_CITY_CODE,
-    s.LOCID_POSTAL_CODE, s.ENCRYPTED_LOCID, s.LOCID_HORIZONTAL_ACCURACY
+    s.START_IP_INT_HEX, s.END_IP_INT_HEX
 FROM source s
 JOIN seq ON seq.n BETWEEN s.start_56_offset AND s.end_56_offset;
 
 
--- 2c: Wide ranges (start/end differ at /48 level or wider) — keep as-is
+-- 2c: Wide ranges (start/end differ at /48 level or wider) — excluded
 --     These are <0.1% of IPv6 build rows. They span too many /56 blocks to
---     explode efficiently. The encrypt procedure handles these via the existing
---     cascading prefix passes (4-6) against the source LOCID_BUILDS table.
---
---     NOTE: These are NOT included in the exploded table. The encrypt procedure
---     falls back to the source table for IPs that don't match in the exploded
---     table's equi-join.
+--     explode efficiently. The encrypt procedure handles these via a BETWEEN
+--     fallback join against LOCID_BUILDS (Stage 2) for unmatched input IDs.
 
 
 -- =============================================================================
@@ -152,19 +138,34 @@ GROUP BY BUILD_DT;
 
 
 -- =============================================================================
--- Usage in the Encrypt Procedure (reference — actual changes in encrypt.sql)
+-- Usage in the Encrypt Procedure (reference — actual code in encrypt.sql)
 -- =============================================================================
 --
--- The encrypt procedure's IPv6 matching will be updated to:
+-- Stage 1: equi-join on /56 prefix (~99%+ of inputs)
 --
---   SELECT ...
---   FROM input_ips i
+--   SELECT i._id, i._ip, i._ts, lb.encrypted_locid, lb.tier,
+--          lb.locid_country, lb.locid_country_code, ...
+--   FROM {TBL_V6_DATED} i
 --   JOIN LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED e
---       ON i.build_dt = e.build_dt
---       AND SUBSTR(i.ip_hex, 1, 14) = e.prefix_56                -- equi-join (hash)
---       AND i.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex  -- filter (~30 rows)
---   QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY e.build_dt DESC) = 1
+--       ON  i.build_dt = e.build_dt
+--       AND SUBSTR(i.ip_hex, 1, 14) = e.prefix_56         -- equi-join (hash)
+--       AND i.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex  -- ~30 rows
+--   JOIN LOCID_SHARE.LOCID_BUILDS lb
+--       ON  e.build_dt = lb.build_dt
+--       AND e.start_ip = lb.start_ip                       -- geo context lookup
+--       AND e.end_ip   = lb.end_ip
+--   QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY lb.build_dt DESC) = 1
 --
--- This replaces the current 6-pass cascading prefix range join for the
--- majority of IPv6 inputs. The existing fallback to the source table
--- remains for the <0.1% of wide ranges.
+-- Stage 2: BETWEEN fallback for unmatched IDs (wide ranges > /48 only)
+--
+--   INSERT INTO {TBL_IPV6}
+--   SELECT i._id, i._ip, i._ts, l.encrypted_locid, l.tier, l.locid_country, ...
+--   FROM {TBL_V6_DATED} i
+--   LEFT JOIN {TBL_IPV6} matched ON i._id = matched._id
+--   JOIN LOCID_SHARE.LOCID_BUILDS l
+--       ON  i.build_dt = l.build_dt
+--       AND l.start_ip LIKE '%:%'
+--       AND SUBSTR(l.start_ip_int_hex, 1, 12) != SUBSTR(l.end_ip_int_hex, 1, 12)
+--       AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+--   WHERE matched._id IS NULL
+--   QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1

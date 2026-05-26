@@ -33,8 +33,8 @@
 --                  'https://apid.locid.com/decrypt?tx_cloc=<tx_cloc_from_udf>'
 -- =============================================================================
 
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.STAGING;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.STAGING;
 
 
 -- ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ SET known_tx_cloc = '0PVqVJ8a59_edbqwp--9jMK2dyvbt4IBjJS_Opqlu59_tpYb822LwRBEIiW
 -- PREREQUISITE: Verify JAR is on stage
 -- ---------------------------------------------------------------------------
 -- Expected: one row for encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
-LIST @LOCID_DEV.STAGING.LOCID_STAGE;
+LIST @LOCID.STAGING.LOCID_STAGE;
 
 
 -- ===========================================================================
@@ -82,8 +82,8 @@ LIST @LOCID_DEV.STAGING.LOCID_STAGE;
 --     ⚠ If NULL: LOCID_BUILDS does not yet contain data for this IP in sandbox.
 SET encrypted_8888 = (
     SELECT lb.encrypted_locid
-    FROM   LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED ex
-    JOIN   LOCID_DEV.STAGING.LOCID_BUILDS lb
+    FROM   LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED ex
+    JOIN   LOCID.STAGING.LOCID_BUILDS lb
            ON  lb.build_dt = ex.build_dt
            AND lb.start_ip = ex.start_ip
            AND lb.end_ip   = ex.end_ip
@@ -101,7 +101,7 @@ SET ts_now = (
 -- 1c. Encrypt → TX_CLOC
 --     Publisher-independent: enc_client_id = dec_client_id = $client_id
 SET tx_cloc_1 = (
-    SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_ENCRYPT(
+    SELECT LOCID.STAGING.LOCID_TXCLOC_ENCRYPT(
         $encrypted_8888,  -- encrypted_locid from LOCID_BUILDS
         $base_locid_key,  -- key to decrypt the stored base locid
         $scheme_key,      -- EncScheme0 key
@@ -115,7 +115,7 @@ SELECT $tx_cloc_1 AS tx_cloc_from_encrypt;
 -- 1d. Compute STABLE_CLOC
 --     Tier 'T1' is known from the T1- prefix of the expected stable_cloc.
 SET stable_cloc_1 = (
-    SELECT LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
+    SELECT LOCID.STAGING.LOCID_STABLE_CLOC(
         $encrypted_8888,  -- encrypted_locid from LOCID_BUILDS
         $base_locid_key,  -- key to decrypt the stored base locid
         $namespace_guid,  -- namespace GUID from LocID Central
@@ -142,7 +142,7 @@ SELECT
 
 -- 2a. Decode known tx_cloc → JSON with location_id, timestamp, enc_client_id
 SET decoded_json = (
-    SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_DECRYPT($known_tx_cloc, $scheme_key)
+    SELECT LOCID.STAGING.LOCID_TXCLOC_DECRYPT($known_tx_cloc, $scheme_key)
 );
 SELECT
     PARSE_JSON($decoded_json):location_id::VARCHAR AS location_id,
@@ -161,13 +161,13 @@ SET location_id_2 = (
     SELECT PARSE_JSON($decoded_json):location_id::VARCHAR
 );
 SET encrypted_for_stable = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($location_id_2, $base_locid_key)
+    SELECT LOCID.STAGING.LOCID_BASE_ENCRYPT($location_id_2, $base_locid_key)
 );
 
 -- 2d. Compute STABLE_CLOC from decrypt path
 --     dec_client_id = $client_id (our consumer), enc_client_id from decoded tx_cloc
 SET stable_cloc_2 = (
-    SELECT LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
+    SELECT LOCID.STAGING.LOCID_STABLE_CLOC(
         $encrypted_for_stable,  -- re-encrypted location_id
         $base_locid_key,
         $namespace_guid,
@@ -194,5 +194,3 @@ SELECT
     $tx_cloc_1    AS tx_cloc_from_encrypt,
     $stable_cloc_1 AS stable_cloc_1,
     $stable_cloc_2 AS stable_cloc_2;
-
-

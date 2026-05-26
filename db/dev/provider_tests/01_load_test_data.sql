@@ -15,15 +15,15 @@
 -- CUSTOMER_TEST_OUTPUT.csv is reference-only; load not required.
 -- =============================================================================
 
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.STAGING;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.STAGING;
 
 
 -- ---------------------------------------------------------------------------
 -- STEP 1: Internal stage for test CSV files
 --         (Separate from LOCID_STAGE which holds the encode-lib JAR)
 -- ---------------------------------------------------------------------------
-CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
+CREATE STAGE IF NOT EXISTS LOCID.STAGING.LOCID_TEST_DATA_STAGE
     DIRECTORY = ( ENABLE = TRUE )
     COMMENT   = 'Internal stage for sandbox test CSV data';
 
@@ -34,24 +34,24 @@ CREATE STAGE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
 --         AUTO_COMPRESS=FALSE preserves CSV format.
 --
 -- PUT file://Coco/db/LOCID_BUILDS.csv
---     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
+--     @LOCID.STAGING.LOCID_TEST_DATA_STAGE
 --     AUTO_COMPRESS = FALSE  OVERWRITE = TRUE;
 --
 -- PUT file://Coco/db/LOCID_BUILDS_IPV4_EXPLODED.csv
---     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
+--     @LOCID.STAGING.LOCID_TEST_DATA_STAGE
 --     AUTO_COMPRESS = FALSE  OVERWRITE = TRUE;
 --
 -- PUT file://Coco/db/LOCID_BUILD_DATES.csv
---     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
+--     @LOCID.STAGING.LOCID_TEST_DATA_STAGE
 --     AUTO_COMPRESS = FALSE  OVERWRITE = TRUE;
 --
 -- PUT file://Coco/db/CUSTOMER_TEST_INPUT.csv
---     @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE
+--     @LOCID.STAGING.LOCID_TEST_DATA_STAGE
 --     AUTO_COMPRESS = FALSE  OVERWRITE = TRUE;
 -- ---------------------------------------------------------------------------
 
 -- Verify all four files are present before proceeding
-LIST @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE;
+LIST @LOCID.STAGING.LOCID_TEST_DATA_STAGE;
 -- Expected: 4 rows (LOCID_BUILDS.csv.gz, LOCID_BUILDS_IPV4_EXPLODED.csv.gz,
 --                    LOCID_BUILD_DATES.csv.gz, CUSTOMER_TEST_INPUT.csv.gz)
 -- Note: SnowSQL auto-compresses to .gz even with AUTO_COMPRESS=FALSE when staging;
@@ -64,7 +64,7 @@ LIST @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE;
 
 -- Customer test input: simulates the customer-provided IP+timestamp table
 -- Column types mirror Coco/db/tables.sql exactly.
-CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (
+CREATE TABLE IF NOT EXISTS LOCID.STAGING.CUSTOMER_TEST_INPUT (
     id          VARCHAR(16777216),
     ip_address  VARCHAR(16777216),
     ts          TIMESTAMP_NTZ(9)
@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (
 
 -- Customer test output: expected results for validation (reference, not loaded by procs)
 -- Column types mirror Coco/db/tables.sql exactly.
-CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT (
+CREATE TABLE IF NOT EXISTS LOCID.STAGING.CUSTOMER_TEST_OUTPUT (
     id                        VARCHAR(16777216),
     ip_address                VARCHAR(16777216),
     ts                        TIMESTAMP_NTZ(9),
@@ -93,10 +93,10 @@ CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT (
 -- ---------------------------------------------------------------------------
 -- STEP 4: Truncate existing rows before reload (idempotent)
 -- ---------------------------------------------------------------------------
-TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS;
-TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
-TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILD_DATES;
-TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
+TRUNCATE TABLE LOCID.STAGING.LOCID_BUILDS;
+TRUNCATE TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
+TRUNCATE TABLE LOCID.STAGING.LOCID_BUILD_DATES;
+TRUNCATE TABLE LOCID.STAGING.CUSTOMER_TEST_INPUT;
 
 
 -- ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
 --   tier, ..., encrypted_locid, locid_horizontal_accuracy
 -- Column positions are remapped explicitly below.
 -- ---------------------------------------------------------------------------
-COPY INTO LOCID_DEV.STAGING.LOCID_BUILDS (
+COPY INTO LOCID.STAGING.LOCID_BUILDS (
     build_dt, start_ip, end_ip, start_ip_int_hex, end_ip_int_hex,
     tier, locid_country, locid_country_code, locid_region, locid_region_code,
     locid_city, locid_city_code, locid_postal_code, encrypted_locid,
@@ -135,7 +135,7 @@ FROM (
         $10,         -- locid_postal_code     ← CSV col 10
         $11,         -- encrypted_locid       ← CSV col 11
         $12          -- locid_horizontal_accuracy ← CSV col 12 ('?' → NULL via NULL_IF)
-    FROM @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE/LOCID_BUILDS.csv
+    FROM @LOCID.STAGING.LOCID_TEST_DATA_STAGE/LOCID_BUILDS.csv
 )
 FILE_FORMAT = (
     TYPE                         = CSV
@@ -152,7 +152,7 @@ FILE_FORMAT = (
 -- CSV column order (header): START_IP, END_IP, IP_ADDRESS, BUILD_DT
 -- Table column order:         build_dt, ip_address, start_ip, end_ip
 -- ---------------------------------------------------------------------------
-COPY INTO LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED (
+COPY INTO LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED (
     build_dt, ip_address, start_ip, end_ip
 )
 FROM (
@@ -161,7 +161,7 @@ FROM (
         $3,         -- ip_address  ← CSV col 3
         $1,         -- start_ip    ← CSV col 1
         $2          -- end_ip      ← CSV col 2
-    FROM @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE/LOCID_BUILDS_IPV4_EXPLODED.csv
+    FROM @LOCID.STAGING.LOCID_TEST_DATA_STAGE/LOCID_BUILDS_IPV4_EXPLODED.csv
 )
 FILE_FORMAT = (
     TYPE                         = CSV
@@ -177,8 +177,8 @@ FILE_FORMAT = (
 --
 -- CSV column order: BUILD_DT, START_DT, END_DT — matches table order.
 -- ---------------------------------------------------------------------------
-COPY INTO LOCID_DEV.STAGING.LOCID_BUILD_DATES
-FROM @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE/LOCID_BUILD_DATES.csv
+COPY INTO LOCID.STAGING.LOCID_BUILD_DATES
+FROM @LOCID.STAGING.LOCID_TEST_DATA_STAGE/LOCID_BUILD_DATES.csv
 FILE_FORMAT = (
     TYPE                         = CSV
     SKIP_HEADER                  = 1
@@ -194,8 +194,8 @@ FILE_FORMAT = (
 -- CSV column order: ID, IP_ADDRESS, TS — matches table order.
 -- TS format: 'YYYY-MM-DD HH24:MI:SS.FF3' (e.g. 2025-08-20 21:16:25.195)
 -- ---------------------------------------------------------------------------
-COPY INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
-FROM @LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE/CUSTOMER_TEST_INPUT.csv
+COPY INTO LOCID.STAGING.CUSTOMER_TEST_INPUT
+FROM @LOCID.STAGING.LOCID_TEST_DATA_STAGE/CUSTOMER_TEST_INPUT.csv
 FILE_FORMAT = (
     TYPE                         = CSV
     SKIP_HEADER                  = 1
@@ -209,13 +209,13 @@ FILE_FORMAT = (
 -- ---------------------------------------------------------------------------
 -- STEP 9: Verify row counts
 -- ---------------------------------------------------------------------------
-SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILDS
+SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.LOCID_BUILDS
 UNION ALL
-SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED
+SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED
 UNION ALL
-SELECT 'LOCID_BUILD_DATES'          AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILD_DATES
+SELECT 'LOCID_BUILD_DATES'          AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.LOCID_BUILD_DATES
 UNION ALL
-SELECT 'CUSTOMER_TEST_INPUT'        AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
+SELECT 'CUSTOMER_TEST_INPUT'        AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.CUSTOMER_TEST_INPUT
 ORDER BY 1;
 -- Expected:
 --   CUSTOMER_TEST_INPUT       100
@@ -225,4 +225,4 @@ ORDER BY 1;
 
 -- Spot-check: verify the build_dt date range loaded correctly
 SELECT MIN(build_dt) AS earliest, MAX(build_dt) AS latest, COUNT(DISTINCT build_dt) AS builds
-FROM LOCID_DEV.STAGING.LOCID_BUILD_DATES;
+FROM LOCID.STAGING.LOCID_BUILD_DATES;

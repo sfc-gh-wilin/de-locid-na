@@ -2,28 +2,28 @@
 -- db/dev/benchmark/01_setup.sql
 -- LocID Dev: Benchmark schema + 50M mockup row table
 --
--- Creates LOCID_DEV.BENCHMARK schema and a 50-million-row table of synthetic
+-- Creates LOCID.BENCHMARK schema and a 50-million-row table of synthetic
 -- LocID-like strings used to compare UDF throughput across four approaches:
---   A. Existing Scala scalar UDF (LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT)
---   B. Python scalar proxy UDF  (LOCID_DEV.BENCHMARK.PROXY_SCALAR)
---   C. Python vectorized proxy  (LOCID_DEV.BENCHMARK.PROXY_VECTORIZED)
---   D. Python vectorized, actual mb-locid-encoding WHL (LOCID_DEV.BENCHMARK.PROXY_WHL)
+--   A. Existing Scala scalar UDF (LOCID.STAGING.LOCID_BASE_ENCRYPT)
+--   B. Python scalar proxy UDF  (LOCID.BENCHMARK.PROXY_SCALAR)
+--   C. Python vectorized proxy  (LOCID.BENCHMARK.PROXY_VECTORIZED)
+--   D. Python vectorized, actual mb-locid-encoding WHL (LOCID.BENCHMARK.PROXY_WHL)
 --
--- Run order: after db/dev/provider/01_setup.sql (LOCID_DEV database must exist).
+-- Run order: after db/dev/provider/01_setup.sql (LOCID database must exist).
 -- Idempotent: CREATE OR REPLACE on all objects.
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-USE DATABASE LOCID_DEV;
+USE DATABASE LOCID;
 
 
 -- ---------------------------------------------------------------------------
 -- STEP 1: Create benchmark schema
 -- ---------------------------------------------------------------------------
-CREATE SCHEMA IF NOT EXISTS LOCID_DEV.BENCHMARK
+CREATE SCHEMA IF NOT EXISTS LOCID.BENCHMARK
     COMMENT = 'UDF throughput benchmark — Scala scalar vs Python vectorized';
 
-USE SCHEMA LOCID_DEV.BENCHMARK;
+USE SCHEMA LOCID.BENCHMARK;
 
 
 -- ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ USE SCHEMA LOCID_DEV.BENCHMARK;
 --            in 05_run_timing.sql — the value here is not used by that query.
 --            For Approaches B/C/D (Python), any non-empty string is valid.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.MOCKUP_50M (
+CREATE OR REPLACE TABLE LOCID.BENCHMARK.MOCKUP_50M (
     row_id   BIGINT        NOT NULL COMMENT 'Sequential row identifier (1–50,000,000)',
     loc_id   VARCHAR(21)   NOT NULL COMMENT 'Synthetic 21-char LocID-like string',
     key_str  VARCHAR       NOT NULL COMMENT 'Constant key placeholder; overridden per approach in 05_run_timing.sql'
@@ -63,7 +63,7 @@ FROM gen;
 -- ---------------------------------------------------------------------------
 -- STEP 3: Results table (populated by 05_run_timing.sql)
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TABLE LOCID_DEV.BENCHMARK.BENCHMARK_RESULTS (
+CREATE OR REPLACE TABLE LOCID.BENCHMARK.BENCHMARK_RESULTS (
     approach        VARCHAR  NOT NULL COMMENT 'A_scala_scalar | B_python_scalar | C_python_vectorized | D_whl_vectorized',
     warehouse_size  VARCHAR  NOT NULL COMMENT 'Snowflake warehouse size used',
     rows_processed  BIGINT   NOT NULL COMMENT 'Number of rows in the benchmark query',
@@ -78,9 +78,9 @@ COMMENT = 'Benchmark timing results — insert one row per run via 05_run_timing
 -- ---------------------------------------------------------------------------
 -- STEP 4: Verify
 -- ---------------------------------------------------------------------------
-SELECT COUNT(*) AS row_count FROM LOCID_DEV.BENCHMARK.MOCKUP_50M;
+SELECT COUNT(*) AS row_count FROM LOCID.BENCHMARK.MOCKUP_50M;
 -- Expected: 50,000,000
 
 -- Spot-check first 5 rows
-SELECT * FROM LOCID_DEV.BENCHMARK.MOCKUP_50M LIMIT 5;
+SELECT * FROM LOCID.BENCHMARK.MOCKUP_50M LIMIT 5;
 -- Expected: row_id 1–5, loc_id = 21-char uppercase hex, key_str = placeholder

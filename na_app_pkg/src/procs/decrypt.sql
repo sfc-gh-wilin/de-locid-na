@@ -47,7 +47,8 @@ PACKAGES = ('snowflake-snowpark-python')
 SECRETS = (
     'license_key' = APP_SCHEMA.LOCID_LICENSE_KEY,
     'api_key'     = APP_SCHEMA.LOCID_API_KEY,
-    'ns_guid'     = APP_SCHEMA.LOCID_NAMESPACE_GUID
+    'ns_guid'     = APP_SCHEMA.LOCID_NAMESPACE_GUID,
+    'central_url' = APP_SCHEMA.LOCID_CENTRAL_URL
 )
 HANDLER = 'decrypt_handler'
 AS $$
@@ -234,12 +235,15 @@ def _timer(count: int, duration_ms: float) -> dict:
 
 def _post_stats(session, job_id: str, client_id: int, rows_in: int,
                 rows_matched: int, rows_out: int, phases: dict,
-                tier_counts: dict, op: str) -> None:
-    """POST batch-metrics telemetry to LocID Central. Non-blocking — silently ignores failures."""
+                tier_counts: dict, op: str, rows_skipped: int = 0) -> bool:
+    """POST batch-metrics telemetry to LocID Central.
+    Returns True on success, False on failure.
+    Failure is logged to APP_LOGS (ERROR) and must be reflected in JOB_LOG by the caller.
+    """
     api_key_val = _snowflake.get_generic_secret_string('api_key')
     lic_key_val = _snowflake.get_generic_secret_string('license_key')
     if not api_key_val or not lic_key_val:
-        return
+        return True  # Nothing to post — not a failure
 
     identifier = f"{lic_key_val[:4]}****_{job_id}"
     ts_ms      = int(time.time() * 1000)
@@ -259,10 +263,16 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
             'metric_datatype': 'Counter',
         }})
 
-    # batch-outcomes — matched + unmatched (invalid/error = 0 in success path)
-    unmatched = max(rows_in - rows_matched, 0)
-    for outcome, val in [('matched', rows_matched), ('unmatched', unmatched)]:
-        if val > 0:
+    # batch-outcomes (§4.3): matched always emitted; others only when non-zero.
+    # unmatched excludes rows_skipped (invalid input) — they go to the 'invalid' bucket.
+    # Integrity invariant: matched + unmatched + invalid == rows_in.
+    unmatched = max(rows_in - rows_matched - rows_skipped, 0)
+    for outcome, val, always in [
+        ('matched',   rows_matched,  True),   # always emitted per §4.3
+        ('unmatched', unmatched,     False),
+        ('invalid',   rows_skipped,  False),  # rows skipped due to bad input format
+    ]:
+        if always or val > 0:
             stats.append({**base, 'data': {
                 'metric_key': f'batch-outcomes.{op}',
                 'dimensions': {'api_key': api_key_val, 'client_id': client_str,
@@ -307,25 +317,35 @@ def _post_stats(session, job_id: str, client_id: int, rows_in: int,
         pass  # Logging must not abort the job
 
     try:
+        _central_url = _snowflake.get_generic_secret_string('central_url').strip().rstrip('/')
         req = urllib.request.Request(
-            'https://central.locid.com/api/0/location_id/stats',
+            f'{_central_url}/stats',
             data=json.dumps(stats).encode(),
             headers={'Content-Type': 'application/json', 'de-access-token': api_key_val},
             method='POST',
         )
         with urllib.request.urlopen(req, timeout=10):
             pass
-    except Exception:
-        pass  # Stats failure must not abort the job
+        return True
+    except Exception as exc:
+        try:
+            session.sql(
+                "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+                params=['ERROR', f'locid_{op}._post_stats', f'Stats POST failed: {exc}']
+            ).collect()
+        except Exception:
+            pass
+        return False
 
 
 def _log_job_start(session, job_id, operation, input_table, warehouse) -> None:
     """Insert a STARTED row so the job is visible even if cancelled externally."""
     session.sql(
         "INSERT INTO APP_SCHEMA.JOB_LOG "
-        "(job_id, operation, rows_in, rows_matched, rows_out, runtime_s, "
+        "(job_id, operation, run_dt, rows_in, rows_matched, rows_out, runtime_s, "
         " status, error_msg, input_table, output_table, warehouse, output_cols) "
-        "VALUES (?, ?, NULL, NULL, NULL, NULL, 'STARTED', NULL, ?, NULL, ?, NULL)",
+        "VALUES (?, ?, CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ, "
+        "        NULL, NULL, NULL, NULL, 'STARTED', NULL, ?, NULL, ?, NULL)",
         params=[job_id, operation, input_table, warehouse],
     ).collect()
 
@@ -361,6 +381,7 @@ def decrypt_handler(
     job_id   = str(uuid.uuid4())
     start_ts = time.time()
     rows_in = rows_matched = rows_out = 0
+    client_id = 0  # resolved in Step 2; default used if job fails before that
     input_table_name = 'reference(DECRYPT_INPUT_TABLE)'  # fallback; resolved in try block
 
     job_sfx     = job_id.replace('-', '')[:12].upper()
@@ -511,8 +532,16 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         # Step 8: POST usage stats to LocID Central
         # ------------------------------------------------------------------
-        _post_stats(session, job_id, client_id, rows_in,
-                    rows_matched, rows_out, phases, {'T0': rows_matched}, 'decrypt')
+        stats_ok = _post_stats(session, job_id, client_id, rows_in,
+                               rows_matched, rows_out, phases, {'T0': rows_matched}, 'decrypt')
+        if not stats_ok:
+            _log_job_end(
+                session, job_id, rows_in, rows_matched, rows_out,
+                runtime_s, 'FAILED',
+                f'Usage stats could not be posted to LocID Central. '
+                f'Data was processed successfully — output table APP_SCHEMA.{output_table} was created.',
+                input_table_name, f"APP_SCHEMA.{output_table}", active_cols,
+            )
 
         return {
             'job_id':        job_id,
@@ -528,11 +557,23 @@ def decrypt_handler(
     except Exception as exc:
         runtime_s = round(time.time() - start_ts, 2)
         phases['total_s'] = runtime_s
+        try:
+            session.sql(
+                "INSERT INTO APP_SCHEMA.APP_LOGS (level, source, message) VALUES (?, ?, ?)",
+                params=['ERROR', 'locid_decrypt.decrypt_handler', str(exc)]
+            ).collect()
+        except Exception:
+            pass
         _log_job_end(
             session, job_id, rows_in, rows_matched, rows_out,
             runtime_s, 'FAILED', str(exc), input_table_name,
             f"APP_SCHEMA.{output_table}", [],
         )
+        try:
+            _post_stats(session, job_id, client_id, rows_in,
+                        rows_matched, rows_out, phases, {'T0': rows_matched}, 'decrypt')
+        except Exception:
+            pass  # Error-path stats are best-effort — never suppress the original raise
         raise RuntimeError(f'LOCID_DECRYPT failed: {exc}') from exc
 
     finally:

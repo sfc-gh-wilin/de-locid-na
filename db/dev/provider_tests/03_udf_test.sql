@@ -19,8 +19,8 @@
 -- test files (EncryptionTest.scala, EncryptionTestWithTS.scala).
 -- =============================================================================
 
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.STAGING;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.STAGING;
 
 
 -- ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ SET namespace_guid = 'ffffffff111122223333444444444444';
 -- Expected: one row for encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
 -- If this returns zero rows, copy the JAR to na_app_pkg/src/lib/ and run
 -- `snow app deploy --connection <conn>` from na_app_pkg/ first.
-LIST @LOCID_DEV.STAGING.LOCID_STAGE;
+LIST @LOCID.STAGING.LOCID_STAGE;
 
 
 -- ===========================================================================
@@ -63,7 +63,7 @@ LIST @LOCID_DEV.STAGING.LOCID_STAGE;
 
 -- 1a. Encrypt
 SET encrypted_locid_1 = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_1, $base_locid_secret)
+    SELECT LOCID.STAGING.LOCID_BASE_ENCRYPT($locid_1, $base_locid_secret)
 );
 SELECT $encrypted_locid_1 AS encrypted_locid_1;
 -- Input: 31F24ZE1W1YX58K2R1139
@@ -71,7 +71,7 @@ SELECT $encrypted_locid_1 AS encrypted_locid_1;
 
 -- 1b. Decrypt
 SET decrypted_locid_1 = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_DECRYPT($encrypted_locid_1, $base_locid_secret)
+    SELECT LOCID.STAGING.LOCID_BASE_DECRYPT($encrypted_locid_1, $base_locid_secret)
 );
 SELECT $decrypted_locid_1 AS decrypted_locid_1;
 -- Input: VvOPJrPpJm6CwNEXCg_91DmS9ue7TUdPJQ0sbyFvfmlVTMPJliA63ZSnFlWZqhTWrQ==
@@ -98,7 +98,7 @@ SELECT
 
 -- 2a. Simulate LOCID_BUILDS.encrypted_locid for locid_2
 SET encrypted_locid_2 = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT($locid_2, $base_locid_secret)
+    SELECT LOCID.STAGING.LOCID_BASE_ENCRYPT($locid_2, $base_locid_secret)
 );
 SELECT $encrypted_locid_2 AS encrypted_locid_2;
 -- Input: 4SV5XGYRWPT8AS6M04A8SMGVBZ
@@ -114,7 +114,7 @@ SELECT $ts_now AS timestamp_sec;
 -- 2c. Encrypt → TX_CLOC
 --     client_id = 1 (matches integration guide examples)
 SET tx_cloc = (
-    SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_ENCRYPT(
+    SELECT LOCID.STAGING.LOCID_TXCLOC_ENCRYPT(
         $encrypted_locid_2,    -- encrypted_locid from DB
         $base_locid_secret,    -- base_locid_key
         $scheme_secret,        -- scheme_key
@@ -137,7 +137,7 @@ SELECT $tx_cloc AS tx_cloc;
 
 -- 3a. Decrypt TX_CLOC
 SET decoded_json = (
-    SELECT LOCID_DEV.STAGING.LOCID_TXCLOC_DECRYPT($tx_cloc, $scheme_secret)
+    SELECT LOCID.STAGING.LOCID_TXCLOC_DECRYPT($tx_cloc, $scheme_secret)
 );
 SELECT $decoded_json AS decoded_json;
 -- {"location_id":"4SV5XGYRWPT8AS6M04A8SMGVBZ","timestamp":1776320434,"enc_client_id":1}
@@ -165,7 +165,7 @@ SELECT
 -- ===========================================================================
 
 SET stable_cloc = (
-    SELECT LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
+    SELECT LOCID.STAGING.LOCID_STABLE_CLOC(
         $encrypted_locid_2,    -- encrypted_locid from DB
         $base_locid_secret,    -- base_locid_key
         $namespace_guid,       -- namespace GUID (hex, no dashes)
@@ -206,4 +206,3 @@ SELECT
     $stable_cloc AS stable_cloc;
 -- tx_cloc: YjRFjkdgbrRlZB0F3D5078a8dfjeVFCLa-a0ACVcW4hJn3GusjsfLmgISrfYNo2a2x0438-3GidvO4wh7t7UoOZ7srQ~.0
 -- stable_cloc: T0-81751ea7-fe52-5663-b339-18f2ace84623
-

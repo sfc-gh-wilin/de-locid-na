@@ -2,16 +2,16 @@
 -- 08_share_to_pkg.sql
 -- LocID Dev: Share provider data into the Native App Package
 --
--- Run order: AFTER Phase 3.2 (snow app deploy has created LOCID_DEV_PKG).
+-- Run order: AFTER Phase 3.2 (snow app deploy has created LOCID_PKG).
 --            Re-run whenever provider source tables are re-created.
 --
--- Role: LOCID_APP_ADMIN — this role owns LOCID_DEV_PKG because snowflake.yml
+-- Role: LOCID_APP_ADMIN — this role owns LOCID_PKG because snowflake.yml
 --       declares meta.role: LOCID_APP_ADMIN for the pkg entity.
 --
 -- What this does:
 --   1. Creates a LOCID_SHARE schema inside the Application Package.
 --   2. Creates Secure Views wrapping the three provider source tables.
---   3. Grants REFERENCE_USAGE on LOCID_DEV so the package can query at runtime.
+--   3. Grants REFERENCE_USAGE on LOCID so the package can query at runtime.
 --   4. Grants SELECT on each view to the package share, making them visible
 --      to every installed app instance.
 --
@@ -19,6 +19,7 @@
 -- are accessible as:
 --   LOCID_SHARE.LOCID_BUILDS
 --   LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
+--   LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED
 --   LOCID_SHARE.LOCID_BUILD_DATES
 --
 -- Consumer accounts cannot query these views directly — the Native App
@@ -31,48 +32,54 @@ USE ROLE LOCID_APP_ADMIN;
 -- ---------------------------------------------------------------------------
 -- Step 1: Create shared schema inside the Application Package
 -- ---------------------------------------------------------------------------
-USE APPLICATION PACKAGE LOCID_DEV_PKG;
+USE APPLICATION PACKAGE LOCID_PKG;
 
 CREATE SCHEMA IF NOT EXISTS LOCID_SHARE;
 
 GRANT USAGE ON SCHEMA LOCID_SHARE
-    TO SHARE IN APPLICATION PACKAGE LOCID_DEV_PKG;
+    TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
 
 
 -- ---------------------------------------------------------------------------
 -- Step 2: Secure Views over provider source tables
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE SECURE VIEW LOCID_DEV_PKG.LOCID_SHARE.LOCID_BUILDS
-    AS SELECT * FROM LOCID_DEV.STAGING.LOCID_BUILDS;
+CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS
+    AS SELECT * FROM LOCID.STAGING.LOCID_BUILDS;
 
-CREATE OR REPLACE SECURE VIEW LOCID_DEV_PKG.LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
-    AS SELECT * FROM LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
+CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
+    AS SELECT * FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
 
-CREATE OR REPLACE SECURE VIEW LOCID_DEV_PKG.LOCID_SHARE.LOCID_BUILD_DATES
-    AS SELECT * FROM LOCID_DEV.STAGING.LOCID_BUILD_DATES;
+CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED
+    AS SELECT * FROM LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED;
+
+CREATE OR REPLACE SECURE VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILD_DATES
+    AS SELECT * FROM LOCID.STAGING.LOCID_BUILD_DATES;
 
 
 -- ---------------------------------------------------------------------------
--- Step 3: REFERENCE_USAGE — allows the package to read LOCID_DEV at runtime
+-- Step 3: REFERENCE_USAGE — allows the package to read LOCID at runtime
 -- ---------------------------------------------------------------------------
-GRANT REFERENCE_USAGE ON DATABASE LOCID_DEV
-    TO SHARE IN APPLICATION PACKAGE LOCID_DEV_PKG;
+GRANT REFERENCE_USAGE ON DATABASE LOCID
+    TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
 
 
 -- ---------------------------------------------------------------------------
 -- Step 4: Grant SELECT on each shared view to all app installations
 -- ---------------------------------------------------------------------------
-GRANT SELECT ON VIEW LOCID_DEV_PKG.LOCID_SHARE.LOCID_BUILDS
-    TO SHARE IN APPLICATION PACKAGE LOCID_DEV_PKG;
+GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS
+    TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
 
-GRANT SELECT ON VIEW LOCID_DEV_PKG.LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
-    TO SHARE IN APPLICATION PACKAGE LOCID_DEV_PKG;
+GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV4_EXPLODED
+    TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
 
-GRANT SELECT ON VIEW LOCID_DEV_PKG.LOCID_SHARE.LOCID_BUILD_DATES
-    TO SHARE IN APPLICATION PACKAGE LOCID_DEV_PKG;
+GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILDS_IPV6_EXPLODED
+    TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
+
+GRANT SELECT ON VIEW LOCID_PKG.LOCID_SHARE.LOCID_BUILD_DATES
+    TO SHARE IN APPLICATION PACKAGE LOCID_PKG;
 
 
 -- ---------------------------------------------------------------------------
 -- Verify: list views in the shared schema
 -- ---------------------------------------------------------------------------
-SHOW VIEWS IN SCHEMA LOCID_DEV_PKG.LOCID_SHARE;
+SHOW VIEWS IN SCHEMA LOCID_PKG.LOCID_SHARE;

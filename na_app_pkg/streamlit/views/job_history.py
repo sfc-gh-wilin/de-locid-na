@@ -109,7 +109,7 @@ else:
         status_icon = "✅" if status == "SUCCESS" else ("⏳" if status == "STARTED" else "❌")
         label = (
             f"{status_icon} `{job_id[:8]}` · **{operation}** · "
-            f"{str(run_dt)[:16]} · {rows_out:,} rows · {runtime_s}s · {status}"
+            f"{str(run_dt)[:16]} UTC · {rows_out:,} rows · {runtime_s}s · {status}"
         )
 
         with st.expander(label):

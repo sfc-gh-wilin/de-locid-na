@@ -25,7 +25,7 @@ SHOW EXTERNAL ACCESS INTEGRATIONS LIKE 'LOCID_CENTRAL_EAI';
 -- STEP 2: Create network rule (schema-level, dev sandbox)
 --         Allows outbound HTTPS to central.locid.com:443.
 -- ---------------------------------------------------------------------------
-CREATE NETWORK RULE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_CENTRAL_RULE
+CREATE NETWORK RULE IF NOT EXISTS LOCID.STAGING.LOCID_CENTRAL_RULE
     TYPE       = HOST_PORT
     MODE       = EGRESS
     VALUE_LIST = ('central.locid.com:443')
@@ -37,7 +37,7 @@ CREATE NETWORK RULE IF NOT EXISTS LOCID_DEV.STAGING.LOCID_CENTRAL_RULE
 --         References the network rule created above.
 -- ---------------------------------------------------------------------------
 CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS LOCID_CENTRAL_EAI
-    ALLOWED_NETWORK_RULES          = (LOCID_DEV.STAGING.LOCID_CENTRAL_RULE)
+    ALLOWED_NETWORK_RULES          = (LOCID.STAGING.LOCID_CENTRAL_RULE)
     ALLOWED_AUTHENTICATION_SECRETS = (ALL)
     ENABLED               = TRUE
     COMMENT               = 'LocID Central: license validation, secret retrieval, usage reporting';

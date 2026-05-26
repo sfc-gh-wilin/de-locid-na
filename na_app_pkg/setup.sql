@@ -117,6 +117,7 @@ WHERE NOT EXISTS (
 --   LOCID_BASE_SECRET  — base_locid_secret AES key (written by LOCID_FETCH_LICENSE)
 --   LOCID_SCHEME_SECRET— scheme_secret AES key (written by LOCID_FETCH_LICENSE)
 --   LOCID_NAMESPACE_GUID — namespace GUID for STABLE_CLOC (written by LOCID_SET_API_KEY / LOCID_FETCH_LICENSE)
+--   LOCID_CENTRAL_URL  — LocID Central API base URL (written by LOCID_SET_CENTRAL_URL, app owner only)
 -- =============================================================================
 CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_LICENSE_KEY
     TYPE          = GENERIC_STRING
@@ -143,13 +144,22 @@ CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_NAMESPACE_GUID
     SECRET_STRING = ''
     COMMENT       = 'namespace_guid for STABLE_CLOC generation. Written by LOCID_SET_API_KEY and LOCID_FETCH_LICENSE.';
 
+CREATE SECRET IF NOT EXISTS APP_SCHEMA.LOCID_CENTRAL_URL
+    TYPE          = GENERIC_STRING
+    SECRET_STRING = 'https://central.locid.com/api/0/location_id'
+    COMMENT       = 'LocID Central API base URL. Not visible to consumers. Updated only via LOCID_SET_CENTRAL_URL proc (app owner only).';
+
 -- Grant READ so that proc SECRETS = (...) clauses can reference these secrets.
--- (WRITE is not grantable to APPLICATION ROLEs — all writes go through procs.)
-GRANT READ ON SECRET APP_SCHEMA.LOCID_LICENSE_KEY   TO APPLICATION ROLE APP_ADMIN;
-GRANT READ ON SECRET APP_SCHEMA.LOCID_API_KEY       TO APPLICATION ROLE APP_ADMIN;
-GRANT READ ON SECRET APP_SCHEMA.LOCID_BASE_SECRET   TO APPLICATION ROLE APP_ADMIN;
-GRANT READ ON SECRET APP_SCHEMA.LOCID_SCHEME_SECRET TO APPLICATION ROLE APP_ADMIN;
+-- READ allows procs to bind a secret via SECRETS = (...); it does NOT expose the
+-- secret string value through SQL — values are only accessible inside a proc
+-- handler via _snowflake.get_generic_secret_string(). WRITE is not grantable to
+-- APPLICATION ROLEs — all writes go through procs with EXECUTE AS OWNER.
+GRANT READ ON SECRET APP_SCHEMA.LOCID_LICENSE_KEY    TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_API_KEY        TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_BASE_SECRET    TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_SCHEME_SECRET  TO APPLICATION ROLE APP_ADMIN;
 GRANT READ ON SECRET APP_SCHEMA.LOCID_NAMESPACE_GUID TO APPLICATION ROLE APP_ADMIN;
+GRANT READ ON SECRET APP_SCHEMA.LOCID_CENTRAL_URL    TO APPLICATION ROLE APP_ADMIN;
 
 
 -- =============================================================================
@@ -216,27 +226,29 @@ BEGIN
         IF (v_scheme_val IS NOT NULL AND LENGTH(:v_scheme_val) > 0) THEN
             ALTER SECRET APP_SCHEMA.LOCID_SCHEME_SECRET SET SECRET_STRING = :v_scheme_val;
         END IF;
-        -- Strip secrets field; replace api_key with api_key_hint in access entries
+        -- Strip secrets field; replace api_key with api_key_hint in access entries.
+        -- OBJECT_INSERT/DELETE preserves all top-level keys (e.g. any future keys
+        -- beyond 'license'/'access' are not lost).
         UPDATE APP_SCHEMA.APP_CONFIG
-            SET config_value = (
-                SELECT OBJECT_CONSTRUCT_KEEP_NULL(
-                    'license',  :v_cache:license,
-                    'access',   (
-                        SELECT ARRAY_AGG(
-                            CASE WHEN a.value:api_key IS NOT NULL
-                                 THEN OBJECT_INSERT(
-                                          OBJECT_DELETE(a.value::OBJECT, 'api_key'),
-                                          'api_key_hint',
-                                          SUBSTR(a.value:api_key::VARCHAR, 1, 8),
-                                          TRUE
-                                      )
-                                 ELSE a.value::OBJECT
-                            END
-                        )
-                        FROM TABLE(FLATTEN(:v_cache:access)) a
+            SET config_value = OBJECT_INSERT(
+                OBJECT_DELETE(:v_cache::OBJECT, 'secrets'),
+                'access',
+                (
+                    SELECT ARRAY_AGG(
+                        CASE WHEN a.value:api_key IS NOT NULL
+                             THEN OBJECT_INSERT(
+                                      OBJECT_DELETE(a.value::OBJECT, 'api_key'),
+                                      'api_key_hint',
+                                      SUBSTR(a.value:api_key::VARCHAR, 1, 8),
+                                      TRUE
+                                  )
+                             ELSE a.value::OBJECT
+                        END
                     )
-                )::VARCHAR
-            )
+                    FROM TABLE(FLATTEN(:v_cache:access)) a
+                ),
+                TRUE
+            )::VARCHAR
             WHERE config_key = 'cached_license';
     END IF;
 
@@ -259,17 +271,17 @@ BEGIN
         WHERE config_key = 'cached_license' AND is_active = TRUE LIMIT 1;
     IF (v_cache2 IS NOT NULL AND v_cache2:access IS NOT NULL) THEN
         UPDATE APP_SCHEMA.APP_CONFIG
-            SET config_value = (
-                SELECT OBJECT_CONSTRUCT_KEEP_NULL(
-                    'license',  :v_cache2:license,
-                    'access',   (
-                        SELECT ARRAY_AGG(
-                            OBJECT_DELETE(a.value::OBJECT, 'namespace_guid')
-                        )
-                        FROM TABLE(FLATTEN(:v_cache2:access)) a
+            SET config_value = OBJECT_INSERT(
+                :v_cache2::OBJECT,
+                'access',
+                (
+                    SELECT ARRAY_AGG(
+                        OBJECT_DELETE(a.value::OBJECT, 'namespace_guid')
                     )
-                )::VARCHAR
-            )
+                    FROM TABLE(FLATTEN(:v_cache2:access)) a
+                ),
+                TRUE
+            )::VARCHAR
             WHERE config_key = 'cached_license';
     END IF;
 
@@ -287,7 +299,7 @@ $$;
 CREATE TABLE IF NOT EXISTS APP_SCHEMA.JOB_LOG (
     job_id        VARCHAR         NOT NULL,
     operation     VARCHAR         NOT NULL,      -- 'ENCRYPT' | 'DECRYPT'
-    run_dt        TIMESTAMP_NTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    run_dt        TIMESTAMP_NTZ   NOT NULL DEFAULT CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ,
     rows_in       NUMBER,
     rows_matched  NUMBER,
     rows_out      NUMBER,
@@ -356,7 +368,8 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
         APP_SCHEMA.LOCID_API_KEY,
         APP_SCHEMA.LOCID_BASE_SECRET,
         APP_SCHEMA.LOCID_SCHEME_SECRET,
-        APP_SCHEMA.LOCID_NAMESPACE_GUID
+        APP_SCHEMA.LOCID_NAMESPACE_GUID,
+        APP_SCHEMA.LOCID_CENTRAL_URL
     )
     ENABLED = TRUE;
 
@@ -477,6 +490,88 @@ $$;
 
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR, VARCHAR)
     TO APPLICATION ROLE APP_ADMIN;
+
+
+-- =============================================================================
+-- 7c. LOCID_SET_CENTRAL_URL Procedure  (Python, inline)
+--
+--   Provider-only utility to switch the LocID Central API endpoint between
+--   environments (prod / dev). Writes the URL to the LOCID_CENTRAL_URL secret.
+--
+--   NOT granted to APP_ADMIN or APP_VIEWER — only the app owner role
+--   (LOCID_APP_INSTALLER) can call this proc directly. Consumers cannot see
+--   or change the endpoint.
+--
+--   Usage (after snow app run --config-file snowflake-dev.yml):
+--     USE ROLE LOCID_APP_INSTALLER;
+--     CALL LOCID_APP_DEV.APP_SCHEMA.LOCID_SET_CENTRAL_URL(
+--         'https://central.matchbookdata-dev.com/api/0/location_id');
+-- =============================================================================
+CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_SET_CENTRAL_URL(
+    URL VARCHAR    -- full base URL, e.g. 'https://central.locid.com/api/0/location_id'
+)
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'set_central_url_handler'
+AS $$
+def set_central_url_handler(session, url: str) -> str:
+    url = url.strip().rstrip('/')
+    if not url.startswith('https://'):
+        raise ValueError("URL must start with https://")
+    session.sql(
+        "ALTER SECRET APP_SCHEMA.LOCID_CENTRAL_URL SET SECRET_STRING = ?",
+        params=[url]
+    ).collect()
+    # Return only the host portion — never echo the full path in logs
+    from urllib.parse import urlparse
+    host = urlparse(url).netloc
+    return f"Central URL updated to host: {host}"
+$$;
+-- Intentionally NOT granted to APP_ADMIN or APP_VIEWER.
+-- Only the app owner (LOCID_APP_INSTALLER) can call this proc.
+
+
+-- =============================================================================
+-- 7d. LOCID_UPDATE_NETWORK_RULE Procedure  (SQL, inline)
+--
+--   Provider-only utility to add or remove the dev host from LOCID_CENTRAL_RULE.
+--   Objects inside a Native App are owned by the APPLICATION object, so direct
+--   ALTER NETWORK RULE from outside returns "Insufficient privileges". This proc
+--   runs EXECUTE AS OWNER (app context) and has OWNERSHIP on the rule.
+--
+--   NOT granted to APP_ADMIN or APP_VIEWER — only the app owner
+--   (LOCID_APP_INSTALLER) can call this proc directly.
+--
+--   Usage (sandbox dev testing only):
+--     -- Add dev host:
+--     USE ROLE LOCID_APP_INSTALLER;
+--     CALL LOCID_APP.APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(TRUE);
+--     -- Remove dev host (reset to prod-only):
+--     CALL LOCID_APP.APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(FALSE);
+-- =============================================================================
+CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(
+    ADD_DEV BOOLEAN    -- TRUE = add central.matchbookdata-dev.com, FALSE = prod-only
+)
+RETURNS VARCHAR
+LANGUAGE SQL
+EXECUTE AS OWNER
+AS $$
+BEGIN
+    IF (ADD_DEV) THEN
+        ALTER NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE
+            SET VALUE_LIST = ('central.locid.com:443', 'central.matchbookdata-dev.com:443');
+        RETURN 'Network rule updated: central.locid.com + central.matchbookdata-dev.com';
+    ELSE
+        ALTER NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE
+            SET VALUE_LIST = ('central.locid.com:443');
+        RETURN 'Network rule updated: central.locid.com only';
+    END IF;
+END;
+$$;
+-- Intentionally NOT granted to APP_ADMIN or APP_VIEWER.
+-- Only the app owner (LOCID_APP_INSTALLER) can call this proc.
 
 
 -- =============================================================================

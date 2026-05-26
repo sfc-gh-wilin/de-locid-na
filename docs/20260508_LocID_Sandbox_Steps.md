@@ -29,8 +29,9 @@ This guide walks through deploying the LocID Native App on LocID's own Snowflake
 | Key access setup | (manual — see below) |
 | Role setup | `db/locid/provider/00_roles.sql` |
 | Add clustering keys | `db/locid/provider/01_optimize_tables.sql` |
-| Grant access | `db/locid/provider/02_grant_access.sql` |
-| Share to app package | `db/locid/provider/03_share_to_pkg.sql` |
+| Create IPv6 exploded table | `db/locid/provider/02_ipv6_exploded_table.sql` |
+| Grant access | `db/locid/provider/03_grant_access.sql` |
+| Share to app package | `db/locid/provider/04_share_to_pkg.sql` |
 
 ---
 
@@ -179,24 +180,35 @@ This adds clustering keys: `LOCID_BUILDS(build_dt, start_ip_int_hex)`, `LOCID_BU
 
 > **Note:** This is a metadata-only operation. Snowflake's Automatic Clustering reclusters in the background — queries improve progressively as it completes.
 
-### 4.4 Grant access
+### 4.4 Create IPv6 exploded table (one-time)
+
+The IPv6 encrypt procedure uses a pre-exploded `/56` prefix lookup table to convert a slow BETWEEN range join into a fast equi-join. This table must exist before the Secure Views in the app package are created.
+
+```bash
+cd <repository-root>
+snow sql --connection locid -f "db/locid/provider/02_ipv6_exploded_table.sql"
+```
+
+> **Note:** The CREATE TABLE statement is idempotent (`IF NOT EXISTS`). The INSERT statements are date-scoped — edit the `BUILD_DT` value before running for each build date you want to include.
+
+### 4.5 Grant access
 
 The Secure Views in the app package reference `LOCID.STAGING` tables directly. The `LOCID_APP_ADMIN` role (which owns the package) must have SELECT on those tables, otherwise the installed app fails with "Failure during expansion of view: Error in secure object".
 
 ```bash
 cd <repository-root>
-snow sql --connection locid -f "db/locid/provider/02_grant_access.sql"
+snow sql --connection locid -f "db/locid/provider/03_grant_access.sql"
 ```
 
 This also grants `LOCID_APP_INSTALLER` read access to the POC test input tables for reference binding.
 
-### 4.5 Share provider data into app package
+### 4.6 Share provider data into app package
 
-Once `LOCID_PKG` exists, run the provider data sharing script. This creates `LOCID_SHARE` inside the app package and exposes the three provider tables as Secure Views.
+Once `LOCID_PKG` exists, run the provider data sharing script. This creates `LOCID_SHARE` inside the app package and exposes the four provider tables as Secure Views.
 
 ```bash
 cd <repository-root>
-snow sql --connection locid -f "db/locid/provider/03_share_to_pkg.sql"
+snow sql --connection locid -f "db/locid/provider/04_share_to_pkg.sql"
 ```
 
 Verify:
@@ -204,12 +216,12 @@ Verify:
 ```bash
 snow sql --connection locid --role LOCID_APP_ADMIN \
     -q "SHOW VIEWS IN SCHEMA LOCID_PKG.LOCID_SHARE"
-# Expected: 3 views — LOCID_BUILDS, LOCID_BUILDS_IPV4_EXPLODED, LOCID_BUILD_DATES
+# Expected: 4 views — LOCID_BUILDS, LOCID_BUILDS_IPV4_EXPLODED, LOCID_BUILDS_IPV6_EXPLODED, LOCID_BUILD_DATES
 ```
 
 > **Re-run when needed:** If the provider source tables are recreated, re-run this file so the Secure Views and grants stay in sync.
 
-### 4.6 Create app version
+### 4.7 Create app version
 
 ```bash
 cd na_app_pkg
@@ -218,7 +230,7 @@ snow app version create v1_0 --force --skip-git-check --connection locid
 
 `--force` overwrites any existing `v1_0` version. `--skip-git-check` suppresses the uncommitted-files warning.
 
-### 4.7 Install the application
+### 4.8 Install the application
 
 ```bash
 cd na_app_pkg
@@ -409,6 +421,41 @@ ALTER APPLICATION PACKAGE LOCID_PKG
 ```
 
 > **Note:** Replace `<new_patch_number>` with the latest patch number from `SHOW VERSIONS` above. Consumers on the DEFAULT channel will automatically pick up the new patch on their next app refresh.
+
+---
+
+## Dev Environment Deployment
+
+The REST endpoint is stored in the `LOCID_CENTRAL_URL` Snowflake SECRET inside the app — not visible to consumers via SQL. The app ships with `central.locid.com` as the default. To test against the dev endpoint in the sandbox, two steps are required: update the secret URL and expand the network rule to allow the dev host.
+
+> **Note:** `LOCID_SET_CENTRAL_URL` is NOT granted to `APP_ADMIN` or `APP_VIEWER`. Only the app owner (`LOCID_APP_INSTALLER`) can call it. Consumers cannot see or change the endpoint.
+
+### Switch to dev endpoint (sandbox only)
+
+```bash
+# 1. Update the secret URL
+snow sql --connection locid --role LOCID_APP_INSTALLER \
+    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_CENTRAL_URL('https://central.matchbookdata-dev.com/api/0/location_id')"
+# Expected: Central URL updated to host: central.matchbookdata-dev.com
+
+# 2. Expand the network rule to allow the dev host
+snow sql --connection locid --role LOCID_APP_INSTALLER \
+    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(TRUE)"
+# Expected: Network rule updated: central.locid.com + central.matchbookdata-dev.com
+```
+
+### Reset to prod endpoint
+
+```bash
+# 1. Reset the secret URL
+snow sql --connection locid --role LOCID_APP_INSTALLER \
+    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_CENTRAL_URL('https://central.locid.com/api/0/location_id')"
+
+# 2. Remove dev host from the network rule
+snow sql --connection locid --role LOCID_APP_INSTALLER \
+    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(FALSE)"
+# Expected: Network rule updated: central.locid.com only
+```
 
 ---
 

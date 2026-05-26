@@ -7,10 +7,11 @@
 --   Generates deterministic, fake data using Snowflake GENERATOR().
 --
 -- Run order:
---   1. db/dev/provider/01_setup.sql      (LOCID_DEV database + STAGING schema)
+--   1. db/dev/provider/01_setup.sql      (LOCID database + STAGING schema)
 --   2. db/dev/provider/02_build_dates.sql
 --   3. db/dev/provider/03_locid_builds.sql
 --   4. db/dev/provider/04_locid_builds_ipv4_exploded.sql
+--   4b. db/dev/provider/04b_locid_builds_ipv6_exploded.sql
 --   5. db/dev/provider/05_stage_setup.sql
 --   6. db/dev/provider/06_udfs.sql       (required for LOCID_BASE_ENCRYPT below)
 --   7. THIS FILE  (self-contained — no other provider_tests file needed first)
@@ -33,8 +34,8 @@
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.STAGING;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.STAGING;
 
 -- ⚠ Replace with base_locid_secret from the LocID Central license response
 --   (secrets.base_locid_secret — NOT the License Key).
@@ -52,10 +53,10 @@ SET test_event_dt = DATEADD('day', -12, CURRENT_DATE);
 -- STEP 1: Pre-compute the test encrypted_locid value
 --         Uses sample LocID from 03_udf_test.sql (EncryptionTest.scala).
 --         All LOCID_BUILDS rows (IPv4 and IPv6) share this encrypted value.
---         LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT must exist (run 06_udfs.sql first).
+--         LOCID.STAGING.LOCID_BASE_ENCRYPT must exist (run 06_udfs.sql first).
 -- ---------------------------------------------------------------------------
 SET test_encrypted_locid = (
-    SELECT LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT('31F24ZE1W1YX58K2R1139', $base_locid_secret)
+    SELECT LOCID.STAGING.LOCID_BASE_ENCRYPT('31F24ZE1W1YX58K2R1139', $base_locid_secret)
 );
 SELECT $test_encrypted_locid AS test_encrypted_locid;
 -- Expected: non-null base64-URL string (exact value depends on $base_locid_secret)
@@ -66,13 +67,13 @@ SELECT $test_encrypted_locid AS test_encrypted_locid;
 --         Skip this step if 01_load_test_data.sql has already been run
 --         (tables already exist due to CREATE TABLE IF NOT EXISTS).
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (
+CREATE TABLE IF NOT EXISTS LOCID.STAGING.CUSTOMER_TEST_INPUT (
     id          VARCHAR(16777216),
     ip_address  VARCHAR(16777216),
     ts          TIMESTAMP_NTZ(9)
 );
 
-CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT (
+CREATE TABLE IF NOT EXISTS LOCID.STAGING.CUSTOMER_TEST_OUTPUT (
     id                        VARCHAR(16777216),
     ip_address                VARCHAR(16777216),
     ts                        TIMESTAMP_NTZ(9),
@@ -93,10 +94,11 @@ CREATE TABLE IF NOT EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT (
 -- ---------------------------------------------------------------------------
 -- STEP 3: Truncate all target tables (idempotent)
 -- ---------------------------------------------------------------------------
-TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILD_DATES;
-TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS;
-TRUNCATE TABLE LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
-TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
+TRUNCATE TABLE LOCID.STAGING.LOCID_BUILD_DATES;
+TRUNCATE TABLE LOCID.STAGING.LOCID_BUILDS;
+TRUNCATE TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
+TRUNCATE TABLE LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED;
+TRUNCATE TABLE LOCID.STAGING.CUSTOMER_TEST_INPUT;
 
 
 -- ---------------------------------------------------------------------------
@@ -106,7 +108,7 @@ TRUNCATE TABLE LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
 -- A customer event timestamped $test_event_dt (CURRENT_DATE - 12) falls in the
 -- w=2 range: [$test_build_dt, $test_build_dt + 6].
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.LOCID_BUILD_DATES (build_dt, start_dt, end_dt)
+INSERT INTO LOCID.STAGING.LOCID_BUILD_DATES (build_dt, start_dt, end_dt)
 WITH weeks AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS w
     FROM TABLE(GENERATOR(rowcount => 5))
@@ -131,7 +133,7 @@ FROM weeks;
 -- start_ip_int_hex / end_ip_int_hex are NULL — not used for IPv4 range matching.
 -- locid_horizontal_accuracy rotates through four representative values (meters).
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.LOCID_BUILDS (
+INSERT INTO LOCID.STAGING.LOCID_BUILDS (
     build_dt, start_ip, end_ip, start_ip_int_hex, end_ip_int_hex,
     tier, locid_country, locid_country_code,
     locid_region, locid_region_code,
@@ -192,7 +194,7 @@ FROM gen;
 -- range-join matching in the encrypt proc works correctly.
 -- Customer test IPs (STEP 7b) use the ::1 host of each subnet to guarantee a match.
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.LOCID_BUILDS (
+INSERT INTO LOCID.STAGING.LOCID_BUILDS (
     build_dt, start_ip, end_ip, start_ip_int_hex, end_ip_int_hex,
     tier, locid_country, locid_country_code,
     locid_region, locid_region_code,
@@ -251,7 +253,7 @@ FROM gen;
 -- The equi-join in LOCID_ENCRYPT matches customer ip_address → ex.ip_address,
 -- then back to LOCID_BUILDS on (build_dt, start_ip, end_ip).
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED (
+INSERT INTO LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED (
     build_dt, ip_address, start_ip, end_ip
 )
 WITH gen AS (
@@ -267,6 +269,30 @@ FROM gen;
 
 
 -- ---------------------------------------------------------------------------
+-- STEP 6b: LOCID_BUILDS_IPV6_EXPLODED (10 rows)
+--
+-- Derived directly from the IPv6 LOCID_BUILDS rows inserted in STEP 5b.
+-- All 10 test /64 subnets are "narrow" ranges (start and end share the same
+-- /56 prefix), so each produces exactly 1 row — no explosion needed.
+-- The encrypt procedure uses these rows for Stage 1 equi-join matching.
+-- ---------------------------------------------------------------------------
+INSERT INTO LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED (
+    build_dt, prefix_56, start_ip, end_ip, start_ip_int_hex, end_ip_int_hex
+)
+SELECT
+    build_dt,
+    SUBSTR(start_ip_int_hex, 1, 14)  AS prefix_56,
+    start_ip,
+    end_ip,
+    start_ip_int_hex,
+    end_ip_int_hex
+FROM LOCID.STAGING.LOCID_BUILDS
+WHERE start_ip LIKE '%:%'
+  AND build_dt = $test_build_dt
+  AND start_ip_int_hex IS NOT NULL;
+
+
+-- ---------------------------------------------------------------------------
 -- STEP 7: CUSTOMER_TEST_INPUT — IPv4 rows (100 rows)
 --
 -- Each row uses the .1 host from a generated /24 subnet so that it matches
@@ -278,7 +304,7 @@ FROM gen;
 --
 -- For the Native App Encrypt proc, select timestamp format: 'timestamp' (Snowflake TIMESTAMP_NTZ column).
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
+INSERT INTO LOCID.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS rn
     FROM TABLE(GENERATOR(rowcount => 100))
@@ -297,7 +323,7 @@ FROM gen;
 -- inserted in STEP 5b. Timestamps start at 18:00:00 on $test_event_dt to avoid
 -- overlap with IPv4 rows while staying within the same $test_build_dt build range.
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
+INSERT INTO LOCID.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
     FROM TABLE(GENERATOR(rowcount => 10))
@@ -319,7 +345,7 @@ FROM gen;
 --
 -- Timestamps start at 20:00:00 on $test_event_dt — after IPv6 host rows.
 -- ---------------------------------------------------------------------------
-INSERT INTO LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
+INSERT INTO LOCID.STAGING.CUSTOMER_TEST_INPUT (id, ip_address, ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
     FROM TABLE(GENERATOR(rowcount => 10))
@@ -339,17 +365,17 @@ FROM gen;
 -- 02_customer_input_sample.sql first.
 -- Column names differ from CUSTOMER_TEST_INPUT: row_id, ip_addr, event_ts
 -- ---------------------------------------------------------------------------
-CREATE SCHEMA IF NOT EXISTS LOCID_DEV.CONSUMER_TEST
+CREATE SCHEMA IF NOT EXISTS LOCID.CONSUMER_TEST
     COMMENT = 'Sandbox consumer simulation — mirrors a customer-owned schema for Native App testing';
 
-CREATE OR REPLACE TABLE LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (
+CREATE OR REPLACE TABLE LOCID.CONSUMER_TEST.NA_TEST_INPUT (
     row_id      VARCHAR          NOT NULL,
     ip_addr     VARCHAR          NOT NULL,
     event_ts    TIMESTAMP_NTZ(9) NOT NULL
 )
 COMMENT = 'Sandbox consumer input: 120-row sample (100 IPv4 + 10 IPv6 host + 10 IPv6 network block) for Native App Encrypt testing';
 
-INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
+INSERT INTO LOCID.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS rn
     FROM TABLE(GENERATOR(rowcount => 100))
@@ -361,7 +387,7 @@ SELECT
 FROM gen;
 
 -- IPv6 consumer input (10 rows) — mirrors CUSTOMER_TEST_INPUT IPv6 host rows (STEP 7b)
-INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
+INSERT INTO LOCID.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
     FROM TABLE(GENERATOR(rowcount => 10))
@@ -373,7 +399,7 @@ SELECT
 FROM gen;
 
 -- IPv6 network block consumer input (10 rows) — mirrors STEP 7c
-INSERT INTO LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
+INSERT INTO LOCID.CONSUMER_TEST.NA_TEST_INPUT (row_id, ip_addr, event_ts)
 WITH gen AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS rn
     FROM TABLE(GENERATOR(rowcount => 10))
@@ -388,35 +414,56 @@ FROM gen;
 -- ---------------------------------------------------------------------------
 -- STEP 9: Verify row counts
 -- ---------------------------------------------------------------------------
-SELECT 'LOCID_BUILD_DATES'          AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILD_DATES
+SELECT 'LOCID_BUILD_DATES'          AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.LOCID_BUILD_DATES
 UNION ALL
-SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILDS
+SELECT 'LOCID_BUILDS'               AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.LOCID_BUILDS
 UNION ALL
-SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED
+SELECT 'LOCID_BUILDS_IPV4_EXPLODED' AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED
 UNION ALL
-SELECT 'CUSTOMER_TEST_INPUT'        AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT
+SELECT 'LOCID_BUILDS_IPV6_EXPLODED' AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED
 UNION ALL
-SELECT 'NA_TEST_INPUT'              AS tbl, COUNT(*) AS row_count FROM LOCID_DEV.CONSUMER_TEST.NA_TEST_INPUT
+SELECT 'CUSTOMER_TEST_INPUT'        AS tbl, COUNT(*) AS row_count FROM LOCID.STAGING.CUSTOMER_TEST_INPUT
+UNION ALL
+SELECT 'NA_TEST_INPUT'              AS tbl, COUNT(*) AS row_count FROM LOCID.CONSUMER_TEST.NA_TEST_INPUT
 ORDER BY 1;
 -- Expected:
 --   CUSTOMER_TEST_INPUT          120  (100 IPv4 + 10 IPv6 host + 10 IPv6 network block)
 --   LOCID_BUILD_DATES              5
 --   LOCID_BUILDS                 110  (100 IPv4 + 10 IPv6)
 --   LOCID_BUILDS_IPV4_EXPLODED   100  (IPv4 only)
+--   LOCID_BUILDS_IPV6_EXPLODED    10  (10 IPv6 /64 subnets — 1 row each, all narrow ranges)
 --   NA_TEST_INPUT                120  (100 IPv4 + 10 IPv6 host + 10 IPv6 network block)
 
 -- Spot-check IPv4: verify all 100 IPv4 IPs match LOCID_BUILDS_IPV4_EXPLODED
 SELECT COUNT(*) AS matched_ipv4
-FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT c
-JOIN LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED e ON e.ip_address = c.ip_address;
+FROM LOCID.STAGING.CUSTOMER_TEST_INPUT c
+JOIN LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED e ON e.ip_address = c.ip_address;
 -- Expected: 100
 
 -- Spot-check IPv6: verify all 20 IPv6 IPs (host + network block) match a LOCID_BUILDS range
+-- Materialize IPv6 hex values first (same pattern as TBL_V6_INP in encrypt.sql).
+-- CTEs/subqueries are inlined by Snowflake's optimizer — only materialization guarantees
+-- PARSE_IP is called after the WHERE filter, not before.
+CREATE OR REPLACE TEMP TABLE _chk_v6_hex AS
+SELECT ip_address,
+       GET_PATH(PARSE_IP(ip_address, 'INET'), 'hex_ipv6') AS ip_hex
+FROM LOCID.STAGING.CUSTOMER_TEST_INPUT
+WHERE ip_address LIKE '%:%';
+
 SELECT COUNT(*) AS matched_ipv6
-FROM LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT c
-JOIN LOCID_DEV.STAGING.LOCID_BUILDS lb
+FROM _chk_v6_hex c
+JOIN LOCID.STAGING.LOCID_BUILDS lb
   ON lb.start_ip LIKE '%:%'
- AND GET_PATH(PARSE_IP(c.ip_address, 'INET'), 'hex_ipv6')
-       BETWEEN lb.start_ip_int_hex AND lb.end_ip_int_hex
-WHERE c.ip_address LIKE '%:%';
+ AND c.ip_hex BETWEEN lb.start_ip_int_hex AND lb.end_ip_int_hex;
 -- Expected: 20  (10 host addresses + 10 network blocks — both fall within /64 ranges)
+
+-- Spot-check IPv6 exploded: verify equi-join on PREFIX_56 matches all 10 test IPv6 ranges
+-- Reuses _chk_v6_hex from above (already materialized, no re-execution of PARSE_IP).
+SELECT COUNT(DISTINCT e.start_ip) AS matched_via_exploded
+FROM _chk_v6_hex c
+JOIN LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED e
+  ON SUBSTR(c.ip_hex, 1, 14) = e.prefix_56
+ AND c.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex;
+-- Expected: 10  (all 10 IPv6 /64 subnets matched via PREFIX_56 equi-join)
+
+DROP TABLE IF EXISTS _chk_v6_hex;

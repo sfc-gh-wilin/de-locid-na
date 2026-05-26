@@ -27,7 +27,7 @@ USE ROLE ACCOUNTADMIN;
 --
 -- If START_IP_INT_HEX and END_IP_INT_HEX are VARIANT, converting them to
 -- VARCHAR eliminates the need for inline casts in the Secure Views
--- (03_share_to_pkg.sql) and improves join/filter performance.
+-- (04_share_to_pkg.sql) and improves join/filter performance.
 --
 -- Skip this section if the columns are already VARCHAR.
 -- =============================================================================

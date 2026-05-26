@@ -43,7 +43,7 @@ CREATE ROLE IF NOT EXISTS LOCID_APP_ADMIN
 -- Manage the Application Package and its versions / patches
 GRANT CREATE APPLICATION PACKAGE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 
--- Create and manage the provider-side database (LOCID_DEV, staging objects)
+-- Create and manage the provider-side database (LOCID, staging objects)
 GRANT CREATE DATABASE ON ACCOUNT TO ROLE LOCID_APP_ADMIN;
 
 -- Create the data share that backs the app's shared read-only objects
@@ -96,7 +96,7 @@ GRANT ROLE LOCID_APP_INSTALLER TO USER IDENTIFIER($my_username);
 --    All routine operations (add version, apply patch, install app) use
 --    the custom roles — ACCOUNTADMIN is not needed day-to-day.
 --
--- 2. Database-level grants for LOCID_APP_ADMIN on LOCID_DEV are in
+-- 2. Database-level grants for LOCID_APP_ADMIN on LOCID are in
 --    01_setup.sql (executed after the database and schema are created).
 --
 -- 3. The app's Setup Wizard (Screen E — Review Privileges) surfaces any

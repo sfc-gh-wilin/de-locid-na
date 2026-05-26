@@ -14,7 +14,7 @@
 --   This produces IDENTICAL output to locid_sf.encode_stable_cloc but with
 --   maximum Python throughput.
 --
--- Production equivalent: LOCID_DEV.APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN
+-- Production equivalent: LOCID.APP_SCHEMA.LOCID_STABLE_CLOC_FROM_PLAIN
 --
 -- UDF signature mirrors MOCKUP_50M (loc_id, key_str) so 05_run_timing.sql can
 -- address it with the same FROM clause as Approaches B and C.
@@ -23,14 +23,14 @@
 -- ⚠ Prerequisites:
 --   1. Upload the wheel to the stage:
 --        snow snowpark package upload
---   2. Verify: LIST @LOCID_DEV.STAGING.LOCID_STAGE;
+--   2. Verify: LIST @LOCID.STAGING.LOCID_STAGE;
 --
 -- Run order: after 01_setup.sql; before 05_run_timing.sql Approach D block.
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.BENCHMARK;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.BENCHMARK;
 
 
 -- ---------------------------------------------------------------------------
@@ -41,14 +41,14 @@ USE SCHEMA   LOCID_DEV.BENCHMARK;
 -- Within each batch, a tight list comprehension runs the SHA-1 hash with
 -- zero intermediate object allocation.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION LOCID_DEV.BENCHMARK.PROXY_WHL(
+CREATE OR REPLACE FUNCTION LOCID.BENCHMARK.PROXY_WHL(
     LOC_ID   VARCHAR,   -- location_id (from MOCKUP_50M.loc_id; varies per row)
     KEY_STR  VARCHAR    -- unused; included to match MOCKUP_50M schema
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
 RUNTIME_VERSION = '3.11'
-IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/mb_locid_encoding-0.0.0-py3-none-any.whl')
+IMPORTS = ('@LOCID.STAGING.LOCID_STAGE/mb_locid_encoding-0.0.0-py3-none-any.whl')
 PACKAGES = ('cryptography>=41,<47', 'protobuf>=5.29,<7', 'pandas')
 HANDLER = 'encode_batch'
 COMMENT = 'Approach D: Python vectorized WHL — inlined UUID5/SHA-1, zero per-row allocation'
@@ -111,7 +111,7 @@ $$;
 -- Smoke test — verify the UDF is working before timing
 -- ---------------------------------------------------------------------------
 SELECT
-    LOCID_DEV.BENCHMARK.PROXY_WHL(
+    LOCID.BENCHMARK.PROXY_WHL(
         'somelocid',
         'unused'
     ) AS result;

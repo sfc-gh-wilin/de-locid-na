@@ -3,7 +3,7 @@
 -- LocID Dev: Scala UDFs wrapping encode-lib JAR
 --
 -- Run order: after 05_stage_setup.sql AND after the JAR has been PUT to stage.
--- All UDFs are created in LOCID_DEV.STAGING.
+-- All UDFs are created in LOCID.STAGING.
 --
 -- UDFs created:
 --   1. LOCID_BASE_ENCRYPT    — test helper: encrypt raw base LocID string
@@ -39,11 +39,11 @@
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-USE DATABASE LOCID_DEV;
-USE SCHEMA   LOCID_DEV.STAGING;
+USE DATABASE LOCID;
+USE SCHEMA   LOCID.STAGING;
 
 -- Full stage reference used inline in each IMPORTS clause:
---   @LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
+--   @LOCID.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar
 
 
 -- =============================================================================
@@ -54,14 +54,14 @@ USE SCHEMA   LOCID_DEV.STAGING;
 --    Input:  loc_id  — raw base LocID string  e.g. '31F24ZE1W1YX58K2R1139'
 --            key_str — base_locid_secret (Base64-URL encoded AES key, from license endpoint secrets)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_BASE_ENCRYPT(
+CREATE OR REPLACE FUNCTION LOCID.STAGING.LOCID_BASE_ENCRYPT(
     LOC_ID   VARCHAR,
     KEY_STR  VARCHAR
 )
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('@LOCID.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.encrypt'
 AS $$
   import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
@@ -90,14 +90,14 @@ $$;
 --    Input:  encrypted_loc_id — base64-URL encoded ciphertext (output of LOCID_BASE_ENCRYPT)
 --            key_str          — base_locid_secret (same key used to encrypt)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_BASE_DECRYPT(
+CREATE OR REPLACE FUNCTION LOCID.STAGING.LOCID_BASE_DECRYPT(
     ENCRYPTED_LOC_ID  VARCHAR,
     KEY_STR           VARCHAR
 )
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('@LOCID.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.decrypt'
 AS $$
   import io.ol.locationid.encoding.encryption.BaseLocIdEncryption
@@ -136,7 +136,7 @@ $$;
 --            timestamp_sec    — Unix timestamp in seconds (BIGINT → Long)
 --            client_id        — encClientId for TxCloc (INT → Int)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_TXCLOC_ENCRYPT(
+CREATE OR REPLACE FUNCTION LOCID.STAGING.LOCID_TXCLOC_ENCRYPT(
     ENCRYPTED_LOCID  VARCHAR,
     BASE_LOCID_KEY   VARCHAR,
     SCHEME_KEY       VARCHAR,
@@ -146,7 +146,7 @@ CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_TXCLOC_ENCRYPT(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('@LOCID.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.txClocEncrypt'
 AS $$
   import io.ol.locationid.TxCloc
@@ -189,14 +189,14 @@ $$;
 --    Input:  tx_cloc    — TX_CLOC string (output of LOCID_TXCLOC_ENCRYPT)
 --            scheme_key — same EncScheme0 key used to encrypt
 -- =============================================================================
-CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_TXCLOC_DECRYPT(
+CREATE OR REPLACE FUNCTION LOCID.STAGING.LOCID_TXCLOC_DECRYPT(
     TX_CLOC    VARCHAR,
     SCHEME_KEY VARCHAR
 )
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('@LOCID.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.txClocDecrypt'
 AS $$
   import io.ol.locationid.encoding.EncScheme0
@@ -236,7 +236,7 @@ $$;
 --            enc_client_id    — encrypting client ID (publisher) (INT → Int)
 --            tier             — location tier: 'T0' (rooftop) or 'T1' (low accuracy)
 -- =============================================================================
-CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
+CREATE OR REPLACE FUNCTION LOCID.STAGING.LOCID_STABLE_CLOC(
     ENCRYPTED_LOCID  VARCHAR,
     BASE_LOCID_KEY   VARCHAR,
     NAMESPACE_GUID   VARCHAR,
@@ -247,7 +247,7 @@ CREATE OR REPLACE FUNCTION LOCID_DEV.STAGING.LOCID_STABLE_CLOC(
 RETURNS VARCHAR
 LANGUAGE SCALA
 RUNTIME_VERSION = '2.13'
-IMPORTS = ('@LOCID_DEV.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
+IMPORTS = ('@LOCID.STAGING.LOCID_STAGE/encode-lib-2.1.5-feature-OLDE-275-scala-2.13-build-SNAPSHOT.jar')
 HANDLER = 'Handler.stableCloc'
 AS $$
   import io.ol.locationid.StableCloc

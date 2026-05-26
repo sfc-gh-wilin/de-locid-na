@@ -12,7 +12,7 @@
 --
 -- SECTION B — App Reset (provider data preserved)
 --   Drops the installed application and application package only.
---   Provider DB objects (LOCID_DEV) remain intact.
+--   Provider DB objects (LOCID) remain intact.
 --   Use to redeploy after code changes without reloading data.
 --   Requires: LOCID_APP_ADMIN (or ACCOUNTADMIN)
 --
@@ -28,8 +28,8 @@
 -- =============================================================================
 -- CONFIGURATION — set these values before running
 -- =============================================================================
-SET app_name     = 'LOCID_DEV_APP';     -- installed application name
-SET app_pkg_name = 'LOCID_DEV_PKG';    -- application package name
+SET app_name     = 'LOCID_APP';     -- installed application name
+SET app_pkg_name = 'LOCID_PKG';    -- application package name
 -- =============================================================================
 
 
@@ -51,17 +51,17 @@ SET app_pkg_name = 'LOCID_DEV_PKG';    -- application package name
 USE ROLE ACCOUNTADMIN;
 
 -- 1. Installed application
-DROP APPLICATION IF EXISTS LOCID_DEV_APP;
+DROP APPLICATION IF EXISTS LOCID_APP;
 
 -- 2. Application package (all versions and patches dropped with it)
-DROP APPLICATION PACKAGE IF EXISTS LOCID_DEV_PKG;
+DROP APPLICATION PACKAGE IF EXISTS LOCID_PKG;
 
 -- 3. External access integration (must drop before the network rule)
 DROP EXTERNAL ACCESS INTEGRATION IF EXISTS LOCID_CENTRAL_EAI;
 
 -- 4. Provider database — cascades all schemas, tables, stages, UDFs,
---    and the LOCID_CENTRAL_RULE network rule inside LOCID_DEV.STAGING
-DROP DATABASE IF EXISTS LOCID_DEV;
+--    and the LOCID_CENTRAL_RULE network rule inside LOCID.STAGING
+DROP DATABASE IF EXISTS LOCID;
 
 -- 5. Custom deployment roles
 DROP ROLE IF EXISTS LOCID_APP_ADMIN;
@@ -72,7 +72,7 @@ DROP ROLE IF EXISTS LOCID_APP_INSTALLER;
 -- SECTION B — App Reset (provider data preserved)
 -- =============================================================================
 -- Drops the installed app and app package only.
--- LOCID_DEV database, UDFs, test data, and stages are untouched.
+-- LOCID database, UDFs, test data, and stages are untouched.
 -- After running this section, re-start from Phase 3
 -- (docs/20260420_NativeApp_Test_Steps.md) to redeploy.
 -- =============================================================================
@@ -80,10 +80,10 @@ DROP ROLE IF EXISTS LOCID_APP_INSTALLER;
 USE ROLE LOCID_APP_ADMIN;
 
 -- 1. Installed application
-DROP APPLICATION IF EXISTS LOCID_DEV_APP;
+DROP APPLICATION IF EXISTS LOCID_APP;
 
 -- 2. Application package (all versions and patches dropped with it)
-DROP APPLICATION PACKAGE IF EXISTS LOCID_DEV_PKG;
+DROP APPLICATION PACKAGE IF EXISTS LOCID_PKG;
 
 
 -- =============================================================================
@@ -96,19 +96,19 @@ DROP APPLICATION PACKAGE IF EXISTS LOCID_DEV_PKG;
 -- =============================================================================
 
 USE ROLE LOCID_APP_ADMIN;
-USE DATABASE LOCID_DEV;
+USE DATABASE LOCID;
 
 -- 1. Provider staging tables — truncate; re-run Phase 2 Option A or B to reload
-TRUNCATE TABLE IF EXISTS LOCID_DEV.STAGING.LOCID_BUILD_DATES;
-TRUNCATE TABLE IF EXISTS LOCID_DEV.STAGING.LOCID_BUILDS;
-TRUNCATE TABLE IF EXISTS LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
-TRUNCATE TABLE IF EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_INPUT;
-TRUNCATE TABLE IF EXISTS LOCID_DEV.STAGING.CUSTOMER_TEST_OUTPUT;
+TRUNCATE TABLE IF EXISTS LOCID.STAGING.LOCID_BUILD_DATES;
+TRUNCATE TABLE IF EXISTS LOCID.STAGING.LOCID_BUILDS;
+TRUNCATE TABLE IF EXISTS LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED;
+TRUNCATE TABLE IF EXISTS LOCID.STAGING.CUSTOMER_TEST_INPUT;
+TRUNCATE TABLE IF EXISTS LOCID.STAGING.CUSTOMER_TEST_OUTPUT;
 
 -- 2. Consumer test schema — drops NA_TEST_INPUT and all app-created output tables
 --    (NA_TEST_OUTPUT_ENC, NA_TEST_OUTPUT_DEC, any other runtime tables)
-DROP SCHEMA IF EXISTS LOCID_DEV.CONSUMER_TEST;
+DROP SCHEMA IF EXISTS LOCID.CONSUMER_TEST;
 
 -- 3. Test CSV stage — optional; remove to force re-upload of CSV source files
 --    Comment this out if you want to keep the staged CSVs for faster reloads.
-DROP STAGE IF EXISTS LOCID_DEV.STAGING.LOCID_TEST_DATA_STAGE;
+DROP STAGE IF EXISTS LOCID.STAGING.LOCID_TEST_DATA_STAGE;

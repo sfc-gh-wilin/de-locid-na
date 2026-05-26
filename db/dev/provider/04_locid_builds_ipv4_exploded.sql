@@ -15,7 +15,7 @@
 
 USE ROLE LOCID_APP_ADMIN;
 
-CREATE OR REPLACE TABLE LOCID_DEV.STAGING.LOCID_BUILDS_IPV4_EXPLODED (
+CREATE OR REPLACE TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED (
     build_dt    DATE     NOT NULL,  -- weekly build identifier
     ip_address  VARCHAR  NOT NULL,  -- individual exploded IPv4 address
     start_ip    VARCHAR  NOT NULL,  -- FK to LOCID_BUILDS.start_ip

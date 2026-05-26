@@ -8,7 +8,7 @@
 
 USE ROLE LOCID_APP_ADMIN;
 
-CREATE OR REPLACE TABLE LOCID_DEV.STAGING.LOCID_BUILD_DATES (
+CREATE OR REPLACE TABLE LOCID.STAGING.LOCID_BUILD_DATES (
     build_dt  DATE  NOT NULL,  -- weekly build identifier
     start_dt  DATE  NOT NULL,  -- date range start (inclusive)
     end_dt    DATE  NOT NULL   -- date range end (inclusive)

@@ -1,8 +1,8 @@
 -- =============================================================================
--- 02_grant_access.sql
+-- 03_grant_access.sql
 -- LocID: Grant LOCID_APP_ADMIN read access to provider tables
 --
--- Run order: AFTER 01_optimize_tables.sql, BEFORE 03_share_to_pkg.sql
+-- Run order: AFTER 02_ipv6_exploded_table.sql, BEFORE 04_share_to_pkg.sql
 --            (or re-run if views fail with "Error in secure object").
 --
 -- Requires: ACCOUNTADMIN (one-time setup).
@@ -24,4 +24,5 @@ GRANT USAGE ON SCHEMA LOCID.STAGING TO ROLE LOCID_APP_ADMIN;
 -- SELECT on the provider source tables (used by Secure Views in the package)
 GRANT SELECT ON TABLE LOCID.STAGING.LOCID_BUILDS TO ROLE LOCID_APP_ADMIN;
 GRANT SELECT ON TABLE LOCID.STAGING.LOCID_BUILDS_IPV4_EXPLODED TO ROLE LOCID_APP_ADMIN;
+GRANT SELECT ON TABLE LOCID.STAGING.LOCID_BUILDS_IPV6_EXPLODED TO ROLE LOCID_APP_ADMIN;
 GRANT SELECT ON TABLE LOCID.STAGING.LOCID_BUILD_DATES TO ROLE LOCID_APP_ADMIN;
