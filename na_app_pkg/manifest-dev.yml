@@ -1,33 +1,22 @@
 manifest_version: 2
 
-# =============================================================================
-# LocID Native App — manifest.yml
-# Provider: LocID
-# =============================================================================
-
 version:
   name:    v1_0
-  label:   "1.0"
-  comment: "LocID enrichment — append TX_CLOC and STABLE_CLOC to IP+timestamp data"
+  label:   "1.0-dev"
+  comment: "LocID enrichment — DEV build (provider sandbox only, not published to Marketplace)"
 
 artifacts:
-  # Setup script: runs at install time and at each version upgrade
-  setup_script: setup.sql
-  # Consumer-visible readme shown in the Marketplace listing
+  # Dev setup script: runs prod setup.sql first, then adds DEV-only proc
+  setup_script: setup_dev.sql
   readme: README.md
-  # Primary Streamlit entry point: auto-launched when consumer opens the app
   default_streamlit: APP_SCHEMA.LOCID_APP
 
-# The app makes outbound HTTPS calls to central.locid.com for license validation
-# and usage statistics. It requires the CREATE EXTERNAL ACCESS INTEGRATION privilege
-# so that setup.sql can create LOCID_CENTRAL_EAI in the consumer account at install time.
-# The consumer is prompted to approve this privilege during installation.
+# Same privileges as prod manifest
 privileges:
   - CREATE EXTERNAL ACCESS INTEGRATION:
       description: "Creates EAI for outbound HTTPS to central.locid.com for license validation and usage stats. No customer data is sent. Requires MANAGE APPLICATION SPECIFICATIONS privilege."
 
 references:
-  # ENCRYPT_INPUT_TABLE — consumer input table for Encrypt jobs
   - ENCRYPT_INPUT_TABLE:
       label: "Input Table for Encrypt"
       description: "Table with ip_address + timestamp columns for Encrypt jobs. Read-only. Use a role owning this table or with SELECT WITH GRANT OPTION. Any database is valid."
@@ -37,7 +26,6 @@ references:
       multi_valued: false
       register_callback: APP_SCHEMA.register_single_callback
 
-  # DECRYPT_INPUT_TABLE — consumer input table for Decrypt jobs
   - DECRYPT_INPUT_TABLE:
       label: "Input Table for Decrypt"
       description: "Table with TX_CLOC column for Decrypt jobs. Read-only. Use a role owning this table or with SELECT WITH GRANT OPTION. Any database is valid."
@@ -50,5 +38,3 @@ references:
 configuration:
   log_level:   INFO
   trace_level: ALWAYS
-
-

@@ -1,5 +1,5 @@
 # =============================================================================
-# snowflake.yml — Snow CLI Native App project definition
+# snowflake.yml — Snow CLI Native App project definition (PROD)
 #
 # Usage (run from na_app_pkg/):
 #   snow app deploy --connection <conn>                       # upload files → stage
@@ -7,14 +7,9 @@
 #       --connection <conn>                                   # create/patch version
 #   snow app run --version v1_0 --connection <conn>           # install / upgrade app
 #
-# To switch between prod and dev endpoints after installation (app owner only):
-#   snow sql --connection <conn> --role LOCID_APP_INSTALLER \
-#       -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(TRUE)"   -- → dev
-#   snow sql --connection <conn> --role LOCID_APP_INSTALLER \
-#       -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(FALSE)"  -- → prod (reset)
-#
-#   LOCID_SET_DEV_ENV updates both the LOCID_CENTRAL_URL secret and the
-#   LOCID_CENTRAL_RULE network rule in a single call. Both URLs are hardcoded.
+# For DEV sandbox deployment (LOCID_PKG_DEV / LOCID_APP_DEV):
+#   Run ./deploy_dev.sh --connection <conn>
+#   This script temporarily swaps in snowflake-dev.yml and restores prod after.
 #
 # Pre-requisite: mb-locid-encoding WHL must be placed in src/lib/ before deploying.
 #   The WHL is staged to @APP_STAGE/lib/ and referenced via IMPORTS in Python UDFs.

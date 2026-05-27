@@ -426,26 +426,48 @@ ALTER APPLICATION PACKAGE LOCID_PKG
 
 ## Dev Environment Deployment
 
-The REST endpoint is stored in the `LOCID_CENTRAL_URL` Snowflake SECRET inside the app — not visible to consumers via SQL. The app ships with `central.locid.com` as the default.
+The REST endpoint is stored in the `LOCID_CENTRAL_URL` Snowflake SECRET inside the app — not visible to consumers via SQL. The production app (`LOCID_PKG` / `LOCID_APP`) contains **no DEV-switching proc** and is never published to Marketplace with dev capabilities.
 
-Both `central.locid.com` and `central.matchbookdata-dev.com` are included in the EAI spec at install time, so **no re-approval is needed** when switching endpoints. Use `LOCID_SET_DEV_ENV` to toggle — it updates both the secret URL and the network rule in one call.
+Dev testing uses a separate `LOCID_PKG_DEV` / `LOCID_APP_DEV` package, deployed via `deploy_dev.sh`. The DEV app is always in dev mode from the moment it installs — `setup_dev.sql` configures the dev endpoint, network rule, and EAI spec at install time.
 
-> **Note:** `LOCID_SET_DEV_ENV` is NOT granted to `APP_ADMIN` or `APP_VIEWER`. Only the app owner (`LOCID_APP_INSTALLER`) can call it. Consumers cannot see or change the endpoint.
+> **Why a separate package?**  
+> Objects inside a Native App can only be modified by procs running inside the app's own context. Direct DDL from outside (even as the app owner) fails with "Insufficient privileges". Keeping the DEV configuration in a separate package means Marketplace consumers never receive it.
 
-### Switch to dev endpoint (sandbox only)
+### Deploy DEV package
 
 ```bash
-snow sql --connection locid --role LOCID_APP_INSTALLER \
-    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(TRUE)"
-# Expected: Environment set to dev.
+cd na_app_pkg
+./deploy_dev.sh --connection locid
+# Expected: drops LOCID_APP, deploys LOCID_APP_DEV already in DEV mode
 ```
 
-### Reset to prod endpoint
+The DEV app is configured at install time — no proc call needed. `setup_dev.sql` sets the dev endpoint URL, network rule, and EAI spec automatically during `snow app run`.
+
+> **One-time step after deploy:** Approve the updated spec in Snowsight:  
+> **LOCID_APP_DEV → Settings → Connections → LocID Central API Access → Approve**
+
+The script drops `LOCID_APP` before deploying — `LOCID_APP` and `LOCID_APP_DEV` cannot coexist in the same account (shared account-level EAI). This is sandbox-only; Marketplace consumers each have their own account.
+
+To reinstall the prod app after dev testing, drop `LOCID_APP_DEV` first (same EAI ownership conflict applies in reverse):
 
 ```bash
+# 1. Drop DEV app
 snow sql --connection locid --role LOCID_APP_INSTALLER \
-    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(FALSE)"
-# Expected: Environment set to prod.
+    -q "DROP APPLICATION IF EXISTS LOCID_APP_DEV CASCADE"
+
+# 2. Reinstall prod app
+cd na_app_pkg
+snow app run --version v1_0 --connection locid
+```
+
+### DEV package cleanup
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+DROP APPLICATION IF EXISTS LOCID_APP_DEV CASCADE;
+
+USE ROLE LOCID_APP_ADMIN;
+DROP APPLICATION PACKAGE IF EXISTS LOCID_PKG_DEV;
 ```
 
 ---

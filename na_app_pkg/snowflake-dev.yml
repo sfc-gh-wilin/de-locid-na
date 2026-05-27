@@ -1,0 +1,58 @@
+# =============================================================================
+# snowflake-dev.yml — Snow CLI Native App project definition (DEV sandbox only)
+#
+# Deploys LOCID_PKG_DEV / LOCID_APP_DEV using setup_dev.sql.
+# This package is NEVER published to Snowflake Marketplace.
+# Marketplace consumers always receive LOCID_PKG built from setup.sql (prod config).
+#
+# Do NOT run snow app commands against this file directly.
+# Use ./deploy_dev.sh instead — it safely swaps this file in/out as snowflake.yml.
+#
+# After dev install, switch endpoint:
+#   USE ROLE LOCID_APP_INSTALLER;
+#   CALL LOCID_APP_DEV.APP_SCHEMA.LOCID_SET_DEV_ENV(TRUE);
+#   -- Re-approve in Snowsight: LOCID_APP_DEV → Settings → Connections → Approve
+# =============================================================================
+
+definition_version: 2
+
+entities:
+  pkg:
+    type: application package
+    identifier: LOCID_PKG_DEV
+    stage: APP_SCHEMA.APP_STAGE
+    manifest: manifest-dev.yml
+    meta:
+      role: LOCID_APP_ADMIN
+    artifacts:
+      # Root files — setup_dev.sql chains setup.sql then adds LOCID_SET_DEV_ENV
+      - src: setup.sql
+        dest: setup.sql
+      - src: setup_dev.sql
+        dest: setup_dev.sql
+      - src: manifest-dev.yml
+        dest: manifest.yml
+      - src: README.md
+        dest: README.md
+
+      # mb-locid-encoding WHL
+      - src: src/lib/
+        dest: ./
+
+      # SQL scripts (UDFs + stored procs)
+      - src: src/udfs/
+        dest: src/
+      - src: src/procs/
+        dest: src/
+
+      # Streamlit app
+      - src: streamlit/
+        dest: ./
+
+  app:
+    type: application
+    identifier: LOCID_APP_DEV
+    from:
+      target: pkg
+    meta:
+      role: LOCID_APP_INSTALLER
