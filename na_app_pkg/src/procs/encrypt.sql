@@ -407,11 +407,12 @@ def encrypt_handler(
     TBL_IPV4      = f'APP_SCHEMA._LOCID_IPV4_{job_sfx}'
     TBL_V6_INP    = f'APP_SCHEMA._LOCID_V6_INP_{job_sfx}'
     TBL_V6_DATED  = f'APP_SCHEMA._LOCID_V6_DATD_{job_sfx}'
+    TBL_V6_RANGE  = f'APP_SCHEMA._LOCID_V6_RNG_{job_sfx}'
     TBL_IPV6      = f'APP_SCHEMA._LOCID_IPV6_{job_sfx}'
     TBL_MATCHED   = f'APP_SCHEMA._LOCID_MTCHD_{job_sfx}'
     _interim_tbls = [
         TBL_IPV4, TBL_V6_INP, TBL_V6_DATED,
-        TBL_IPV6, TBL_MATCHED,
+        TBL_V6_RANGE, TBL_IPV6, TBL_MATCHED,
     ]
 
     # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
@@ -536,22 +537,22 @@ def encrypt_handler(
         phases['ipv4_match_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
-        # Step 4: IPv6 matching — equi-join via LOCID_BUILDS_IPV6_EXPLODED
-        #         with BETWEEN fallback for wide ranges
+        # Step 4: IPv6 matching — split equi-join with BETWEEN fallback
         #
-        # Performance strategy (2-stage):
+        # Performance strategy (3 steps):
         #
-        #   Stage 1: Equi-join on /56 prefix via LOCID_BUILDS_IPV6_EXPLODED.
-        #            The exploded table has one row per /56 prefix per build range
-        #            (covers ranges ≤ /48, ~99%+ of inputs). Hash equi-join on
-        #            PREFIX_56 reduces candidates from ~269K → ~30 per input IP.
-        #            Join back to LOCID_BUILDS to retrieve geo context columns
-        #            (not stored in the exploded table).
+        #   Stage 1a: Equi-join + range filter against LOCID_BUILDS_IPV6_EXPLODED.
+        #             Materialise the result in TBL_V6_RANGE. Splitting from Stage 1b
+        #             lets Snowflake optimise each join independently — confirmed
+        #             significant speedup by client (Ryan Bessey, 2026-05-27).
         #
-        #   Stage 2: BETWEEN fallback for IDs unmatched in Stage 1.
-        #            Wide ranges (> /48, ~31K source rows) are excluded from the
-        #            exploded table. Only unmatched IDs are joined against the
-        #            LOCID_BUILDS source for these rare wide ranges.
+        #   Stage 1b: Join TBL_V6_RANGE to LOCID_BUILDS for geo context (not stored
+        #             in the exploded table). QUALIFY deduplicates per _id.
+        #
+        #   Stage 2:  BETWEEN fallback for IDs unmatched in Stage 1.
+        #             Wide ranges (> /48, ~31K source rows) are excluded from the
+        #             exploded table. Only unmatched IDs are joined against
+        #             LOCID_BUILDS source for these rare wide ranges.
         # ------------------------------------------------------------------
 
         # 4-a: IPv6 input with ip_hex pre-computed
@@ -589,9 +590,22 @@ def encrypt_handler(
             )
         """).collect()
 
-        # Stage 1: equi-join via LOCID_BUILDS_IPV6_EXPLODED (~99%+ of inputs).
-        # Hash join on PREFIX_56 + BETWEEN filter reduces candidates from ~269K → ~30.
-        # Join back to LOCID_BUILDS to retrieve geo context (not in exploded table).
+        # Stage 1a: equi-join + range filter against LOCID_BUILDS_IPV6_EXPLODED.
+        # Materialise the range-join result first so Snowflake can optimise the
+        # geo-context lookup (join to LOCID_BUILDS) independently.
+        # Split suggested by client (Ryan Bessey) — confirmed significant speedup.
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_RANGE} AS
+            SELECT i._id, i._ip, i._ts,
+                e.build_dt, e.start_ip, e.end_ip
+            FROM {TBL_V6_DATED} i
+            JOIN {BUILDS_V6} e
+                ON  i.build_dt = e.build_dt
+                AND SUBSTR(i.ip_hex, 1, 14) = e.prefix_56
+                AND i.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex
+        """).collect()
+
+        # Stage 1b: join the materialised range results to LOCID_BUILDS to get geo context.
         session.sql(f"""
             INSERT INTO {TBL_IPV6}
             SELECT i._id, i._ip, i._ts,
@@ -601,15 +615,11 @@ def encrypt_handler(
                 lb.locid_city,         lb.locid_city_code,
                 lb.locid_postal_code,  lb.locid_horizontal_accuracy,
                 lb.build_dt
-            FROM {TBL_V6_DATED} i
-            JOIN {BUILDS_V6} e
-                ON  i.build_dt = e.build_dt
-                AND SUBSTR(i.ip_hex, 1, 14) = e.prefix_56
-                AND i.ip_hex BETWEEN e.start_ip_int_hex AND e.end_ip_int_hex
+            FROM {TBL_V6_RANGE} i
             JOIN {BUILDS} lb
-                ON  e.build_dt = lb.build_dt
-                AND e.start_ip  = lb.start_ip
-                AND e.end_ip    = lb.end_ip
+                ON  i.build_dt = lb.build_dt
+                AND i.start_ip  = lb.start_ip
+                AND i.end_ip    = lb.end_ip
             QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY lb.build_dt DESC) = 1
         """).collect()
 
