@@ -273,29 +273,4 @@ with act_col:
     else:
         st.info("No jobs run yet.")
 
-# ---------------------------------------------------------------------------
-# Sidebar footer — client info + app version + runtime version (diagnostic)
-# ---------------------------------------------------------------------------
-if client_name != "—":
-    st.sidebar.caption(f"**{client_name}**")
-
-# App version and patch from installed application metadata
-@st.cache_data(ttl=300, show_spinner=False)
-def _get_app_version(_sid: int) -> str:
-    from snowflake.snowpark.context import get_active_session as _gas
-    _s = _gas()
-    try:
-        rows = _s.sql(
-            "SELECT SYS_CONTEXT('SNOWFLAKE$APPLICATION', 'CURRENT_VERSION'), "
-            "SYS_CONTEXT('SNOWFLAKE$APPLICATION', 'CURRENT_PATCH')"
-        ).collect()
-        ver = rows[0][0] if rows and rows[0][0] else "—"
-        patch = rows[0][1] if rows and rows[0][1] is not None else "0"
-        return f"{ver} · {patch}"
-    except Exception:
-        return "—"
-
-st.sidebar.caption(f"App {_get_app_version(sid)}")
-# st.sidebar.caption(f"Streamlit {st.__version__}")
-
 logger.debug(session, "app.main", "Home view loaded")

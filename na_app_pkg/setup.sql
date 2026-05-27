@@ -603,8 +603,20 @@ AS $$
 _PROD_URL = 'https://central.locid.com/api/0/location_id'
 _DEV_URL  = 'https://central.matchbookdata-dev.com/api/0/location_id'
 
+_UPSERT_SQL = (
+    "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
+    "USING (SELECT ? AS k, ? AS v) AS s ON t.config_key = s.k "
+    "WHEN MATCHED THEN UPDATE SET config_value = s.v, "
+    "last_refreshed_at = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ "
+    "WHEN NOT MATCHED THEN INSERT "
+    "(config_key, config_value, last_refreshed_at, is_active) "
+    "VALUES (s.k, s.v, "
+    "CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ, TRUE)"
+)
+
 def set_env_handler(session, use_dev: bool) -> str:
     url = _DEV_URL if use_dev else _PROD_URL
+    env = 'dev' if use_dev else 'prod'
 
     # 1. Write endpoint URL to secret
     session.sql(
@@ -624,7 +636,9 @@ def set_env_handler(session, use_dev: bool) -> str:
             "SET VALUE_LIST = ('central.locid.com:443')"
         ).collect()
 
-    env = 'dev' if use_dev else 'prod'
+    # 3. Record env in APP_CONFIG so the Streamlit UI can show a DEV badge
+    session.sql(_UPSERT_SQL, params=['central_env', env]).collect()
+
     return f"Environment set to {env}."
 $$;
 -- Intentionally NOT granted to APP_ADMIN or APP_VIEWER.
@@ -657,7 +671,7 @@ EXECUTE IMMEDIATE FROM 'src/procs/purge_outputs.sql';
 --     Handles consumer object binding at configuration time.
 --     Snowflake calls this procedure when the consumer binds or removes a
 --     reference — either through the Streamlit setup wizard or by calling
---     LOCID_DEV_APP.APP_SCHEMA.register_single_callback(...) directly.
+--     LOCID_APP.APP_SCHEMA.register_single_callback(...) directly.
 --
 --     References declared in manifest.yml:
 --       ENCRYPT_INPUT_TABLE — consumer input table for Encrypt jobs (SELECT)

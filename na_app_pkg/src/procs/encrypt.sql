@@ -698,11 +698,14 @@ def encrypt_handler(
             'locid_postal_code':  'locid_postal_code',
         }
 
-        # ID output: COALESCE(TRY_CAST AS NUMBER(38,0)::VARCHAR, TO_VARCHAR) strips decimal
-        # points for FLOAT/NUMBER columns (e.g. 12345.0 → '12345') while falling back
-        # to TO_VARCHAR for non-numeric types (VARCHAR, etc.).
+        # ID output: strip trailing decimal for numeric IDs (e.g. 12345.0 → '12345').
+        # TRY_CAST cannot cast between numeric types directly (Snowflake restriction),
+        # so convert to VARCHAR first. TO_VARCHAR strips trailing zeros on numeric
+        # types, so TRY_CAST(TO_VARCHAR(_id) AS NUMBER(38,0)) succeeds for integers
+        # (returning the integer string) and returns NULL for non-integer values
+        # (e.g. '12345.12' has scale > 0), letting COALESCE fall back to TO_VARCHAR.
         id_expr = (
-            f"COALESCE(TRY_CAST(_id AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
+            f"COALESCE(TRY_CAST(TO_VARCHAR(_id) AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
             if id_to_varchar else f"_id AS {id_col}"
         )
         select_exprs = [id_expr] + [
