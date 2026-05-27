@@ -30,9 +30,9 @@ EXECUTE IMMEDIATE FROM './setup.sql';
 ALTER SECRET APP_SCHEMA.LOCID_CENTRAL_URL
     SET SECRET_STRING = 'https://central.matchbookdata-dev.com/api/0/location_id';
 
--- 2b. Set network rule to dev host only
+-- 2b. Add dev host to network rule (keep prod host so HTTP_PING UDF still works)
 ALTER NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE
-    SET VALUE_LIST = ('central.matchbookdata-dev.com:443');
+    SET VALUE_LIST = ('central.matchbookdata-dev.com:443', 'central.locid.com:443');
 
 -- 2c. Update EAI app spec — provider approves once in Snowsight after install
 --     LOCID_APP_DEV → Settings → Connections → LocID Central API Access → Approve

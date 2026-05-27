@@ -730,7 +730,7 @@ def encrypt_handler(
             SELECT {', '.join(select_exprs)}
             FROM {TBL_MATCHED}
         """).collect()
-        phases['udf_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
+        phases['udf_s'] = round(time.perf_counter() - _pt, 3)
 
         session.sql(
             f"GRANT SELECT ON TABLE APP_SCHEMA.{output_table} TO APPLICATION ROLE APP_ADMIN"
@@ -739,6 +739,7 @@ def encrypt_handler(
             f"GRANT SELECT ON TABLE APP_SCHEMA.{output_table} TO APPLICATION ROLE APP_VIEWER"
         ).collect()
 
+        _pt = time.perf_counter()
         rows_out  = session.sql(f"SELECT COUNT(*) FROM APP_SCHEMA.{output_table}").collect()[0][0]
         phases['write_s'] = round(time.perf_counter() - _pt, 3)
         runtime_s = round(time.time() - start_ts, 2)

@@ -242,6 +242,8 @@ if step == 1:
 elif step == 2:
     st.subheader(":material/table_rows: Step 2 — Map Columns")
     columns = st.session_state.get("dec_input_columns", [])
+    col_id    = ""
+    col_txclo = ""
     if not columns:
         st.error("Column list is empty — go back and re-enter the table name.")
     else:

@@ -34,19 +34,20 @@ if [ ! -f "$DEV_CONFIG" ]; then
 fi
 
 # Extract connection flag for the drop step
-CONN_FLAG=""
+CONN_ARGS=()
+prev=""
 for arg in "$@"; do
     if [[ "$arg" == --connection=* ]]; then
-        CONN_FLAG="$arg"
+        CONN_ARGS=("$arg")
     elif [[ "$prev" == "--connection" ]]; then
-        CONN_FLAG="--connection $arg"
+        CONN_ARGS=("--connection" "$arg")
     fi
     prev="$arg"
 done
 
 # Step 1: Drop LOCID_APP (prod) if installed — EAI ownership conflict
 echo "Dropping LOCID_APP (if installed) — EAI conflict prevention..."
-snow sql $CONN_FLAG \
+snow sql "${CONN_ARGS[@]}" \
     -q "DROP APPLICATION IF EXISTS LOCID_APP CASCADE" 2>/dev/null || true
 
 # Always restore prod config on exit (success, failure, or interrupt)
@@ -67,4 +68,4 @@ echo ""
 echo "Dev deployment complete. Prod config restored."
 echo ""
 echo "To reinstall LOCID_APP (prod) when done testing:"
-echo "  snow app run --version v1_0 $CONN_FLAG"
+echo "  snow app run --version v1_0 ${CONN_ARGS[*]}"

@@ -458,7 +458,7 @@ def decrypt_handler(
         """).collect()
 
         rows_matched = session.sql(
-            f"SELECT COUNT(*) FROM {TBL_DECODED}"
+            f"SELECT COUNT(*) FROM {TBL_DECODED} WHERE _decoded IS NOT NULL"
         ).collect()[0][0]
         phases['decode_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
@@ -532,8 +532,19 @@ def decrypt_handler(
         # ------------------------------------------------------------------
         # Step 8: POST usage stats to LocID Central
         # ------------------------------------------------------------------
+        tier_counts = {}
+        try:
+            tier_rows = session.sql(
+                f"SELECT COALESCE(_decoded:tier::VARCHAR, 'T0') AS tier, COUNT(*) "
+                f"FROM {TBL_DECODED} WHERE _decoded IS NOT NULL GROUP BY tier"
+            ).collect()
+            for row in tier_rows:
+                tier_counts[row[0] or 'T0'] = row[1]
+        except Exception:
+            tier_counts = {'T0': rows_matched}
+
         stats_ok = _post_stats(session, job_id, client_id, rows_in,
-                               rows_matched, rows_out, phases, {'T0': rows_matched}, 'decrypt')
+                               rows_matched, rows_out, phases, tier_counts, 'decrypt')
         if not stats_ok:
             _log_job_end(
                 session, job_id, rows_in, rows_matched, rows_out,

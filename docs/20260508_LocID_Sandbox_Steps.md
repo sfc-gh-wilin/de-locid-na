@@ -249,6 +249,17 @@ snow app run --version v1_0 --connection locid
 
 Open the app in Snowsight: **Data Products → Apps → LOCID_APP**.
 
+> **Why do I see two "LOCID_APP" tiles in My Apps?**
+>
+> Snowsight's "My Apps" page aggregates all Streamlit apps in the account — including Streamlits embedded inside Native Apps. This produces two tiles with the same name:
+>
+> | Tile | "Installed from" label | Owner Role | What it is |
+> |---|---|---|---|
+> | Tile 1 | `LOCID_PKG` | `LOCID_APP_INSTALLER` | The **Native App** — use this one |
+> | Tile 2 | `LOCID_APP.APP_SCHEMA.LOCID_APP` | *(none)* | The internal **Streamlit object** surfaced directly |
+>
+> Always open the app via **Tile 1** (owner role `LOCID_APP_INSTALLER`, source `LOCID_PKG`). This routes through the Native App container with proper permissions. Tile 2 opens the same Streamlit directly, bypassing the app context — it may appear to work but lacks the correct role bindings. This is a Snowsight display quirk in sandbox only; real Marketplace consumers see one tile in their own account.
+
 Walk through the Setup Wizard screens:
 
 | Screen | Action |
@@ -448,6 +459,24 @@ The DEV app is configured at install time — no proc call needed. `setup_dev.sq
 
 The script drops `LOCID_APP` before deploying — `LOCID_APP` and `LOCID_APP_DEV` cannot coexist in the same account (shared account-level EAI). This is sandbox-only; Marketplace consumers each have their own account.
 
+> **Why Prod and Dev apps cannot coexist in the same account**
+>
+> When a Native App installs, it claims ownership of its External Access Integration (EAI) — the object that grants the app network access to the LocID Central API. EAI names are **account-level singletons**: they are not scoped to a package or app instance.
+>
+> Both `LOCID_APP` and `LOCID_APP_DEV` require an EAI pointing to the external endpoint. Because both apps run in the same sandbox account, they compete for the same EAI name and ownership. Snowflake does not allow two installed apps to simultaneously own or share the same EAI.
+>
+> This constraint is **sandbox-only**. In a real Marketplace deployment each consumer installs the app in their own account, so there is never a conflict. To eliminate the drop cycle entirely, use a dedicated second Snowflake account for DEV consumer testing (see [Release DEV App to a DEV Consumer Account](#release-dev-app-to-a-dev-consumer-account) below).
+
+> **"Can each package just use its own EAI with a different name?"**
+>
+> In principle yes — two EAIs with different names (`LOCID_CENTRAL_EAI` and `LOCID_CENTRAL_EAI_DEV`) would not conflict. In practice it does not work cleanly here because the EAI name is hardcoded inside every proc and function definition in `setup.sql`:
+>
+> ```sql
+> EXTERNAL_ACCESS_INTEGRATIONS = (LOCID_CENTRAL_EAI)
+> ```
+>
+> To give `LOCID_APP_DEV` its own EAI, `setup_dev.sql` would have to re-create every proc after prod setup runs — just to swap the name. That duplicates all proc DDL and creates ongoing maintenance overhead any time a new proc is added. The drop cycle is simpler and the problem is sandbox-only. The clean long-term fix is a **dedicated second Snowflake account for DEV**, which requires no code changes and mirrors real consumer behavior exactly.
+
 To reinstall the prod app after dev testing, drop `LOCID_APP_DEV` first (same EAI ownership conflict applies in reverse):
 
 ```bash
@@ -469,6 +498,169 @@ DROP APPLICATION IF EXISTS LOCID_APP_DEV CASCADE;
 USE ROLE LOCID_APP_ADMIN;
 DROP APPLICATION PACKAGE IF EXISTS LOCID_PKG_DEV;
 ```
+
+---
+
+### Release DEV App to a DEV Consumer Account
+
+Use this to let a specific consumer account (e.g. a UAT partner) test against the DEV endpoint.
+
+> **Provider steps** in this section are performed on the **provider** account. Consumer steps are performed on the **DEV consumer** account.
+
+---
+
+#### Provider Step 1 — Ensure DEV package is deployed and versioned
+
+```bash
+cd na_app_pkg
+./deploy_dev.sh --connection locid   # deploys LOCID_PKG_DEV in provider sandbox
+snow app version create v1_0 --force --skip-git-check --connection locid
+```
+
+Verify the version was created:
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+SHOW VERSIONS IN APPLICATION PACKAGE LOCID_PKG_DEV;
+-- Expected: review_status = 'NOT_REVIEWED' — this is correct for a private listing.
+-- The automated Snowflake security scan only runs for public Marketplace submissions.
+-- Private listings shared to specific consumer accounts skip the scan entirely.
+-- The version is immediately usable; no waiting required.
+```
+
+Enable external distribution so the package can be shared to accounts outside the provider's organization:
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+
+ALTER APPLICATION PACKAGE LOCID_PKG_DEV
+    SET DISTRIBUTION = 'EXTERNAL';
+```
+
+> **Required** even for private listings shared to a single consumer account. Without this the package defaults to `INTERNAL` distribution — the consumer account will not see the listing if it is in a different Snowflake organization.
+
+#### Provider Step 2 — Add version to release channel and set release directive
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+
+-- Add the version to the DEFAULT release channel before setting the directive.
+-- snow app version create creates the version but does not add it to the channel.
+ALTER APPLICATION PACKAGE LOCID_PKG_DEV
+    MODIFY RELEASE CHANNEL DEFAULT
+    ADD VERSION v1_0;
+
+-- Set the release directive so consumers receive this version.
+ALTER APPLICATION PACKAGE LOCID_PKG_DEV
+    MODIFY RELEASE CHANNEL DEFAULT
+    SET DEFAULT RELEASE DIRECTIVE
+    VERSION = v1_0
+    PATCH = 0;
+```
+
+> Replace `PATCH = 0` with the latest patch number from `SHOW VERSIONS IN APPLICATION PACKAGE LOCID_PKG_DEV`.
+
+#### Provider Step 3 — Create a private listing in Snowsight
+
+In Snowsight on the **provider** account:
+
+1. Navigate to **Marketplace → Provider Studio**
+2. Click **+ Listing**
+3. Enter the listing name: `LocID for Snowflake - DEV`
+4. Under "Who can discover this listing?" → select **Only specified consumers**
+5. Click **Add Data Product** → choose `LOCID_PKG_DEV`
+6. Select `Free` for **Pricing**
+7. In **Consumer Accounts** → add the DEV consumer's org.account (e.g. `JZAEQUY.DEV_CONSUMER_ACCT`)
+8. Add a **Description** (e.g. "DEV build for pre-production testing")
+9. Click **Publish**
+
+Verify the listing is visible to the DEV consumer:
+
+In Snowsight on the **DEV consumer** account, navigate to **Catalog → Apps** and confirm `LocID for Snowflake - DEV` appears under "Recently Shared with You".
+
+---
+
+#### DEV Consumer Step 1 — Drop PROD app (if installed)
+
+> **Required.** `LOCID_APP` (prod) and `LOCID_APP_DEV` share the same account-level EAI name `LOCID_CENTRAL_EAI`. Both cannot be installed at the same time in the same account.
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+DROP APPLICATION IF EXISTS LOCID_APP CASCADE;
+```
+
+#### DEV Consumer Step 2 — Install from listing
+
+In Snowsight on the **DEV consumer** account:
+
+1. **Switch to the `LOCID_APP_INSTALLER` role** (bottom-left role selector)
+2. Navigate to **Catalog → Apps**
+3. Find **LocID for Snowflake - DEV** (under "Recently Shared with You" or use search)
+4. Click **Get**
+5. Expand **Options** → change the **Application name** field to `LOCID_APP_DEV`
+6. Click **Get** to install
+
+#### DEV Consumer Step 3 — Approve network access
+
+**Option A — Snowsight UI:**
+
+1. Navigate to **Catalog → Apps → LOCID_APP_DEV**
+2. Click **Settings** (gear icon) → **Configurations**
+3. Next to *LocID Central API Access*, click **…** → **Approve**
+
+**Option B — SQL:**
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+
+-- 1. Find the current sequence number:
+SHOW SPECIFICATIONS IN APPLICATION LOCID_APP_DEV;
+
+-- 2. Approve (replace N with SEQUENCE_NUMBER from above, usually 1):
+ALTER APPLICATION LOCID_APP_DEV
+    APPROVE SPECIFICATION LOCID_CENTRAL_EAI_SPEC SEQUENCE_NUMBER = N;
+
+-- 3. Grant usage on the integration:
+GRANT USAGE ON INTEGRATION LOCID_CENTRAL_EAI TO APPLICATION LOCID_APP_DEV;
+```
+
+#### DEV Consumer Step 4 — Grant warehouse
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+
+GRANT USAGE ON WAREHOUSE <your_warehouse> TO APPLICATION LOCID_APP_DEV;
+```
+
+#### DEV Consumer Step 5 — Setup Wizard
+
+Open the app: **Catalog → Apps → LOCID_APP_DEV**
+
+| Screen | Action |
+|--------|--------|
+| **A — Welcome** | Click **Get Started** |
+| **B — License key?** | Select **Yes, I have a license key** |
+| **E — Approve Network Access** | Approve the connection to `central.matchbookdata-dev.com` and click **Approved — Continue** |
+| **C — Enter License Key** | Enter the **DEV environment** license key and click **Fetch License** |
+| **D — Review License** | Confirm license details and click **Continue** |
+| **F — Create App Objects** | Click **Create App Objects** |
+| **H — Select API Key** | Choose the active API key and click **Confirm** |
+| **I — Setup Complete** | Done — sidebar navigation is now active |
+
+> **Note:** A DEV-environment license key is required. The prod license key will be rejected by `central.matchbookdata-dev.com` with HTTP 401.
+
+#### DEV Consumer — Restore PROD App after testing
+
+```sql
+USE ROLE LOCID_APP_INSTALLER;
+
+-- 1. Drop DEV app (releases EAI ownership)
+DROP APPLICATION IF EXISTS LOCID_APP_DEV CASCADE;
+
+-- 2. Reinstall PROD app from the Marketplace listing
+```
+
+In Snowsight: **Catalog → Apps → LocID for Snowflake → Get → Application name: LOCID_APP → Get**
 
 ---
 
