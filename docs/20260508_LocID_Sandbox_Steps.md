@@ -426,35 +426,26 @@ ALTER APPLICATION PACKAGE LOCID_PKG
 
 ## Dev Environment Deployment
 
-The REST endpoint is stored in the `LOCID_CENTRAL_URL` Snowflake SECRET inside the app — not visible to consumers via SQL. The app ships with `central.locid.com` as the default. To test against the dev endpoint in the sandbox, two steps are required: update the secret URL and expand the network rule to allow the dev host.
+The REST endpoint is stored in the `LOCID_CENTRAL_URL` Snowflake SECRET inside the app — not visible to consumers via SQL. The app ships with `central.locid.com` as the default.
 
-> **Note:** `LOCID_SET_CENTRAL_URL` is NOT granted to `APP_ADMIN` or `APP_VIEWER`. Only the app owner (`LOCID_APP_INSTALLER`) can call it. Consumers cannot see or change the endpoint.
+Both `central.locid.com` and `central.matchbookdata-dev.com` are included in the EAI spec at install time, so **no re-approval is needed** when switching endpoints. Use `LOCID_SET_DEV_ENV` to toggle — it updates both the secret URL and the network rule in one call.
+
+> **Note:** `LOCID_SET_DEV_ENV` is NOT granted to `APP_ADMIN` or `APP_VIEWER`. Only the app owner (`LOCID_APP_INSTALLER`) can call it. Consumers cannot see or change the endpoint.
 
 ### Switch to dev endpoint (sandbox only)
 
 ```bash
-# 1. Update the secret URL
 snow sql --connection locid --role LOCID_APP_INSTALLER \
-    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_CENTRAL_URL('https://central.matchbookdata-dev.com/api/0/location_id')"
-# Expected: Central URL updated to host: central.matchbookdata-dev.com
-
-# 2. Expand the network rule to allow the dev host
-snow sql --connection locid --role LOCID_APP_INSTALLER \
-    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(TRUE)"
-# Expected: Network rule updated: central.locid.com + central.matchbookdata-dev.com
+    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(TRUE)"
+# Expected: Environment set to dev.
 ```
 
 ### Reset to prod endpoint
 
 ```bash
-# 1. Reset the secret URL
 snow sql --connection locid --role LOCID_APP_INSTALLER \
-    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_CENTRAL_URL('https://central.locid.com/api/0/location_id')"
-
-# 2. Remove dev host from the network rule
-snow sql --connection locid --role LOCID_APP_INSTALLER \
-    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(FALSE)"
-# Expected: Network rule updated: central.locid.com only
+    -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(FALSE)"
+# Expected: Environment set to prod.
 ```
 
 ---

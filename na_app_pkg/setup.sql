@@ -379,8 +379,8 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION LOCID_CENTRAL_EAI
 ALTER APPLICATION SET SPECIFICATION LOCID_CENTRAL_EAI_SPEC
     TYPE        = EXTERNAL_ACCESS
     LABEL       = 'LocID Central API Access'
-    DESCRIPTION = 'Allows the app to connect to central.locid.com (HTTPS 443) for license validation. No customer data is sent.'
-    HOST_PORTS  = ('central.locid.com:443');
+    DESCRIPTION = 'Allows the app to connect to central.locid.com (HTTPS 443) for license validation. No customer data is sent. central.matchbookdata-dev.com is included for provider sandbox testing only.'
+    HOST_PORTS  = ('central.locid.com:443', 'central.matchbookdata-dev.com:443');
 
 
 -- =============================================================================
@@ -497,18 +497,18 @@ GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_SET_API_KEY(INTEGER, VARCHAR, VARCHAR)
 --
 --   Provider-only utility to switch the LocID Central API endpoint between
 --   environments (prod / dev). Writes the URL to the LOCID_CENTRAL_URL secret.
+--   Both URLs are hardcoded here — no caller-supplied string needed.
 --
---   NOT granted to APP_ADMIN or APP_VIEWER — only the app owner role
---   (LOCID_APP_INSTALLER) can call this proc directly. Consumers cannot see
---   or change the endpoint.
+--   NOT granted to APP_ADMIN or APP_VIEWER — only the app owner
+--   (LOCID_APP_INSTALLER) can call this proc directly.
 --
---   Usage (after snow app run --config-file snowflake-dev.yml):
+--   Usage (sandbox dev testing only — always pair with LOCID_UPDATE_NETWORK_RULE):
 --     USE ROLE LOCID_APP_INSTALLER;
---     CALL LOCID_APP_DEV.APP_SCHEMA.LOCID_SET_CENTRAL_URL(
---         'https://central.matchbookdata-dev.com/api/0/location_id');
+--     CALL LOCID_APP.APP_SCHEMA.LOCID_SET_CENTRAL_URL(TRUE);   -- → dev
+--     CALL LOCID_APP.APP_SCHEMA.LOCID_SET_CENTRAL_URL(FALSE);  -- → prod (reset)
 -- =============================================================================
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_SET_CENTRAL_URL(
-    URL VARCHAR    -- full base URL, e.g. 'https://central.locid.com/api/0/location_id'
+    USE_DEV BOOLEAN    -- TRUE = central.matchbookdata-dev.com, FALSE = central.locid.com
 )
 RETURNS VARCHAR
 LANGUAGE PYTHON
@@ -516,15 +516,15 @@ RUNTIME_VERSION = '3.11'
 PACKAGES = ('snowflake-snowpark-python')
 HANDLER = 'set_central_url_handler'
 AS $$
-def set_central_url_handler(session, url: str) -> str:
-    url = url.strip().rstrip('/')
-    if not url.startswith('https://'):
-        raise ValueError("URL must start with https://")
+_PROD_URL = 'https://central.locid.com/api/0/location_id'
+_DEV_URL  = 'https://central.matchbookdata-dev.com/api/0/location_id'
+
+def set_central_url_handler(session, use_dev: bool) -> str:
+    url = _DEV_URL if use_dev else _PROD_URL
     session.sql(
         "ALTER SECRET APP_SCHEMA.LOCID_CENTRAL_URL SET SECRET_STRING = ?",
         params=[url]
     ).collect()
-    # Return only the host portion — never echo the full path in logs
     from urllib.parse import urlparse
     host = urlparse(url).netloc
     return f"Central URL updated to host: {host}"
@@ -569,6 +569,63 @@ BEGIN
         RETURN 'Network rule updated: central.locid.com only';
     END IF;
 END;
+$$;
+-- Intentionally NOT granted to APP_ADMIN or APP_VIEWER.
+-- Only the app owner (LOCID_APP_INSTALLER) can call this proc.
+
+
+-- =============================================================================
+-- 7e. LOCID_SET_DEV_ENV Procedure  (Python, inline)
+--
+--   Combined convenience proc: updates the LOCID_CENTRAL_URL secret AND the
+--   LOCID_CENTRAL_RULE network rule in a single call.
+--
+--   Replaces the two-step LOCID_SET_CENTRAL_URL + LOCID_UPDATE_NETWORK_RULE
+--   workflow. Both URLs and both network rule VALUE_LISTs are hardcoded here.
+--
+--   NOT granted to APP_ADMIN or APP_VIEWER — only the app owner
+--   (LOCID_APP_INSTALLER) can call this proc directly.
+--
+--   Usage (sandbox dev testing only):
+--     USE ROLE LOCID_APP_INSTALLER;
+--     CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(TRUE);   -- → dev
+--     CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(FALSE);  -- → prod (reset)
+-- =============================================================================
+CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_SET_DEV_ENV(
+    USE_DEV BOOLEAN    -- TRUE = dev environment, FALSE = prod (default)
+)
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'set_env_handler'
+AS $$
+_PROD_URL = 'https://central.locid.com/api/0/location_id'
+_DEV_URL  = 'https://central.matchbookdata-dev.com/api/0/location_id'
+
+def set_env_handler(session, use_dev: bool) -> str:
+    url = _DEV_URL if use_dev else _PROD_URL
+
+    # 1. Write endpoint URL to secret
+    session.sql(
+        "ALTER SECRET APP_SCHEMA.LOCID_CENTRAL_URL SET SECRET_STRING = ?",
+        params=[url]
+    ).collect()
+
+    # 2. Update the network rule
+    if use_dev:
+        session.sql(
+            "ALTER NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE "
+            "SET VALUE_LIST = ('central.locid.com:443', 'central.matchbookdata-dev.com:443')"
+        ).collect()
+    else:
+        session.sql(
+            "ALTER NETWORK RULE APP_SCHEMA.LOCID_CENTRAL_RULE "
+            "SET VALUE_LIST = ('central.locid.com:443')"
+        ).collect()
+
+    env = 'dev' if use_dev else 'prod'
+    return f"Environment set to {env}."
 $$;
 -- Intentionally NOT granted to APP_ADMIN or APP_VIEWER.
 -- Only the app owner (LOCID_APP_INSTALLER) can call this proc.

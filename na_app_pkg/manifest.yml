@@ -24,7 +24,7 @@ artifacts:
 # The consumer is prompted to approve this privilege during installation.
 privileges:
   - CREATE EXTERNAL ACCESS INTEGRATION:
-      description: "Creates EAI for HTTPS to central.locid.com (license validation, usage stats). No customer data sent. Requires ACCOUNTADMIN or MANAGE APPLICATION SPECIFICATIONS privilege."
+      description: "Outbound HTTPS to central.locid.com and central.matchbookdata-dev.com for license validation and usage stats. No customer data sent. Requires MANAGE APPLICATION SPECIFICATIONS privilege."
 
 references:
   # ENCRYPT_INPUT_TABLE — consumer input table for Encrypt jobs

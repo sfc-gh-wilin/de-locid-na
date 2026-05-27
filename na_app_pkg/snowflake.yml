@@ -9,13 +9,12 @@
 #
 # To switch between prod and dev endpoints after installation (app owner only):
 #   snow sql --connection <conn> --role LOCID_APP_INSTALLER \
-#       -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_CENTRAL_URL('https://central.matchbookdata-dev.com/api/0/location_id')"
+#       -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(TRUE)"   -- → dev
 #   snow sql --connection <conn> --role LOCID_APP_INSTALLER \
-#       -q "CALL LOCID_APP.APP_SCHEMA.LOCID_UPDATE_NETWORK_RULE(TRUE)"
+#       -q "CALL LOCID_APP.APP_SCHEMA.LOCID_SET_DEV_ENV(FALSE)"  -- → prod (reset)
 #
-#   Note: ALTER NETWORK RULE on app-internal objects requires EXECUTE AS OWNER —
-#   direct ALTER from outside fails with "Insufficient privileges". Use the proc.
-#   Reset to prod: LOCID_SET_CENTRAL_URL(prod_url) + LOCID_UPDATE_NETWORK_RULE(FALSE)
+#   LOCID_SET_DEV_ENV updates both the LOCID_CENTRAL_URL secret and the
+#   LOCID_CENTRAL_RULE network rule in a single call. Both URLs are hardcoded.
 #
 # Pre-requisite: mb-locid-encoding WHL must be placed in src/lib/ before deploying.
 #   The WHL is staged to @APP_STAGE/lib/ and referenced via IMPORTS in Python UDFs.
