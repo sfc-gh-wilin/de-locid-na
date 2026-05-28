@@ -710,12 +710,15 @@ def encrypt_handler(
 
         # ID output: strip trailing decimal for numeric IDs (e.g. 12345.0 → '12345').
         # TRY_CAST cannot cast between numeric types directly (Snowflake restriction),
-        # so convert to VARCHAR first. TO_VARCHAR strips trailing zeros on numeric
-        # types, so TRY_CAST(TO_VARCHAR(_id) AS NUMBER(38,0)) succeeds for integers
-        # (returning the integer string) and returns NULL for non-integer values
-        # (e.g. '12345.12' has scale > 0), letting COALESCE fall back to TO_VARCHAR.
+        # so convert to VARCHAR first. ROUND(_id, 0) is applied before TO_VARCHAR to
+        # eliminate floating-point representation artifacts on FLOAT/DOUBLE columns
+        # (e.g. a large integer stored as FLOAT may produce '5555555555555.3' from
+        # TO_VARCHAR without rounding). For exact numeric types, ROUND is a no-op.
+        # TRY_CAST then succeeds for integer-valued strings, returning the clean integer
+        # string; it returns NULL for true non-integer values (e.g. '12345.12'),
+        # letting COALESCE fall back to the unmodified TO_VARCHAR(_id).
         id_expr = (
-            f"COALESCE(TRY_CAST(TO_VARCHAR(_id) AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
+            f"COALESCE(TRY_CAST(TO_VARCHAR(ROUND(_id, 0)) AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
             if id_to_varchar else f"_id AS {id_col}"
         )
         select_exprs = [id_expr] + [

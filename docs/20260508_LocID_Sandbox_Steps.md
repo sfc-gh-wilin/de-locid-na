@@ -522,10 +522,10 @@ Verify the version was created:
 ```sql
 USE ROLE LOCID_APP_ADMIN;
 SHOW VERSIONS IN APPLICATION PACKAGE LOCID_PKG_DEV;
--- Expected: review_status = 'NOT_REVIEWED' — this is correct for a private listing.
--- The automated Snowflake security scan only runs for public Marketplace submissions.
--- Private listings shared to specific consumer accounts skip the scan entirely.
--- The version is immediately usable; no waiting required.
+-- Expected at this point: review_status = 'NOT_REVIEWED'
+-- This is correct immediately after version create, before the package has
+-- DISTRIBUTION = 'EXTERNAL' set. The security scan is triggered in Step 2
+-- when ADD VERSION is run on an EXTERNAL package — see wait note there.
 ```
 
 Enable external distribution so the package can be shared to accounts outside the provider's organization:
@@ -539,18 +539,34 @@ ALTER APPLICATION PACKAGE LOCID_PKG_DEV
 
 > **Required** even for private listings shared to a single consumer account. Without this the package defaults to `INTERNAL` distribution — the consumer account will not see the listing if it is in a different Snowflake organization.
 
-#### Provider Step 2 — Add version to release channel and set release directive
+#### Provider Step 2 — Add version to release channel and wait for approval
 
 ```sql
 USE ROLE LOCID_APP_ADMIN;
 
--- Add the version to the DEFAULT release channel before setting the directive.
--- snow app version create creates the version but does not add it to the channel.
+-- Add the version to the DEFAULT release channel.
+-- On an EXTERNAL package this triggers the Snowflake automated security scan.
 ALTER APPLICATION PACKAGE LOCID_PKG_DEV
     MODIFY RELEASE CHANNEL DEFAULT
     ADD VERSION v1_0;
+```
 
--- Set the release directive so consumers receive this version.
+Wait for the security scan to complete (typically < 1 hour):
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+SHOW VERSIONS IN APPLICATION PACKAGE LOCID_PKG_DEV;
+-- Wait until review_status = 'APPROVED' on v1_0 before proceeding.
+-- If still 'PENDING' — wait and re-run this query.
+-- Setting the release directive before APPROVED fails with:
+--   "Version 'V1_0', patch 0 has not yet been approved to release to accounts outside of this organization"
+```
+
+Once approved, set the release directive:
+
+```sql
+USE ROLE LOCID_APP_ADMIN;
+
 ALTER APPLICATION PACKAGE LOCID_PKG_DEV
     MODIFY RELEASE CHANNEL DEFAULT
     SET DEFAULT RELEASE DIRECTIVE
