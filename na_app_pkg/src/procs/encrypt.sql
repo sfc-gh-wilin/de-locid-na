@@ -397,8 +397,9 @@ def encrypt_handler(
     tier_counts = {}   # populated after matching; default used if job fails before that
     input_table_name = 'reference(ENCRYPT_INPUT_TABLE)'  # fallback; resolved in try block
 
-    # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
-    output_table = f"LOCID_ENCRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}"
+    # Auto-generate output table name: UTC timestamp + job suffix ensures uniqueness
+    # even when two jobs start within the same UTC second.
+    output_table = f"LOCID_ENCRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}_{job_id.replace('-', '')[:12].upper()}"
 
     # Interim work tables — job-scoped TRANSIENT in APP_SCHEMA.
     # Native Apps prohibit TEMPORARY TABLE (session-scoped), so we use TRANSIENT
@@ -536,7 +537,7 @@ def encrypt_handler(
                 JOIN rel_builds rb ON l.build_dt = rb.build_dt
             )
             SELECT
-                i._id, i._ip, i._ts,
+                TO_VARCHAR(i._id) AS _id, i._ip, i._ts,
                 lb.encrypted_locid, lb.tier,
                 lb.locid_country,      lb.locid_country_code,
                 lb.locid_region,       lb.locid_region_code,

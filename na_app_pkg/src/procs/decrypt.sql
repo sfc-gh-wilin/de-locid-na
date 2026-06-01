@@ -388,8 +388,9 @@ def decrypt_handler(
     TBL_DECODED = f'APP_SCHEMA._LOCID_DECODED_{job_sfx}'
     _interim_tbls = [TBL_DECODED]
 
-    # Auto-generate output table name in APP_SCHEMA (UTC timestamp)
-    output_table = f"LOCID_DECRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}"
+    # Auto-generate output table name: UTC timestamp + job suffix ensures uniqueness
+    # even when two jobs start within the same UTC second.
+    output_table = f"LOCID_DECRYPT_OUTPUT_{time.strftime('%Y%m%d_%H%M%S', time.gmtime())}_{job_sfx}"
 
     # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
     # from the caller's session and cannot be queried or changed within the proc.
