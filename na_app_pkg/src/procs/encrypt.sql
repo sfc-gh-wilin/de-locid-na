@@ -10,7 +10,7 @@
 --   2. Fetch license context (client_id) from cached license; namespace_guid from SECRET
 --      Crypto secrets are bound directly to UDFs via SECRETS clauses — never embedded in SQL.
 --   3. IPv4 matching — equi-join via LOCID_BUILDS_IPV4_EXPLODED
---   4. IPv6 matching — 6-pass cascading hex-prefix range join
+--   4. IPv6 matching — prefix_56 equi-join (Stage 1) + 5-pass wide-range cascade (Stage 2)
 --   5. Call LOCID_TXCLOC_ENCRYPT (with geo context) + LOCID_STABLE_CLOC per matched row
 --   6. Apply entitlement filter on output columns
 --   7. CREATE OR REPLACE TABLE → customer output table
@@ -409,10 +409,14 @@ def encrypt_handler(
     TBL_V6_DATED  = f'APP_SCHEMA._LOCID_V6_DATD_{job_sfx}'
     TBL_V6_RANGE  = f'APP_SCHEMA._LOCID_V6_RNG_{job_sfx}'
     TBL_IPV6      = f'APP_SCHEMA._LOCID_IPV6_{job_sfx}'
+    TBL_V6_WIDE   = f'APP_SCHEMA._LOCID_V6_WIDE_{job_sfx}'
+    TBL_V6_UNMTCH = f'APP_SCHEMA._LOCID_V6_UNMT_{job_sfx}'
+    TBL_V6_SEEN   = f'APP_SCHEMA._LOCID_V6_SEEN_{job_sfx}'
     TBL_MATCHED   = f'APP_SCHEMA._LOCID_MTCHD_{job_sfx}'
     _interim_tbls = [
         TBL_IPV4, TBL_V6_INP, TBL_V6_DATED,
-        TBL_V6_RANGE, TBL_IPV6, TBL_MATCHED,
+        TBL_V6_RANGE, TBL_IPV6, TBL_V6_WIDE,
+        TBL_V6_UNMTCH, TBL_V6_SEEN, TBL_MATCHED,
     ]
 
     # CURRENT_WAREHOUSE() is blocked in Native App procs; warehouse is inherited
@@ -537,22 +541,27 @@ def encrypt_handler(
         phases['ipv4_match_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 
         # ------------------------------------------------------------------
-        # Step 4: IPv6 matching — split equi-join with BETWEEN fallback
+        # Step 4: IPv6 matching — prefix_56 equi-join (Stage 1) + 5-pass wide-range cascade (Stage 2)
         #
-        # Performance strategy (3 steps):
+        # Performance strategy:
         #
-        #   Stage 1a: Equi-join + range filter against LOCID_BUILDS_IPV6_EXPLODED.
-        #             Materialise the result in TBL_V6_RANGE. Splitting from Stage 1b
-        #             lets Snowflake optimise each join independently — confirmed
-        #             significant speedup by client (Ryan Bessey, 2026-05-27).
+        #   Stage 1a: Equi-join + range filter against LOCID_BUILDS_IPV6_EXPLODED
+        #             (prefix_56 + BETWEEN). Materialise in TBL_V6_RANGE so Snowflake
+        #             can optimise the geo-context lookup independently.
+        #             Split confirmed significant speedup by client (Ryan Bessey, 2026-05-27).
         #
-        #   Stage 1b: Join TBL_V6_RANGE to LOCID_BUILDS for geo context (not stored
-        #             in the exploded table). QUALIFY deduplicates per _id.
+        #   Stage 1b: Join TBL_V6_RANGE to LOCID_BUILDS for geo context. QUALIFY
+        #             deduplicates per _id.
         #
-        #   Stage 2:  BETWEEN fallback for IDs unmatched in Stage 1.
-        #             Wide ranges (> /48, ~31K source rows) are excluded from the
-        #             exploded table. Only unmatched IDs are joined against
-        #             LOCID_BUILDS source for these rare wide ranges.
+        #   Stage 2:  5-pass cascading fallback for IDs unmatched in Stage 1.
+        #             Wide ranges (span > /48) are excluded from the exploded table.
+        #             Pre-materialise candidates (TBL_V6_WIDE) and unmatched inputs
+        #             (TBL_V6_UNMTCH), then cascade through progressively shorter
+        #             shared-prefix equi-joins (prefix 10→8→6→4→pure BETWEEN).
+        #             Each pass narrows candidates via equi-join before BETWEEN,
+        #             and TBL_V6_SEEN prevents re-processing already-matched IDs.
+        #             Benchmarked by client (Ryan Bessey, 2026-06-01):
+        #               1 M rows → 8 min, 10 M → 9 min, 100 M → 14 min (Large WH).
         # ------------------------------------------------------------------
 
         # 4-a: IPv6 input with ip_hex pre-computed
@@ -623,9 +632,34 @@ def encrypt_handler(
             QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY lb.build_dt DESC) = 1
         """).collect()
 
-        # Stage 2: BETWEEN fallback for IDs unmatched in Stage 1.
-        # Wide ranges (> /48) are excluded from the exploded table. Only the ~31K
-        # source rows where start and end differ at the /48 level are scanned.
+        # Stage 2: 5-pass cascading fallback for IDs unmatched in Stage 1.
+        # Pre-materialise wide-range candidates and unmatched inputs, then cascade
+        # through progressively shorter shared-prefix equi-joins so each pass uses
+        # an equi-join to narrow candidates before the BETWEEN range filter.
+        # TBL_V6_SEEN accumulates matched _ids across passes to skip re-processing.
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_WIDE} AS
+            SELECT *
+            FROM {BUILDS} l
+            WHERE l.start_ip LIKE '%:%'
+              AND SUBSTR(l.start_ip_int_hex, 1, 12) != SUBSTR(l.end_ip_int_hex, 1, 12)
+              AND l.build_dt IN (SELECT DISTINCT build_dt FROM {TBL_V6_DATED})
+            ORDER BY l.build_dt, l.start_ip_int_hex
+        """).collect()
+
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_UNMTCH} AS
+            SELECT i.*
+            FROM {TBL_V6_DATED} i
+            LEFT JOIN {TBL_IPV6} matched ON i._id = matched._id
+            WHERE matched._id IS NULL
+        """).collect()
+
+        session.sql(f"""
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_SEEN} (_id VARCHAR)
+        """).collect()
+
+        # Pass 1 — prefix 10 chars (/40 boundary)
         session.sql(f"""
             INSERT INTO {TBL_IPV6}
             SELECT i._id, i._ip, i._ts,
@@ -635,14 +669,118 @@ def encrypt_handler(
                 l.locid_city,         l.locid_city_code,
                 l.locid_postal_code,  l.locid_horizontal_accuracy,
                 l.build_dt
-            FROM {TBL_V6_DATED} i
-            LEFT JOIN {TBL_IPV6} matched ON i._id = matched._id
-            JOIN {BUILDS} l
+            FROM {TBL_V6_UNMTCH} i
+            JOIN {TBL_V6_WIDE} l
                 ON  i.build_dt = l.build_dt
-                AND l.start_ip LIKE '%:%'
-                AND SUBSTR(l.start_ip_int_hex, 1, 12) != SUBSTR(l.end_ip_int_hex, 1, 12)
+                AND SUBSTR(i.ip_hex, 1, 10) = SUBSTR(l.start_ip_int_hex, 1, 10)
                 AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
-            WHERE matched._id IS NULL
+            WHERE SUBSTR(l.start_ip_int_hex, 1, 10) = SUBSTR(l.end_ip_int_hex, 1, 10)
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
+        """).collect()
+
+        # Seed SEEN with all matched so far (Stage 1 + Pass 1)
+        session.sql(f"""
+            INSERT INTO {TBL_V6_SEEN}
+            SELECT DISTINCT _id FROM {TBL_IPV6}
+        """).collect()
+
+        # Pass 2 — prefix 8 chars (/32 boundary)
+        session.sql(f"""
+            INSERT INTO {TBL_IPV6}
+            SELECT i._id, i._ip, i._ts,
+                l.encrypted_locid, l.tier,
+                l.locid_country,      l.locid_country_code,
+                l.locid_region,       l.locid_region_code,
+                l.locid_city,         l.locid_city_code,
+                l.locid_postal_code,  l.locid_horizontal_accuracy,
+                l.build_dt
+            FROM {TBL_V6_UNMTCH} i
+            LEFT JOIN {TBL_V6_SEEN} xs ON i._id = xs._id
+            JOIN {TBL_V6_WIDE} l
+                ON  i.build_dt = l.build_dt
+                AND SUBSTR(i.ip_hex, 1, 8) = SUBSTR(l.start_ip_int_hex, 1, 8)
+                AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+            WHERE xs._id IS NULL
+              AND SUBSTR(l.start_ip_int_hex, 1, 8) = SUBSTR(l.end_ip_int_hex, 1, 8)
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
+        """).collect()
+
+        session.sql(f"""
+            INSERT INTO {TBL_V6_SEEN}
+            SELECT DISTINCT _id FROM {TBL_IPV6}
+            EXCEPT SELECT _id FROM {TBL_V6_SEEN}
+        """).collect()
+
+        # Pass 3 — prefix 6 chars (/24 boundary)
+        session.sql(f"""
+            INSERT INTO {TBL_IPV6}
+            SELECT i._id, i._ip, i._ts,
+                l.encrypted_locid, l.tier,
+                l.locid_country,      l.locid_country_code,
+                l.locid_region,       l.locid_region_code,
+                l.locid_city,         l.locid_city_code,
+                l.locid_postal_code,  l.locid_horizontal_accuracy,
+                l.build_dt
+            FROM {TBL_V6_UNMTCH} i
+            LEFT JOIN {TBL_V6_SEEN} xs ON i._id = xs._id
+            JOIN {TBL_V6_WIDE} l
+                ON  i.build_dt = l.build_dt
+                AND SUBSTR(i.ip_hex, 1, 6) = SUBSTR(l.start_ip_int_hex, 1, 6)
+                AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+            WHERE xs._id IS NULL
+              AND SUBSTR(l.start_ip_int_hex, 1, 6) = SUBSTR(l.end_ip_int_hex, 1, 6)
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
+        """).collect()
+
+        session.sql(f"""
+            INSERT INTO {TBL_V6_SEEN}
+            SELECT DISTINCT _id FROM {TBL_IPV6}
+            EXCEPT SELECT _id FROM {TBL_V6_SEEN}
+        """).collect()
+
+        # Pass 4 — prefix 4 chars (/16 boundary)
+        session.sql(f"""
+            INSERT INTO {TBL_IPV6}
+            SELECT i._id, i._ip, i._ts,
+                l.encrypted_locid, l.tier,
+                l.locid_country,      l.locid_country_code,
+                l.locid_region,       l.locid_region_code,
+                l.locid_city,         l.locid_city_code,
+                l.locid_postal_code,  l.locid_horizontal_accuracy,
+                l.build_dt
+            FROM {TBL_V6_UNMTCH} i
+            LEFT JOIN {TBL_V6_SEEN} xs ON i._id = xs._id
+            JOIN {TBL_V6_WIDE} l
+                ON  i.build_dt = l.build_dt
+                AND SUBSTR(i.ip_hex, 1, 4) = SUBSTR(l.start_ip_int_hex, 1, 4)
+                AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+            WHERE xs._id IS NULL
+              AND SUBSTR(l.start_ip_int_hex, 1, 4) = SUBSTR(l.end_ip_int_hex, 1, 4)
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
+        """).collect()
+
+        session.sql(f"""
+            INSERT INTO {TBL_V6_SEEN}
+            SELECT DISTINCT _id FROM {TBL_IPV6}
+            EXCEPT SELECT _id FROM {TBL_V6_SEEN}
+        """).collect()
+
+        # Pass 5 — pure BETWEEN, no equi-join (truly global ranges only)
+        session.sql(f"""
+            INSERT INTO {TBL_IPV6}
+            SELECT i._id, i._ip, i._ts,
+                l.encrypted_locid, l.tier,
+                l.locid_country,      l.locid_country_code,
+                l.locid_region,       l.locid_region_code,
+                l.locid_city,         l.locid_city_code,
+                l.locid_postal_code,  l.locid_horizontal_accuracy,
+                l.build_dt
+            FROM {TBL_V6_UNMTCH} i
+            LEFT JOIN {TBL_V6_SEEN} xs ON i._id = xs._id
+            JOIN {TBL_V6_WIDE} l
+                ON  i.build_dt = l.build_dt
+                AND i.ip_hex BETWEEN l.start_ip_int_hex AND l.end_ip_int_hex
+            WHERE xs._id IS NULL
             QUALIFY ROW_NUMBER() OVER (PARTITION BY i._id ORDER BY l.build_dt DESC) = 1
         """).collect()
 
@@ -708,17 +846,13 @@ def encrypt_handler(
             'locid_postal_code':  'locid_postal_code',
         }
 
-        # ID output: strip trailing decimal for numeric IDs (e.g. 12345.0 → '12345').
+        # ID output: strip trailing decimal for integer-valued numeric IDs (e.g. 12345.0 → '12345').
         # TRY_CAST cannot cast between numeric types directly (Snowflake restriction),
-        # so convert to VARCHAR first. ROUND(_id, 0) is applied before TO_VARCHAR to
-        # eliminate floating-point representation artifacts on FLOAT/DOUBLE columns
-        # (e.g. a large integer stored as FLOAT may produce '5555555555555.3' from
-        # TO_VARCHAR without rounding). For exact numeric types, ROUND is a no-op.
-        # TRY_CAST then succeeds for integer-valued strings, returning the clean integer
-        # string; it returns NULL for true non-integer values (e.g. '12345.12'),
-        # letting COALESCE fall back to the unmodified TO_VARCHAR(_id).
+        # so convert to VARCHAR first. TRY_CAST succeeds for integer-valued strings and
+        # returns NULL for true non-integer values (e.g. '5555555555555.3'), letting
+        # COALESCE fall back to the unmodified TO_VARCHAR(_id) to preserve the original.
         id_expr = (
-            f"COALESCE(TRY_CAST(TO_VARCHAR(ROUND(_id, 0)) AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
+            f"COALESCE(TRY_CAST(TO_VARCHAR(_id) AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
             if id_to_varchar else f"_id AS {id_col}"
         )
         select_exprs = [id_expr] + [

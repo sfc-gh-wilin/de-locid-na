@@ -511,12 +511,6 @@ Use this to let a specific consumer account (e.g. a UAT partner) test against th
 
 #### Provider Step 1 — Ensure DEV package is deployed and versioned
 
-```bash
-cd na_app_pkg
-./deploy_dev.sh --connection locid   # deploys LOCID_PKG_DEV in provider sandbox
-snow app version create v1_0 --force --skip-git-check --connection locid
-```
-
 Verify the version was created:
 
 ```sql
