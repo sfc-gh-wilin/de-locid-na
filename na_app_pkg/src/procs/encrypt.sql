@@ -847,12 +847,18 @@ def encrypt_handler(
         }
 
         # ID output: strip trailing decimal for integer-valued numeric IDs (e.g. 12345.0 → '12345').
-        # TRY_CAST cannot cast between numeric types directly (Snowflake restriction),
-        # so convert to VARCHAR first. TRY_CAST succeeds for integer-valued strings and
-        # returns NULL for true non-integer values (e.g. '5555555555555.3'), letting
-        # COALESCE fall back to the unmodified TO_VARCHAR(_id) to preserve the original.
+        # TRY_CAST(non-string AS NUMBER) is forbidden by Snowflake, and TRY_CAST on a
+        # decimal string like '5.123' rounds silently to 5 instead of returning NULL.
+        # Solution: convert _id to VARCHAR first (safe for FLOAT, NUMBER, or VARCHAR input),
+        # then use REGEXP_LIKE to gate the cast — only strings that are truly integer-valued
+        # (digits only, or digits + decimal followed solely by zeros) are cast to NUMBER.
+        # All other values (e.g. '5.123') fall through unchanged.
         id_expr = (
-            f"COALESCE(TRY_CAST(TO_VARCHAR(_id) AS NUMBER(38,0))::VARCHAR, TO_VARCHAR(_id)) AS {id_col}"
+            f"""CASE
+                WHEN REGEXP_LIKE(TO_VARCHAR(_id), '-?[0-9]+([.][0]+)?')
+                THEN TO_VARCHAR(TRY_CAST(TO_VARCHAR(_id) AS NUMBER(38,0)))
+                ELSE TO_VARCHAR(_id)
+            END AS {id_col}"""
             if id_to_varchar else f"_id AS {id_col}"
         )
         select_exprs = [id_expr] + [
