@@ -220,7 +220,7 @@ GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;
 
 ### 2.4 Verify installation
 
-In Snowsight, navigate to **Catalog → Apps**. Confirm `LOCID_APP` appears with status **Ready**.
+In Snowsight, navigate to **Catalog → Apps**. Confirm `LOCID_APP` appears with status **Installed**.
 
 ---
 
@@ -288,7 +288,7 @@ FROM TABLE(GENERATOR(ROWCOUNT => 10));
 
 **Option A — Streamlit UI (recommended):**
 
-Open the app → **Settings** (gear icon) → bind **Input Table for Encrypt** to `LOCID_TEST.INPUT.SAMPLE_DATA`.
+Open the app → click the **Permissions** tab → find **Input Table for Encrypt** → click **Review** (or the edit icon) → bind to `LOCID_TEST.INPUT.SAMPLE_DATA`.
 
 **Option B — SQL:**
 
