@@ -504,6 +504,7 @@ def decrypt_handler(
             CREATE OR REPLACE TABLE APP_SCHEMA.{output_table} AS
             SELECT {', '.join(select_exprs)}
             FROM {TBL_DECODED}
+            WHERE _decoded IS NOT NULL
         """).collect()
         phases['udf_s'] = round(time.perf_counter() - _pt, 3); _pt = time.perf_counter()
 

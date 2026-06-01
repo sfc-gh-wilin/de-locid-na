@@ -469,10 +469,19 @@ def encrypt_handler(
         rows_in = session.sql("SELECT COUNT(*) FROM reference('ENCRYPT_INPUT_TABLE')").collect()[0][0]
 
         # Timestamp → epoch-seconds SQL expression
-        # Uses TRY_ functions so invalid values become NULL (skipped) instead of
-        # failing the entire job.
+        # TRY_CAST is forbidden between numeric types (e.g. NUMBER(38,5) → BIGINT).
+        # For epoch_ms and epoch_sec, probe with LIMIT 0 first: if TRY_CAST compiles
+        # the column is string-compatible and TRY_ error-tolerance is preserved;
+        # if it fails the column is numeric and a direct ::BIGINT cast is used instead.
         if ts_format == 'epoch_ms':
-            ts_expr = f"FLOOR(TRY_CAST({ts_col} AS BIGINT) / 1000)::BIGINT"
+            try:
+                session.sql(
+                    f"SELECT TRY_CAST({ts_col} AS BIGINT) "
+                    f"FROM reference('ENCRYPT_INPUT_TABLE') LIMIT 0"
+                ).collect()
+                ts_expr = f"FLOOR(TRY_CAST({ts_col} AS BIGINT) / 1000)::BIGINT"
+            except Exception:
+                ts_expr = f"FLOOR({ts_col}::BIGINT / 1000)::BIGINT"
         elif ts_format == 'timestamp':
             # Probe the actual column type using a zero-row compile check.
             # TRY_CAST(col AS TIMESTAMP_NTZ) raises a SQL compilation error when col
@@ -488,7 +497,14 @@ def encrypt_handler(
             except Exception:
                 ts_expr = f"DATE_PART(epoch_second, {ts_col})::BIGINT"
         else:   # epoch_sec (default)
-            ts_expr = f"TRY_CAST({ts_col} AS BIGINT)"
+            try:
+                session.sql(
+                    f"SELECT TRY_CAST({ts_col} AS BIGINT) "
+                    f"FROM reference('ENCRYPT_INPUT_TABLE') LIMIT 0"
+                ).collect()
+                ts_expr = f"TRY_CAST({ts_col} AS BIGINT)"
+            except Exception:
+                ts_expr = f"{ts_col}::BIGINT"
 
         # Count rows with valid timestamps; difference = skipped due to invalid ts
         rows_valid_ts = session.sql(
