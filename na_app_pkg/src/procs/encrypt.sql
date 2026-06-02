@@ -26,7 +26,7 @@
 -- Consumer references used by this procedure (declared in manifest.yml):
 --   ENCRYPT_INPUT_TABLE — consumer input table; read via reference('ENCRYPT_INPUT_TABLE')
 --
--- Output table: auto-generated in APP_SCHEMA as LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS.
+-- Output table: auto-generated in APP_SCHEMA as LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX.
 -- The app owns APP_SCHEMA — no consumer GRANT needed.
 -- SELECT is granted to APP_ADMIN and APP_VIEWER after creation.
 
@@ -991,5 +991,3 @@ $$;
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_ENCRYPT(
     VARCHAR, VARCHAR, VARCHAR, VARCHAR, ARRAY, BOOLEAN
 ) TO APPLICATION ROLE APP_ADMIN;
-
-

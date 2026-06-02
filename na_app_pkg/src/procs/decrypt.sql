@@ -31,7 +31,7 @@
 -- Consumer references used by this procedure (declared in manifest.yml):
 --   DECRYPT_INPUT_TABLE — consumer input table; read via reference('DECRYPT_INPUT_TABLE')
 --
--- Output table: auto-generated in APP_SCHEMA as LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS.
+-- Output table: auto-generated in APP_SCHEMA as LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX.
 -- The app owns APP_SCHEMA — no consumer GRANT needed.
 -- SELECT is granted to APP_ADMIN and APP_VIEWER after creation.
 CREATE OR REPLACE PROCEDURE APP_SCHEMA.LOCID_DECRYPT(
@@ -601,5 +601,3 @@ $$;
 GRANT USAGE ON PROCEDURE APP_SCHEMA.LOCID_DECRYPT(
     VARCHAR, VARCHAR, ARRAY
 ) TO APPLICATION ROLE APP_ADMIN;
-
-
