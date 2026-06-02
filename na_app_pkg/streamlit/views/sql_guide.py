@@ -167,7 +167,7 @@ st.code(
     "-- The procedure returns a VARIANT with job metadata:\n"
     "-- job_id, status, output_table, rows_in, rows_matched, runtime_s\n\n"
     "-- To query the output, use the output_table value from the result:\n"
-    f"SELECT * FROM {_app_name}.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS>;\n\n"
+    f"SELECT * FROM {_app_name}.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX>;\n\n"
     "-- Or capture the output table name dynamically:\n"
     "DECLARE\n"
     "    result VARIANT;\n"
@@ -240,7 +240,7 @@ st.markdown("**Read the results:**")
 st.code(
     "-- The procedure returns a VARIANT with job metadata:\n"
     "-- job_id, status, output_table, rows_in, rows_matched, rows_out, runtime_s\n\n"
-    f"SELECT * FROM {_app_name}.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS>;",
+    f"SELECT * FROM {_app_name}.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX>;",
     language="sql",
 )
 

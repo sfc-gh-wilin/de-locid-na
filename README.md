@@ -296,8 +296,8 @@ Customer Input Table (via reference binding)
          │
          ├─ 5. Apply entitlement filter on output columns
          │
-         ├─ 6. CREATE TABLE APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS
-         │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
+         ├─ 6. CREATE TABLE APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX
+         │      (auto-generated: UTC timestamp + 12-char job ID; SELECT granted to APP_ADMIN/APP_VIEWER)
          │
          ├─ 8. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
          │
@@ -332,8 +332,8 @@ Customer Input Table (via reference binding)
          │
          ├─ 4. Apply entitlement filter on output columns
          │
-         ├─ 5. CREATE TABLE APP_SCHEMA.LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS
-         │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
+         ├─ 5. CREATE TABLE APP_SCHEMA.LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX
+         │      (auto-generated: UTC timestamp + 12-char job ID; SELECT granted to APP_ADMIN/APP_VIEWER)
          │
          ├─ 7. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
          │
@@ -689,9 +689,11 @@ See **[Customer Onboarding Workflow](#customer-onboarding-workflow)** for the fu
 Each Encrypt and Decrypt job creates a new permanent table in `APP_SCHEMA`:
 
 ```
-LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS
-LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS
+LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX
+LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX
 ```
+
+Where `YYYYMMDD_HHMMSS` is the UTC timestamp at job start and `JOBSFX` is the first 12 uppercase hex characters of the job UUID (e.g., `LOCID_ENCRYPT_OUTPUT_20260601_143022_A4D2C1F07E3B`).
 
 Over time, frequent job runs can produce many output tables. The app provides a built-in purge procedure to help consumers manage this.
 
@@ -725,7 +727,7 @@ Returns a summary:
 
 ```json
 {
-  "tables_dropped": ["LOCID_ENCRYPT_OUTPUT_20260401_120000", ...],
+  "tables_dropped": ["LOCID_ENCRYPT_OUTPUT_20260401_120000_A4D2C1F07E3B", ...],
   "count": 5,
   "retention_days": 30,
   "cutoff_date": "2026-04-08 13:37:00"

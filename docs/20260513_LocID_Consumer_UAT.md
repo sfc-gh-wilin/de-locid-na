@@ -38,8 +38,8 @@
 
 | Step | Action | Expected Result                                                                     | Pass/Fail |
 |------|--------|-------------------------------------------------------------------------------------|-----------|
-| 1.1 | Navigate to **Catalog → Apps** in Snowsight | `LOCID_APP` appears in list                                                         | ☐ |
-| 1.2 | Check app status | Status = **Installed**                                                              | ☐ |
+| 1.1 | Navigate to **Catalog → Apps** in Snowsight | `LOCID_APP` appears in list. **Note:** two `LOCID_APP` rows may appear — see Known Issues below. | ☐ |
+| 1.2 | Check app status (row with Owner Role = `LOCID_APP_INSTALLER`) | Status = **Installed**                                                              | ☐ |
 | 1.3 | Run: `DESCRIBE APPLICATION LOCID_APP;` | Returns version `v1_0`, patch ≥ 0, `upgrade_state = COMPLETE`                       | ☐ |
 | 1.4 | Verify external access was approved | Access to `central.locid.com` approved during install (Required Permissions prompt) | ☐ |
 
@@ -118,7 +118,7 @@
 | 5.4 | Step 4 — Review & click **Run Job** | Job submits, progress indicator shown | ☐ |
 | 5.5 | Wait for completion | Job finishes with status SUCCESS | ☐ |
 | 5.6 | Run: `SHOW TABLES LIKE 'LOCID_ENCRYPT_OUTPUT_%' IN SCHEMA LOCID_APP.APP_SCHEMA;` | New output table exists with current timestamp suffix | ☐ |
-| 5.7 | Run: `SELECT * FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> LIMIT 10;` | Rows returned with expected columns (ROW_ID + selected output cols) | ☐ |
+| 5.7 | Run: `SELECT * FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX> LIMIT 10;` | Rows returned with expected columns (ROW_ID + selected output cols) | ☐ |
 
 ---
 
@@ -153,13 +153,13 @@
 | | ```sql | | |
 | | CALL LOCID_APP.APP_SCHEMA.REGISTER_SINGLE_CALLBACK( | | |
 | |     'DECRYPT_INPUT_TABLE', 'ADD', | | |
-| |     SYSTEM$REFERENCE('TABLE', 'LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS>', 'PERSISTENT', 'SELECT') | | |
+| |     SYSTEM$REFERENCE('TABLE', 'LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX>', 'PERSISTENT', 'SELECT') | | |
 | | ); | | |
 | | ``` | | ☐ |
 | 7.2 | Open **Run Decrypt** → Map columns: ID = `ROW_ID`, TX_CLOC = `TX_CLOC` | Columns mapped | ☐ |
 | 7.3 | Click **Run Job** | Job submits | ☐ |
 | 7.4 | Wait for completion | Job finishes with status SUCCESS | ☐ |
-| 7.5 | Run: `SELECT * FROM LOCID_APP.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS> LIMIT 10;` | Rows returned with ROW_ID + STABLE_CLOC + geo context columns | ☐ |
+| 7.5 | Run: `SELECT * FROM LOCID_APP.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX> LIMIT 10;` | Rows returned with ROW_ID + STABLE_CLOC + geo context columns | ☐ |
 
 ---
 
@@ -179,8 +179,8 @@
 | |     e.stable_cloc AS from_encrypt, | | |
 | |     d.stable_cloc AS from_decrypt, | | |
 | |     IFF(e.stable_cloc = d.stable_cloc, 'PASS', 'FAIL') AS consistent | | |
-| | FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> e | | |
-| | JOIN LOCID_APP.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS> d | | |
+| | FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX> e | | |
+| | JOIN LOCID_APP.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX> d | | |
 | |     ON e.row_id = d.row_id | | |
 | | WHERE e.stable_cloc IS NOT NULL; | | |
 | | ``` | | ☐ |
@@ -348,3 +348,20 @@
 | Date | |
 | App Version | |
 | Notes | |
+
+---
+
+## Known Issues
+
+### KI-01 — Two `LOCID_APP` entries in Snowsight Apps list
+
+**Affected step:** TC-01 (steps 1.1–1.2)
+
+Snowsight displays two rows named `LOCID_APP` on the **Catalog → Apps** page. The second entry is the Streamlit app embedded inside the Native App (`LOCID_APP.APP_SCHEMA.LOCID_APP`) — it is not a separate installation.
+
+| Entry | Installed from | Owner Role | Use |
+|-------|---------------|------------|-----|
+| **Correct** | `LOCID_PKG` | `LOCID_APP_INSTALLER` | ✓ Open and use this one |
+| Ignore | `LOCID_APP.APP_SCHEMA.LOCID_APP` | *(none)* | ✗ Do not open |
+
+**Status:** Known Snowflake platform bug. Will be resolved in a future Snowflake release. No action required — always select the entry with Owner Role `LOCID_APP_INSTALLER`.

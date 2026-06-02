@@ -220,7 +220,18 @@ GRANT USAGE ON WAREHOUSE LOCID_WH TO APPLICATION LOCID_APP;
 
 ### 2.4 Verify installation
 
-In Snowsight, navigate to **Catalog → Apps**. Confirm `LOCID_APP` appears with status **Installed**.
+In Snowsight, navigate to **Catalog → Apps**. Confirm `LOCID_APP` appears with status **NEW**.
+
+> **Known issue — two `LOCID_APP` entries visible in the Apps list**
+>
+> Snowsight currently displays the embedded Streamlit app (located inside the Native App at `LOCID_APP.APP_SCHEMA.LOCID_APP`) as a separate entry alongside the installed Native App.
+>
+> | Entry | Installed from | Owner Role | Action |
+> |-------|---------------|------------|--------|
+> | **Correct** | `LOCID_PKG` | `LOCID_APP_INSTALLER` | Use this one |
+> | Ignore | `LOCID_APP.APP_SCHEMA.LOCID_APP` | *(none)* | Do not open |
+>
+> Always open the entry whose **Owner Role** column shows `LOCID_APP_INSTALLER`. This is a known Snowflake platform bug and will be resolved in a future Snowflake release.
 
 ---
 
@@ -288,7 +299,7 @@ FROM TABLE(GENERATOR(ROWCOUNT => 10));
 
 **Option A — Streamlit UI (recommended):**
 
-Open the app → click the **Permissions** tab → find **Input Table for Encrypt** → click **Review** (or the edit icon) → bind to `LOCID_TEST.INPUT.SAMPLE_DATA`.
+Open the app → click the **Permissions** tab → find **Input Table for Encrypt** → click **Add** (or the edit icon) → bind to `LOCID_TEST.INPUT.SAMPLE_DATA`.
 
 **Option B — SQL:**
 
@@ -322,12 +333,12 @@ Select output columns (all entitled) and click **Run Job**.
 
 **Expected:**
 - Job completes successfully (status = `SUCCESS` in Job History)
-- Output table created: `LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS`
+- Output table created: `LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX`
 
 Inspect:
 
 ```sql
-SELECT * FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> LIMIT 10;
+SELECT * FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX> LIMIT 10;
 ```
 
 ### 5.3 Warehouse recommendation
@@ -353,7 +364,7 @@ USE ROLE LOCID_APP_INSTALLER;
 
 CALL LOCID_APP.APP_SCHEMA.REGISTER_SINGLE_CALLBACK(
     'DECRYPT_INPUT_TABLE', 'ADD',
-    SYSTEM$REFERENCE('TABLE', 'LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS>',
+    SYSTEM$REFERENCE('TABLE', 'LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX>',
                      'PERSISTENT', 'SELECT')
 );
 ```
@@ -377,8 +388,8 @@ SELECT
     e.stable_cloc AS from_encrypt,
     d.stable_cloc AS from_decrypt,
     IFF(e.stable_cloc = d.stable_cloc, 'PASS', 'FAIL') AS consistent
-FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS> e
-JOIN LOCID_APP.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS> d ON e.row_id = d.row_id
+FROM LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX> e
+JOIN LOCID_APP.APP_SCHEMA.LOCID_DECRYPT_OUTPUT_<YYYYMMDD_HHMMSS_JOBSFX> d ON e.row_id = d.row_id
 WHERE e.stable_cloc IS NOT NULL
 LIMIT 20;
 -- All rows should show PASS

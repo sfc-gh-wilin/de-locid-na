@@ -7,7 +7,7 @@
 -- Purpose:
 --   Allows consumers to manage the accumulation of output tables created by
 --   LOCID_ENCRYPT and LOCID_DECRYPT. Each job creates a new table named
---   LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS or LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS.
+--   LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX or LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX.
 --   Over time these can become numerous. This procedure drops output tables
 --   older than a configurable retention threshold.
 --
@@ -56,7 +56,7 @@ def purge_handler(session, retention_days):
         ).collect()
 
         # Parse table name → extract timestamp suffix
-        pattern = re.compile(r'^LOCID_(?:ENCRYPT|DECRYPT)_OUTPUT_(\d{8}_\d{6})$')
+        pattern = re.compile(r'^LOCID_(?:ENCRYPT|DECRYPT)_OUTPUT_(\d{8}_\d{6})_[0-9A-F]{12}$')
         dropped = []
 
         for row in tables:

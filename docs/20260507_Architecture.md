@@ -263,8 +263,8 @@ Customer Input Table (via reference binding)
          │
          ├─ 5. Apply entitlement filter on output columns
          │
-         ├─ 6. CREATE TABLE APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS
-         │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
+         ├─ 6. CREATE TABLE APP_SCHEMA.LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX
+         │      (auto-generated: UTC timestamp + 12-char job ID; SELECT granted to APP_ADMIN/APP_VIEWER)
          │
          ├─ 8. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
          │
@@ -301,8 +301,8 @@ Customer Input Table (via reference binding)
          │
          ├─ 4. Apply entitlement filter on output columns
          │
-         ├─ 5. CREATE TABLE APP_SCHEMA.LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS
-         │      (auto-generated name; SELECT granted to APP_ADMIN/APP_VIEWER)
+         ├─ 5. CREATE TABLE APP_SCHEMA.LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX
+         │      (auto-generated: UTC timestamp + 12-char job ID; SELECT granted to APP_ADMIN/APP_VIEWER)
          │
          ├─ 7. UPDATE JOB_LOG (STARTED→SUCCESS) + opportunistic LOCID_PURGE_LOGS
          │
@@ -559,7 +559,7 @@ Read-only for customers. Updated by LocID via app version releases when new fiel
 - "Re-run Setup Wizard" link — for re-registering credentials or troubleshooting connectivity
 
 **Output Table Management**
-- Each Encrypt/Decrypt job creates a permanent table: `LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS` / `LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS`
+- Each Encrypt/Decrypt job creates a permanent table: `LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX` / `LOCID_DECRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX`
 - Over time these accumulate; consumers can purge old output tables via `LOCID_PURGE_OUTPUTS`:
 
   ```sql
