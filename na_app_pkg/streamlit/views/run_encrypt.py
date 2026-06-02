@@ -714,7 +714,7 @@ elif step == 4:
     )
     st.caption(
         "Output will be written to an auto-named table in APP_SCHEMA "
-        "(e.g. LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS)."
+        "(e.g. LOCID_ENCRYPT_OUTPUT_YYYYMMDD_HHMMSS_JOBSFX)."
     )
 
     col1, col2 = st.columns(2)
