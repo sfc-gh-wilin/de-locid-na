@@ -123,8 +123,7 @@ def _get_license_context(session) -> dict:
         if item.get('status') == 'ACTIVE':
             if sel_id is None or item.get('api_key_id') == sel_id:
                 entry = item
-                if sel_id is not None:
-                    break
+                break
 
     if not entry:
         raise RuntimeError(
@@ -550,7 +549,7 @@ def decrypt_handler(
         if not stats_ok:
             _log_job_end(
                 session, job_id, rows_in, rows_matched, rows_out,
-                runtime_s, 'FAILED',
+                runtime_s, 'WARNING',
                 f'Usage stats could not be posted to LocID Central. '
                 f'Data was processed successfully — output table APP_SCHEMA.{output_table} was created.',
                 input_table_name, f"APP_SCHEMA.{output_table}", active_cols,
@@ -583,8 +582,12 @@ def decrypt_handler(
             f"APP_SCHEMA.{output_table}", [],
         )
         try:
-            _post_stats(session, job_id, client_id, rows_in,
-                        rows_matched, rows_out, phases, {'T0': rows_matched}, 'decrypt')
+            # Skip error-path telemetry when license context was never fetched
+            # (client_id=0 is not a valid billing identifier; posting it creates
+            # noise in LocID Central's analytics for pre-license-fetch failures).
+            if client_id != 0:
+                _post_stats(session, job_id, client_id, rows_in,
+                            rows_matched, rows_out, phases, {'T0': rows_matched}, 'decrypt')
         except Exception:
             pass  # Error-path stats are best-effort — never suppress the original raise
         raise RuntimeError(f'LOCID_DECRYPT failed: {exc}') from exc

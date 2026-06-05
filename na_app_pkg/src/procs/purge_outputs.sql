@@ -30,7 +30,7 @@ HANDLER = 'purge_handler'
 AS $$
 import time
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import snowflake.snowpark as snowpark
 
@@ -48,7 +48,7 @@ def purge_handler(session, retention_days):
             except (TypeError, ValueError):
                 retention_days = 90
 
-        cutoff = datetime.utcnow() - timedelta(days=retention_days)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=retention_days)
 
         # List all output tables in APP_SCHEMA
         tables = session.sql(

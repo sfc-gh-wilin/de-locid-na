@@ -65,7 +65,7 @@ def fetch_license(session: snowpark.Session, license_key: str) -> dict[str, Any]
     return data
 
 
-def get_secrets(session: snowpark.Session) -> None:
+def ensure_secrets_fresh(session: snowpark.Session) -> None:
     """
     Ensure the license cache is fresh.  Re-fetches from LocID Central via
     LOCID_FETCH_LICENSE if the cached_license entry is older than
@@ -86,7 +86,7 @@ def get_secrets(session: snowpark.Session) -> None:
         if age_s is not None and age_s < CACHE_TTL_SECONDS:
             return
 
-    logger.info(session, "locid_central.get_secrets",
+    logger.info(session, "locid_central.ensure_secrets_fresh",
                 "Cache stale — re-fetching from LocID Central")
     fetch_license(session, "")
 

@@ -449,7 +449,6 @@ steps = ["Input", "Map Columns", "Output Columns", "Review & Run"]
 
 st.progress((step - 1) / (len(steps) - 1),
             text=f"Step {step} of {len(steps)}: {steps[step-1]}")
-# st.divider()
 
 # ---------------------------------------------------------------------------
 # Step 1 — Input Table

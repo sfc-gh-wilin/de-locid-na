@@ -178,10 +178,29 @@ elif step == "E":
 # ---------------------------------------------------------------------------
 elif step == "F":
     st.subheader(":material/build: Initialising App Objects")
-    st.success("APP_CONFIG table — OK", icon="✅")
-    st.success("JOB_LOG table — OK",   icon="✅")
-    st.success("APP_LOGS table — OK",  icon="✅")
-    st.success("HTTP_PING UDF — OK",   icon="✅")
+    try:
+        tbl_rows = session.sql(
+            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+            "WHERE TABLE_SCHEMA = 'APP_SCHEMA' "
+            "AND TABLE_NAME IN ('APP_CONFIG', 'JOB_LOG', 'APP_LOGS')"
+        ).collect()
+        found_tables = {r[0] for r in tbl_rows}
+        fn_rows = session.sql(
+            "SELECT FUNCTION_NAME FROM INFORMATION_SCHEMA.FUNCTIONS "
+            "WHERE FUNCTION_SCHEMA = 'APP_SCHEMA' AND FUNCTION_NAME = 'HTTP_PING'"
+        ).collect()
+        found_ping = bool(fn_rows)
+        for name in ['APP_CONFIG', 'JOB_LOG', 'APP_LOGS']:
+            if name in found_tables:
+                st.success(f"{name} table — OK", icon="✅")
+            else:
+                st.error(f"{name} table — MISSING (setup.sql may not have completed)", icon="❌")
+        if found_ping:
+            st.success("HTTP_PING UDF — OK", icon="✅")
+        else:
+            st.error("HTTP_PING UDF — MISSING (setup.sql may not have completed)", icon="❌")
+    except Exception as e:
+        st.warning(f"Could not verify app objects: {e}", icon="⚠️")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Back"):

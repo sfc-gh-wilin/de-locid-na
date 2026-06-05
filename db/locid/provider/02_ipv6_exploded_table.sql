@@ -34,6 +34,12 @@
 
 USE ROLE ACCOUNTADMIN;
 
+-- =============================================================================
+-- CONFIGURATION — set target_build_dt before running Step 2
+-- =============================================================================
+SET target_build_dt = 'YYYY-MM-DD';  -- Replace with the build date to process (e.g. '2026-05-20')
+-- =============================================================================
+
 
 -- =============================================================================
 -- Step 1: Create the exploded table
@@ -77,7 +83,7 @@ SELECT
 FROM LOCID.STAGING.LOCID_BUILDS
 WHERE START_IP LIKE '%:%'
   AND SUBSTR(START_IP_INT_HEX, 1, 14) = SUBSTR(END_IP_INT_HEX, 1, 14)
-  AND BUILD_DT = '2026-05-13';   -- Replace with target build_dt
+  AND BUILD_DT = $target_build_dt;
 
 
 -- 2b: Medium ranges (share /48 but span multiple /56 blocks) — explode
@@ -95,7 +101,7 @@ WITH source AS (
     WHERE START_IP LIKE '%:%'
       AND SUBSTR(START_IP_INT_HEX, 1, 12) = SUBSTR(END_IP_INT_HEX, 1, 12)
       AND SUBSTR(START_IP_INT_HEX, 1, 14) != SUBSTR(END_IP_INT_HEX, 1, 14)
-      AND BUILD_DT = '2026-05-13'   -- Replace with target build_dt
+      AND BUILD_DT = $target_build_dt
 ),
 seq AS (
     SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS n

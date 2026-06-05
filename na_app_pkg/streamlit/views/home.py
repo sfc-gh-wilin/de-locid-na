@@ -12,7 +12,7 @@ Status dashboard displayed as the app's default landing view:
 """
 
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
@@ -128,15 +128,23 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Status cards (License · LocID Central · Last Job)
 # ---------------------------------------------------------------------------
-def _parse_license(raw: str | None) -> tuple[str, str, str]:
-    """Return (status, client_name, expiry_label) from cached_license JSON."""
+def _parse_license(raw: str | None, selected_key_id: int | None = None) -> tuple[str, str, str]:
+    """Return (status, client_name, expiry_label) from cached_license JSON.
+
+    Matches the selected API key (by api_key_id) to get the correct status.
+    Falls back to the first ACTIVE entry when no key is selected.
+    """
     if not raw:
         return "NOT CONFIGURED", "—", "—"
     try:
         data    = json.loads(raw)
         lic     = data.get("license", {})
         access  = data.get("access", [])
-        status  = access[0].get("status", "UNKNOWN") if access else "UNKNOWN"
+        status  = "UNKNOWN"
+        for entry in access:
+            if selected_key_id is None or entry.get("api_key_id") == selected_key_id:
+                status = entry.get("status", "UNKNOWN")
+                break
         client  = lic.get("client_name", "—")
         expiry  = lic.get("expiration_date", "")
         exp_str = expiry[:10] if expiry else "—"
@@ -150,7 +158,6 @@ def _central_refresh_label(refreshed_at) -> tuple[str, bool]:
     if not refreshed_at:
         return "Never refreshed", False
     try:
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
         # refreshed_at is a Snowflake TIMESTAMP — convert to UTC-aware datetime
         if hasattr(refreshed_at, 'timestamp'):
@@ -170,7 +177,12 @@ def _central_refresh_label(refreshed_at) -> tuple[str, bool]:
 
 
 cached_raw, refreshed_at = config.get("cached_license", (None, None))
-lic_status, client_name, lic_expiry = _parse_license(cached_raw)
+_api_key_id_raw = config.get("api_key_id", (None, None))[0]
+try:
+    _selected_key_id = int(_api_key_id_raw.strip()) if _api_key_id_raw else None
+except (ValueError, AttributeError):
+    _selected_key_id = None
+lic_status, client_name, lic_expiry = _parse_license(cached_raw, _selected_key_id)
 central_label, central_fresh = _central_refresh_label(refreshed_at)
 
 col_lic, col_central, col_job = st.columns(3)

@@ -19,7 +19,7 @@ import time
 import pandas as pd
 import streamlit as st
 from snowflake.snowpark.context import get_active_session
-from utils.locid_central import get_secrets
+from utils.locid_central import ensure_secrets_fresh
 from utils.entitlements import get_active_entitlements
 from utils import logger
 from utils.errors import show_error
@@ -105,7 +105,7 @@ with colB:
     if st.button(":material/refresh: Refresh from LocID Central"):
         with st.spinner("Fetching latest secrets and entitlements…"):
             try:
-                get_secrets(session)
+                ensure_secrets_fresh(session)
                 _load_config.clear()
                 logger.info(session, "configuration.refresh",
                             "Secrets and entitlements refreshed")
@@ -213,7 +213,7 @@ if save_clicked:
             session.sql(
                 "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
                 "USING (SELECT 'log_retention_days' AS k, ? AS v) AS s ON t.config_key = s.k "
-                "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
+                "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ "
                 "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
                 params=[str(new_days)],
             ).collect()
@@ -272,7 +272,7 @@ if st.button(":material/save: Save Log Level", key="save_log_level"):
             session.sql(
                 "MERGE INTO APP_SCHEMA.APP_CONFIG AS t "
                 "USING (SELECT 'log_level' AS k, ? AS v) AS s ON t.config_key = s.k "
-                "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CURRENT_TIMESTAMP() "
+                "WHEN MATCHED THEN UPDATE SET config_value = s.v, last_refreshed_at = CONVERT_TIMEZONE('UTC', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ "
                 "WHEN NOT MATCHED THEN INSERT (config_key, config_value, is_active) VALUES (s.k, s.v, TRUE)",
                 params=[new_level],
             ).collect()

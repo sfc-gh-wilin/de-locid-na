@@ -23,7 +23,7 @@
 -- CONFIGURATION — set these values before running
 -- =============================================================================
 SET my_warehouse = 'COMPUTE_WH';  -- warehouse name for both roles
-SET my_username  = 'WLIN';  -- Snowflake username to receive both roles
+SET my_username  = '<your_snowflake_username>';  -- Set your Snowflake username before running
 -- =============================================================================
 
 

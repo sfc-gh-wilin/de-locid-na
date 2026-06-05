@@ -133,8 +133,7 @@ def _get_license_context(session) -> dict:
         if item.get('status') == 'ACTIVE':
             if sel_id is None or item.get('api_key_id') == sel_id:
                 entry = item
-                if sel_id is not None:
-                    break
+                break
 
     if not entry:
         raise RuntimeError(
@@ -537,7 +536,7 @@ def encrypt_handler(
                 JOIN rel_builds rb ON l.build_dt = rb.build_dt
             )
             SELECT
-                TO_VARCHAR(i._id) AS _id, i._ip, i._ts,
+                i._id, i._ip, i._ts,
                 lb.encrypted_locid, lb.tier,
                 lb.locid_country,      lb.locid_country_code,
                 lb.locid_region,       lb.locid_region_code,
@@ -603,17 +602,19 @@ def encrypt_handler(
                 ON TO_DATE(TO_TIMESTAMP(i._ts)) BETWEEN bd.start_dt AND bd.end_dt
         """).collect()
 
-        # Create empty IPv6 results accumulator
+        # Create empty IPv6 results accumulator — schema derived from TBL_V6_INP
+        # so _id inherits the original ID column type (not forced to VARCHAR).
         session.sql(f"""
-            CREATE OR REPLACE TRANSIENT TABLE {TBL_IPV6} (
-                _id VARCHAR, _ip VARCHAR, _ts BIGINT,
-                encrypted_locid VARCHAR, tier VARCHAR,
-                locid_country VARCHAR,      locid_country_code VARCHAR,
-                locid_region  VARCHAR,      locid_region_code  VARCHAR,
-                locid_city    VARCHAR,      locid_city_code    VARCHAR,
-                locid_postal_code VARCHAR,  locid_horizontal_accuracy VARCHAR,
-                build_dt DATE
-            )
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_IPV6} AS
+            SELECT i._id, i._ip, i._ts,
+                ''::VARCHAR AS encrypted_locid, ''::VARCHAR AS tier,
+                ''::VARCHAR AS locid_country,      ''::VARCHAR AS locid_country_code,
+                ''::VARCHAR AS locid_region,       ''::VARCHAR AS locid_region_code,
+                ''::VARCHAR AS locid_city,         ''::VARCHAR AS locid_city_code,
+                ''::VARCHAR AS locid_postal_code,  ''::VARCHAR AS locid_horizontal_accuracy,
+                CURRENT_DATE()::DATE AS build_dt
+            FROM {TBL_V6_INP} i
+            WHERE 1 = 0
         """).collect()
 
         # Stage 1a: equi-join + range filter against LOCID_BUILDS_IPV6_EXPLODED.
@@ -673,7 +674,8 @@ def encrypt_handler(
         """).collect()
 
         session.sql(f"""
-            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_SEEN} (_id VARCHAR)
+            CREATE OR REPLACE TRANSIENT TABLE {TBL_V6_SEEN} AS
+            SELECT _id FROM {TBL_V6_INP} WHERE 1 = 0
         """).collect()
 
         # Pass 1 — prefix 10 chars (/40 boundary)
@@ -934,7 +936,7 @@ def encrypt_handler(
         if not stats_ok:
             _log_job_end(
                 session, job_id, rows_in, rows_matched, rows_out,
-                runtime_s, 'FAILED',
+                runtime_s, 'WARNING',
                 f'Usage stats could not be posted to LocID Central. '
                 f'Data was processed successfully — output table APP_SCHEMA.{output_table} was created.',
                 input_table_name, f"APP_SCHEMA.{output_table}", active_cols,
@@ -973,9 +975,13 @@ def encrypt_handler(
             f"APP_SCHEMA.{output_table}", [],
         )
         try:
-            _post_stats(session, job_id, client_id, rows_in,
-                        rows_matched, rows_out, phases, tier_counts, 'encrypt',
-                        rows_skipped=rows_skipped)
+            # Skip error-path telemetry when license context was never fetched
+            # (client_id=0 is not a valid billing identifier; posting it creates
+            # noise in LocID Central's analytics for pre-license-fetch failures).
+            if client_id != 0:
+                _post_stats(session, job_id, client_id, rows_in,
+                            rows_matched, rows_out, phases, tier_counts, 'encrypt',
+                            rows_skipped=rows_skipped)
         except Exception:
             pass  # Error-path stats are best-effort — never suppress the original raise
         raise RuntimeError(f'LOCID_ENCRYPT failed: {exc}') from exc

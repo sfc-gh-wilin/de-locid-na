@@ -110,6 +110,56 @@ st.divider()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _quote_id(name: str) -> str:
+    """Double-quote an identifier to preserve case and avoid SQL injection."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _check_id_uniqueness(table: str, id_col: str, sample_rows: int = 100_000) -> dict:
+    """Check whether id_col has duplicate values in the input table.
+
+    LOCID_DECRYPT deduplicates to one output row per unique ID
+    (via QUALIFY ROW_NUMBER()). Duplicates are not an error, but consumers
+    should know their output row count may be lower than their input.
+    sample_rows: rows to sample; 0 = full table scan.
+    """
+    q_id = _quote_id(id_col)
+    sample_clause = f"TABLESAMPLE ({sample_rows} ROWS)" if sample_rows > 0 else ""
+    try:
+        rows = session.sql(f"""
+            SELECT COUNT(*) AS total, COUNT(DISTINCT {q_id}) AS distinct_count
+            FROM (SELECT {q_id} FROM {table} {sample_clause})
+        """).collect()[0]
+        return {
+            "id_total":    int(rows[0] or 0),
+            "id_distinct": int(rows[1] or 0),
+        }
+    except Exception as e:
+        logger.warning(session, "run_decrypt._check_id_uniqueness",
+                       f"ID uniqueness check failed: {e}")
+        return {"id_error": str(e)}
+
+
+def _show_id_check(result: dict, id_col: str, sample_label: str) -> None:
+    """Render the ID uniqueness check result."""
+    if "id_error" in result:
+        st.warning(f"ID uniqueness check failed: {result['id_error']}", icon="⚠️")
+        return
+    total    = result.get("id_total", 0)
+    distinct = result.get("id_distinct", 0)
+    dupes    = total - distinct
+    st.caption(f"ID check — column: `{id_col}` · sample: {sample_label}")
+    if dupes == 0:
+        st.success(f"All {total:,} sampled IDs are unique.", icon="✅")
+    else:
+        st.warning(
+            f"{dupes:,} duplicate ID value(s) detected in {total:,} sampled rows "
+            f"({distinct:,} distinct). Output row count will be lower than input — "
+            "LOCID_DECRYPT keeps one output row per unique ID.",
+            icon="⚠️",
+        )
+
+
 def _get_bound_table(ref_name: str) -> str | None:
     """Return FQN of the currently bound table for ref_name, or None.
 
@@ -194,7 +244,6 @@ steps = ["Input", "Map Columns", "Output Columns", "Review & Run"]
 
 st.progress((step - 1) / (len(steps) - 1),
             text=f"Step {step} of {len(steps)}: {steps[step-1]}")
-# st.divider()
 
 # ---------------------------------------------------------------------------
 # Step 1 — Input Table
@@ -254,10 +303,28 @@ elif step == 2:
         col_txclo = st.selectbox("TX_CLOC",       columns,
                                   index=_best_match(columns,
                                       ['tx_cloc', 'txcloc', 'cloc', 'tx_loc']))
+
+        if st.button("🔑 Run ID Unique Check"):
+            with st.spinner("Checking ID column for duplicate values…"):
+                r = _check_id_uniqueness(
+                    "reference('DECRYPT_INPUT_TABLE')", col_id
+                )
+                st.session_state.dec_id_check       = r
+                st.session_state.dec_id_check_label = (col_id, "100,000 rows")
+
+        if "dec_id_check" in st.session_state:
+            id_label = st.session_state.get("dec_id_check_label", ("—", "—"))
+            _show_id_check(
+                st.session_state.dec_id_check,
+                id_label[0],
+                id_label[1],
+            )
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("← Back"):
             st.session_state.dec_step = 1
+            st.session_state.pop("dec_id_check", None)
             st.rerun()
     with col2:
         if st.button("Next →", disabled=not columns):

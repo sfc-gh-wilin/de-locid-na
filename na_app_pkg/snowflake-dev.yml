@@ -8,10 +8,8 @@
 # Do NOT run snow app commands against this file directly.
 # Use ./deploy_dev.sh instead — it safely swaps this file in/out as snowflake.yml.
 #
-# After dev install, switch endpoint:
-#   USE ROLE LOCID_APP_INSTALLER;
-#   CALL LOCID_APP_DEV.APP_SCHEMA.LOCID_SET_DEV_ENV(TRUE);
-#   -- Re-approve in Snowsight: LOCID_APP_DEV → Settings → Connections → Approve
+# After dev install, approve the external access spec in Snowsight:
+#   LOCID_APP_DEV → Settings → Connections → LocID Central API Access → Approve
 # =============================================================================
 
 definition_version: 2
