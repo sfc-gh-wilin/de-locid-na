@@ -733,102 +733,67 @@ ORDER BY run_at DESC;
 
 The `mb_locid_encoding` WHL is the Python encoding library used by all LocID UDFs. It is **not committed to git** and must be placed manually in `na_app_pkg/src/lib/` before each deploy. When a new version is provided by the Matchbook team, follow these steps.
 
-### D.1 — Determine if the filename changed
-
-The current WHL filename is hardcoded in the UDF definitions:
-
-```
-na_app_pkg/src/udfs/locid_udf.sql   (6 IMPORTS clauses)
-```
-
-Check the new WHL filename:
-
-```bash
-ls na_app_pkg/src/lib/
-# e.g. mb_locid_encoding-1.2.0-py3-none-any.whl
-```
-
-- **Same filename** (e.g., still `mb_locid_encoding-0.0.0-py3-none-any.whl`) → skip to [D.3](#d3--deploy).
-- **New filename** (version number changed) → continue to D.2.
-
-### D.2 — Update hardcoded filename references (if version changed)
-
-Update all 6 `IMPORTS` clauses in `na_app_pkg/src/udfs/locid_udf.sql`:
-
-```bash
-# Verify current references
-grep -n "IMPORTS" na_app_pkg/src/udfs/locid_udf.sql
-
-# Replace old version with new version (adjust version strings as needed)
-sed -i '' \
-  "s|mb_locid_encoding-0\.0\.0-py3-none-any\.whl|mb_locid_encoding-1.2.0-py3-none-any.whl|g" \
-  na_app_pkg/src/udfs/locid_udf.sql
-
-# Confirm all 6 occurrences updated
-grep -n "IMPORTS" na_app_pkg/src/udfs/locid_udf.sql
-```
-
-Also update the comment lines in `na_app_pkg/setup.sql` (lines referencing the WHL filename) and `na_app_pkg/src/udfs/locid_udf.sql` (top-of-file comment) to keep documentation consistent.
-
-> **Note:** The `snowflake.yml` artifact mapping uses `src: src/lib/` (directory-level), so it automatically picks up any `.whl` file placed there — no change needed in `snowflake.yml`.
-
-### D.3 — Replace the WHL file
+### D.1 — Replace the WHL file
 
 ```bash
 # Remove old WHL
 rm na_app_pkg/src/lib/mb_locid_encoding-*.whl
 
 # Copy new WHL into place
-cp /path/to/new/mb_locid_encoding-1.2.0-py3-none-any.whl na_app_pkg/src/lib/
+cp /path/to/new/mb_locid_encoding-<new_version>-py3-none-any.whl na_app_pkg/src/lib/
 
 # Confirm
 ls na_app_pkg/src/lib/
 ```
 
-### D.4 — Deploy
+### D.2 — Update hardcoded filename references (if version string changed)
+
+The WHL filename is hardcoded in 6 `IMPORTS` clauses in `na_app_pkg/src/udfs/locid_udf.sql`. If the version number in the new filename differs from the current one (`0.0.0`), update all references:
+
+```bash
+# Verify current references
+grep -n "mb_locid_encoding" na_app_pkg/src/udfs/locid_udf.sql
+
+# Replace old version with new version (adjust version strings as needed)
+sed -i '' \
+  "s|mb_locid_encoding-0\.0\.0-py3-none-any\.whl|mb_locid_encoding-<new_version>-py3-none-any.whl|g" \
+  na_app_pkg/src/udfs/locid_udf.sql
+
+# Confirm all 6 occurrences updated
+grep -n "mb_locid_encoding" na_app_pkg/src/udfs/locid_udf.sql
+```
+
+> **Note:** `snowflake.yml` maps the entire `src/lib/` directory to the stage, so it picks up any `.whl` file automatically — no change needed there.
+
+### D.3 — Deploy and create a new patch
+
+Follow the same steps as **Re-deploying After Code Changes**:
 
 ```bash
 cd na_app_pkg
+
+# 1. Upload the new WHL (and any code changes)
 snow app deploy --connection locid
+
+# 2. Add a new patch to the existing version
+snow app version create v1_0 --force --skip-git-check --connection locid
+
+# 3. Upgrade the running app (provider account test)
+snow app run --version v1_0 --connection locid
 ```
 
-Snow CLI uploads the new WHL to `@LOCID_PKG.APP_SCHEMA.APP_STAGE/lib/` and re-runs `setup.sql`, which recreates all UDFs with the updated `IMPORTS` path.
-
-Verify the new WHL is on stage:
-
-```bash
-snow stage list-files @LOCID_PKG.APP_SCHEMA.APP_STAGE/lib \
-    --connection locid --role LOCID_APP_ADMIN
-```
-
-### D.5 — Create a new app patch (required for consumer accounts)
-
-Because UDF `IMPORTS` clauses changed, consumers on existing installs will not see the update until a new patch is released and installed.
+Then push the new patch to consumers:
 
 ```sql
--- Create a new patch on the current version
 USE ROLE LOCID_APP_ADMIN;
-ALTER APPLICATION PACKAGE LOCID_PKG
-    ADD PATCH FOR VERSION V1_0
-    USING '@LOCID_PKG.APP_SCHEMA.APP_STAGE';
 
--- Confirm the new patch number
+-- Find the latest patch number
 SHOW VERSIONS IN APPLICATION PACKAGE LOCID_PKG;
+
+-- Set the release directive to the new patch
+ALTER APPLICATION PACKAGE LOCID_PKG
+    MODIFY RELEASE CHANNEL DEFAULT
+    SET DEFAULT RELEASE DIRECTIVE
+    VERSION = v1_0
+    PATCH = <new_patch_number>;
 ```
-
-Then follow the standard release steps (Provider Steps 1–2 in the "Release DEV App to a DEV Consumer Account" section) to push the patch to the release channel.
-
-> **Note:** If only the WHL binary changed but the filename stayed the same (same version string), Snow CLI still re-uploads the file on `snow app deploy`. No new patch is strictly required for the stage file to update, but creating a patch is still recommended so consumers on managed upgrades receive the update automatically.
-
-### D.6 — Smoke test
-
-After install/upgrade on a test account, run a quick UDF validation:
-
-```sql
-USE ROLE LOCID_APP_INSTALLER;
-
--- Confirm UDF resolves without import errors
-SELECT LOCID_APP.APP_SCHEMA.LOCID_ENCRYPT_IPV4('192.168.1.1', 'test-key');
-```
-
-A non-NULL or expected-format result confirms the new WHL is loaded correctly.
